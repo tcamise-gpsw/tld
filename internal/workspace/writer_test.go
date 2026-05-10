@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	hashidlib "github.com/mertcikla/tld/internal/hashids"
-	"github.com/mertcikla/tld/internal/workspace"
+	hashidlib "github.com/mertcikla/tld/v2/internal/hashids"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 

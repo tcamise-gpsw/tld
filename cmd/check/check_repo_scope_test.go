@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 )
 
 func TestCheckCmd_SkipsForeignRepoSymbols(t *testing.T) {

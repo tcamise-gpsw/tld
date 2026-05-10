@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mertcikla/tld/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
 )
 
 var goRequireLineRE = regexp.MustCompile(`^\s*([A-Za-z0-9_./~-]+)\s+v[0-9]`)

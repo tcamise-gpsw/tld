@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	tldgit "github.com/mertcikla/tld/internal/git"
-	"github.com/mertcikla/tld/internal/tagcolors"
+	tldgit "github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/tagcolors"
 	"github.com/viant/sqlite-vec/vector"
 )
 

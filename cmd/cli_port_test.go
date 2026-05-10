@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd/version"
+	"github.com/mertcikla/tld/v2/cmd/version"
 
-	"github.com/mertcikla/tld/cmd"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/cmd"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestRootCmd_HelpMatchesReferenceSurface(t *testing.T) {

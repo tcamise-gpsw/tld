@@ -17,9 +17,9 @@ import (
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	assets "github.com/mertcikla/tld"
-	localstore "github.com/mertcikla/tld/internal/store"
-	"github.com/mertcikla/tld/internal/watch"
+	assets "github.com/mertcikla/tld/v2"
+	localstore "github.com/mertcikla/tld/v2/internal/store"
+	"github.com/mertcikla/tld/v2/internal/watch"
 )
 
 func TestServerReadyReportsResourceCounts(t *testing.T) {

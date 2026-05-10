@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	tldgit "github.com/mertcikla/tld/internal/git"
-	"github.com/mertcikla/tld/internal/ignore"
+	tldgit "github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 )
 
 type RunnerOptions struct {

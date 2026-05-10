@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	assets "github.com/mertcikla/tld"
-	"github.com/mertcikla/tld/internal/localserver"
-	storepkg "github.com/mertcikla/tld/internal/store"
-	watchpkg "github.com/mertcikla/tld/internal/watch"
-	"github.com/mertcikla/tld/internal/workspace"
+	assets "github.com/mertcikla/tld/v2"
+	"github.com/mertcikla/tld/v2/internal/localserver"
+	storepkg "github.com/mertcikla/tld/v2/internal/store"
+	watchpkg "github.com/mertcikla/tld/v2/internal/watch"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestWatchSubcommandsFailClearlyOutsideGitRepositoryWithoutRepositoryRows(t *testing.T) {

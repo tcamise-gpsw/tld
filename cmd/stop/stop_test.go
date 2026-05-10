@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd/stop"
+	"github.com/mertcikla/tld/v2/cmd/stop"
 )
 
 func TestStopCmdReportsNoServerRunningForEmptyDataDir(t *testing.T) {

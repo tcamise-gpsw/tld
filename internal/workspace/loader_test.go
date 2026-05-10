@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	hashidlib "github.com/mertcikla/tld/internal/hashids"
-	"github.com/mertcikla/tld/internal/workspace"
+	hashidlib "github.com/mertcikla/tld/v2/internal/hashids"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func writeFile(t *testing.T, path, content string) {

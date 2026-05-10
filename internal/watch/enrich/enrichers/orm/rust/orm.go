@@ -1,8 +1,8 @@
 package rust
 
 import (
-	"github.com/mertcikla/tld/internal/watch/enrich"
-	"github.com/mertcikla/tld/internal/watch/enrich/enrichers/pattern"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich/enrichers/pattern"
 )
 
 func All() []enrich.Enricher { return pattern.FromSpecs(Specs()) }

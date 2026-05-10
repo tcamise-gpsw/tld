@@ -10,9 +10,9 @@ import (
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"github.com/google/uuid"
-	"github.com/mertcikla/tld/internal/store"
-	watchpkg "github.com/mertcikla/tld/internal/watch"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/store"
+	watchpkg "github.com/mertcikla/tld/v2/internal/watch"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 type Result struct {

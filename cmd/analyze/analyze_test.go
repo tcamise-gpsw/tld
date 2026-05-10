@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
-	"github.com/mertcikla/tld/internal/localserver"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/cmd"
+	"github.com/mertcikla/tld/v2/internal/localserver"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestAnalyzeCmd_WatchPipelineWritesYAML(t *testing.T) {

@@ -3,8 +3,8 @@ package messaging
 import (
 	"testing"
 
-	"github.com/mertcikla/tld/internal/watch/enrich"
-	"github.com/mertcikla/tld/internal/watch/enrich/enrichertest"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich/enrichertest"
 )
 
 func TestMessagingEnrichers(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mertcikla/tld/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
 )
 
 type Enricher = enrich.Enricher

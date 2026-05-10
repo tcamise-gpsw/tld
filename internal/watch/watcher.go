@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/mertcikla/tld/internal/ignore"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 )
 
 type sourceWatcher struct {

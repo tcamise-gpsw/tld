@@ -1,6 +1,6 @@
 package core
 
-import "github.com/mertcikla/tld/internal/app"
+import "github.com/mertcikla/tld/v2/internal/app"
 
 type TechnologyConnector = app.TechnologyConnector
 type LibraryElement = app.LibraryElement

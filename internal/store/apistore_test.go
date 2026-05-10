@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	assets "github.com/mertcikla/tld"
-	"github.com/mertcikla/tld/internal/app"
-	"github.com/mertcikla/tld/pkg/api"
+	assets "github.com/mertcikla/tld/v2"
+	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/pkg/api"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

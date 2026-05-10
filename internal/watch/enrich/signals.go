@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mertcikla/tld/internal/analyzer"
+	"github.com/mertcikla/tld/v2/internal/analyzer"
 )
 
 var goRequireLineRE = regexp.MustCompile(`^\s*([A-Za-z0-9_./~-]+)\s+v[0-9]`)

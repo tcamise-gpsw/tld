@@ -3,7 +3,7 @@ package enrich
 import (
 	"context"
 
-	"github.com/mertcikla/tld/internal/analyzer"
+	"github.com/mertcikla/tld/v2/internal/analyzer"
 )
 
 type ActivationMode string

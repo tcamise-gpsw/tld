@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd/version"
+	"github.com/mertcikla/tld/v2/cmd/version"
 )
 
 func TestVersionCmdPrintsCurrentVersion(t *testing.T) {

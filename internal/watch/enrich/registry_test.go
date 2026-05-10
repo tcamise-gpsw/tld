@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/internal/analyzer"
-	"github.com/mertcikla/tld/internal/watch/enrich"
-	"github.com/mertcikla/tld/internal/watch/enrich/defaults"
-	goroutes "github.com/mertcikla/tld/internal/watch/enrich/enrichers/routes/golang"
+	"github.com/mertcikla/tld/v2/internal/analyzer"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich/defaults"
+	goroutes "github.com/mertcikla/tld/v2/internal/watch/enrich/enrichers/routes/golang"
 )
 
 type ActivationSignal = enrich.ActivationSignal

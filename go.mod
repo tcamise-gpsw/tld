@@ -1,4 +1,4 @@
-module github.com/mertcikla/tld
+module github.com/mertcikla/tld/v2
 
 go 1.26.1
 

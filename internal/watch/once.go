@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	tldgit "github.com/mertcikla/tld/internal/git"
+	tldgit "github.com/mertcikla/tld/v2/internal/git"
 )
 
 type OneShotOptions struct {

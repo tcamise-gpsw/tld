@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 )
 
 func TestRemoveElementCmd_LocalOnly(t *testing.T) {

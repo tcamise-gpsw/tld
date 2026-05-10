@@ -8,7 +8,7 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
-	"github.com/mertcikla/tld/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
 )
 
 func All() []enrich.Enricher {

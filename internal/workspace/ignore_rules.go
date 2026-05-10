@@ -1,6 +1,6 @@
 package workspace
 
-import "github.com/mertcikla/tld/internal/ignore"
+import "github.com/mertcikla/tld/v2/internal/ignore"
 
 // IgnoreRulesForRepository returns the merged global and repository-specific
 // exclusion rules for the named repository.

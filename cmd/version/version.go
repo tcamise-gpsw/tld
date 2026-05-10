@@ -1,7 +1,7 @@
 package version
 
 import (
-	"github.com/mertcikla/tld/internal/term"
+	"github.com/mertcikla/tld/v2/internal/term"
 	"github.com/spf13/cobra"
 )
 

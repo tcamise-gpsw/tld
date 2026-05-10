@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"embed"
 
-	"github.com/mertcikla/tld/internal/app"
-	"github.com/mertcikla/tld/internal/core"
+	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/internal/core"
 )
 
 type SQLiteStore struct {

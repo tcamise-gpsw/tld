@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/mertcikla/tld/internal/app"
-	"github.com/mertcikla/tld/internal/store"
+	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/internal/store"
 )
 
 type mergeElementsRequest struct {

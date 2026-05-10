@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 )
 
 func TestInitCmd_CreatesWorkspace(t *testing.T) {

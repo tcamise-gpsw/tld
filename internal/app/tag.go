@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/mertcikla/tld/internal/tagcolors"
+	"github.com/mertcikla/tld/v2/internal/tagcolors"
 )
 
 type Tag struct {

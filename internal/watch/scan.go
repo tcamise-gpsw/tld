@@ -17,12 +17,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mertcikla/tld/internal/analyzer"
-	analyzerlsp "github.com/mertcikla/tld/internal/analyzer/lsp"
-	tldgit "github.com/mertcikla/tld/internal/git"
-	"github.com/mertcikla/tld/internal/ignore"
-	"github.com/mertcikla/tld/internal/watch/enrich"
-	"github.com/mertcikla/tld/internal/watch/enrich/defaults"
+	"github.com/mertcikla/tld/v2/internal/analyzer"
+	analyzerlsp "github.com/mertcikla/tld/v2/internal/analyzer/lsp"
+	tldgit "github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/ignore"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich/defaults"
 )
 
 const (

@@ -6,9 +6,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mertcikla/tld/internal/localserver"
-	"github.com/mertcikla/tld/internal/term"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/localserver"
+	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

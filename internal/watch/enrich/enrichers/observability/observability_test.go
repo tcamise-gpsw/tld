@@ -3,8 +3,8 @@ package observability
 import (
 	"testing"
 
-	"github.com/mertcikla/tld/internal/watch/enrich"
-	"github.com/mertcikla/tld/internal/watch/enrich/enrichertest"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich/enrichertest"
 )
 
 func TestObservabilityEnrichers(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/internal/localserver"
-	"github.com/mertcikla/tld/internal/term"
+	"github.com/mertcikla/tld/v2/internal/localserver"
+	"github.com/mertcikla/tld/v2/internal/term"
 )
 
 func TestPrintServeInfoIncludesCoreFields(t *testing.T) {

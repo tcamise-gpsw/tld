@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	assets "github.com/mertcikla/tld"
-	"github.com/mertcikla/tld/internal/tagcolors"
+	assets "github.com/mertcikla/tld/v2"
+	"github.com/mertcikla/tld/v2/internal/tagcolors"
 )
 
 func TestConfigureSQLiteDBEnablesBusyTimeoutAndWAL(t *testing.T) {

@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mertcikla/tld/internal/codeowners"
-	"github.com/mertcikla/tld/internal/layout"
-	"github.com/mertcikla/tld/internal/tagcolors"
-	"github.com/mertcikla/tld/internal/tech"
+	"github.com/mertcikla/tld/v2/internal/codeowners"
+	"github.com/mertcikla/tld/v2/internal/layout"
+	"github.com/mertcikla/tld/v2/internal/tagcolors"
+	"github.com/mertcikla/tld/v2/internal/tech"
 )
 
 const (

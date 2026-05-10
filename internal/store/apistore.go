@@ -11,8 +11,8 @@ import (
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/mertcikla/tld/internal/app"
-	"github.com/mertcikla/tld/pkg/api"
+	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/pkg/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

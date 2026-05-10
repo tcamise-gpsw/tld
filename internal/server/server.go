@@ -17,9 +17,9 @@ import (
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/mertcikla/tld/internal/store"
-	"github.com/mertcikla/tld/internal/watch"
-	"github.com/mertcikla/tld/pkg/api"
+	"github.com/mertcikla/tld/v2/internal/store"
+	"github.com/mertcikla/tld/v2/internal/watch"
+	"github.com/mertcikla/tld/v2/pkg/api"
 )
 
 type Server struct {

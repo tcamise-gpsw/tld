@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 
-	"github.com/mertcikla/tld/internal/planner"
+	"github.com/mertcikla/tld/v2/internal/planner"
 )
 
 func TestPlanCmd_OutputsMarkdown(t *testing.T) {

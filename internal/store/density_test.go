@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mertcikla/tld/internal/app"
+	"github.com/mertcikla/tld/v2/internal/app"
 )
 
 func seedDensityView(t *testing.T, sqliteStore *SQLiteStore) {

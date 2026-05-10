@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/internal/localserver"
+	"github.com/mertcikla/tld/v2/internal/localserver"
 )
 
 func TestBootstrapCreatesDatabaseAndReadyEndpoint(t *testing.T) {

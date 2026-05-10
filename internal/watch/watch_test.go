@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mertcikla/tld/internal/analyzer"
-	tldgit "github.com/mertcikla/tld/internal/git"
-	"github.com/mertcikla/tld/internal/watch/enrich"
-	"github.com/mertcikla/tld/internal/watch/enrich/defaults"
+	"github.com/mertcikla/tld/v2/internal/analyzer"
+	tldgit "github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich"
+	"github.com/mertcikla/tld/v2/internal/watch/enrich/defaults"
 	sqlitevec "github.com/viant/sqlite-vec/vec"
 	_ "modernc.org/sqlite"
 )

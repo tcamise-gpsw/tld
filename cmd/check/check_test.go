@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 )
 
 func withWorkingDir(t *testing.T, dir string) {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	hashidlib "github.com/mertcikla/tld/internal/hashids"
-	"github.com/mertcikla/tld/internal/ignore"
+	hashidlib "github.com/mertcikla/tld/v2/internal/hashids"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 )
 
 // WorkspaceConfig is parsed from the workspace-local .tld.yaml.

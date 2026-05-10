@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/mertcikla/tld/internal/store"
+	"github.com/mertcikla/tld/v2/internal/store"
 )
 
 type densityRequest struct {

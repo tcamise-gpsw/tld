@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mertcikla/tld/internal/watch"
+	"github.com/mertcikla/tld/v2/internal/watch"
 )
 
 type openEditorRequest struct {

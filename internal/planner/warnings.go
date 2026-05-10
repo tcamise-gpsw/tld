@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mertcikla/tld/internal/tech"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/tech"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 // WarningGroup represents a collection of similar architectural warnings.
