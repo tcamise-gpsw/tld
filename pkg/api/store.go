@@ -72,14 +72,14 @@ type ConnectorInput struct {
 type Store interface {
 	// Views
 	ListViews(ctx context.Context, workspaceID uuid.UUID) ([]*diagv1.View, error)
-	GetViews(ctx context.Context, workspaceID uuid.UUID, ownerElementID *int32, isRoot *bool, search string, limit, offset int) ([]*diagv1.View, int, error)
+	GetViews(ctx context.Context, workspaceID uuid.UUID, parentViewID *int32, isRoot *bool, search string, limit, offset int) ([]*diagv1.View, int, error)
 	GetView(ctx context.Context, id int32, workspaceID uuid.UUID) (*diagv1.View, error)
 	CreateView(ctx context.Context, workspaceID uuid.UUID, ownerElementID *int32, name string, label *string, isRoot bool) (*diagv1.View, error)
 	UpdateView(ctx context.Context, id int32, workspaceID uuid.UUID, name string, label *string) (*diagv1.View, error)
 	DeleteView(ctx context.Context, id int32, workspaceID uuid.UUID) error
 
 	// Elements
-	ListElements(ctx context.Context, workspaceID uuid.UUID, limit, offset int32, search string) ([]*diagv1.Element, error)
+	ListElements(ctx context.Context, workspaceID uuid.UUID, limit, offset int32, search string) ([]*diagv1.Element, int, error)
 	GetElement(ctx context.Context, id int32, workspaceID uuid.UUID) (*diagv1.Element, error)
 	CreateElement(ctx context.Context, workspaceID uuid.UUID, input ElementInput) (*diagv1.Element, error)
 	UpdateElement(ctx context.Context, id int32, workspaceID uuid.UUID, input ElementInput) (*diagv1.Element, error)
@@ -112,6 +112,10 @@ type Store interface {
 	CreateViewLayer(ctx context.Context, viewID int32, name string, tags []string, color string) (*diagv1.ViewLayer, error)
 	UpdateViewLayer(ctx context.Context, id int32, name *string, tags []string, color *string) (*diagv1.ViewLayer, error)
 	DeleteViewLayer(ctx context.Context, id int32) error
+
+	// Tags
+	Tags(ctx context.Context, workspaceID uuid.UUID) (map[string]*diagv1.Tag, error)
+	UpdateTag(ctx context.Context, workspaceID uuid.UUID, name, color string, description *string) error
 
 	// ApplyPlan atomically applies a CLI workspace plan (create/update elements, views, connectors).
 	ApplyPlan(ctx context.Context, workspaceID uuid.UUID, req *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error)

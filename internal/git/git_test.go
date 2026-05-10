@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,53 @@ func TestDetectBranch(t *testing.T) {
 	}
 	if branch != "main" {
 		t.Errorf("expected branch %q, got %q", "main", branch)
+	}
+}
+
+func TestListTrackedFilesStopsAtLimit(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{
+		"a.go": "package main",
+		"b.go": "package main",
+		"c.go": "package main",
+	})
+
+	result, err := ListTrackedFiles(dir, 2)
+	if err != nil {
+		t.Fatalf("ListTrackedFiles: %v", err)
+	}
+	if !result.Capped {
+		t.Fatal("expected capped result")
+	}
+	if result.Total != 3 {
+		t.Fatalf("Total = %d, want 3", result.Total)
+	}
+	if got := len(result.Files); got != 2 {
+		t.Fatalf("len(Files) = %d, want 2", got)
+	}
+}
+
+func TestEnsureDetachedWorktreeCreatesReusableCheckout(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{"main.go": "package main\nfunc Main() {}\n"})
+	head, err := DetectHeadCommit(dir)
+	if err != nil {
+		t.Fatalf("DetectHeadCommit: %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "baseline")
+
+	if err := EnsureDetachedWorktree(dir, head, target); err != nil {
+		t.Fatalf("EnsureDetachedWorktree: %v", err)
+	}
+	got, err := DetectHeadCommit(target)
+	if err != nil {
+		t.Fatalf("DetectHeadCommit(worktree): %v", err)
+	}
+	if got != head {
+		t.Fatalf("worktree HEAD = %s, want %s", got, head)
+	}
+	if err := EnsureDetachedWorktree(dir, head, target); err != nil {
+		t.Fatalf("EnsureDetachedWorktree reuse: %v", err)
 	}
 }
 
@@ -164,4 +212,39 @@ func TestFilesChangedSince(t *testing.T) {
 	if len(files) != 1 || filepath.Base(files[0]) != "main.go" {
 		t.Fatalf("unexpected files: %v", files)
 	}
+}
+
+func TestParseLineHunks(t *testing.T) {
+	diff := `diff --git a/main.go b/main.go
+index 1111111..2222222 100644
+--- a/main.go
++++ b/main.go
+@@ -2 +2,2 @@ func A() {
+-	old
++	new
++	next
+@@ -8,2 +9 @@ func B() {
+-	remove
+-	again
++	replace
+`
+	hunks := ParseLineHunks(diff)
+	got := hunks["main.go"]
+	if len(got) != 2 {
+		t.Fatalf("expected 2 hunks, got %+v", got)
+	}
+	if strings.Join(intsToStrings(got[0].AddedLines), ",") != "2,3" || strings.Join(intsToStrings(got[0].RemovedLines), ",") != "2" {
+		t.Fatalf("unexpected first hunk lines: %+v", got[0])
+	}
+	if strings.Join(intsToStrings(got[1].AddedLines), ",") != "9" || strings.Join(intsToStrings(got[1].RemovedLines), ",") != "8,9" {
+		t.Fatalf("unexpected second hunk lines: %+v", got[1])
+	}
+}
+
+func intsToStrings(values []int) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, strconv.Itoa(value))
+	}
+	return out
 }

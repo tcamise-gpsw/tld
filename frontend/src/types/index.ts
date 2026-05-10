@@ -3,6 +3,7 @@ export interface TechnologyConnector {
   slug?: string
   label: string
   is_primary_icon?: boolean
+  isPrimaryIcon?: boolean
 }
 
 export interface TechnologyCatalogItem {
@@ -80,6 +81,15 @@ export interface PlacedElement {
   language?: string | null
   has_view: boolean
   view_label: string | null
+}
+
+export interface VisibilityOverride {
+  view_id: number
+  resource_type: 'element' | 'connector'
+  resource_id: number
+  level_delta: number
+  created_at?: string
+  updated_at?: string
 }
 
 export interface NavigationConnector {

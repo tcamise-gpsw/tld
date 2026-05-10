@@ -73,8 +73,8 @@ function dedupeTechnologyLinks(links: TechnologyConnector[]): TechnologyConnecto
 
   // Sort links to process primary ones first, ensuring they are preserved during deduping
   const sortedLinks = [...links].sort((a, b) => {
-    const aPrimary = !!(a.is_primary_icon ?? (a as any).isPrimaryIcon)
-    const bPrimary = !!(b.is_primary_icon ?? (b as any).isPrimaryIcon)
+    const aPrimary = !!(a.is_primary_icon ?? a.isPrimaryIcon)
+    const bPrimary = !!(b.is_primary_icon ?? b.isPrimaryIcon)
     if (aPrimary && !bPrimary) return -1
     if (!aPrimary && bPrimary) return 1
     return 0
@@ -84,7 +84,7 @@ function dedupeTechnologyLinks(links: TechnologyConnector[]): TechnologyConnecto
     const label = link.label.trim()
     if (!label) continue
 
-    const isPrimary = !!(link.is_primary_icon ?? (link as any).isPrimaryIcon)
+    const isPrimary = !!(link.is_primary_icon ?? link.isPrimaryIcon)
 
     if (link.type === 'catalog' && link.slug) {
       const slug = link.slug.trim()
@@ -141,7 +141,7 @@ async function normalizeInitialTechnologyLinks(element: LibraryElement): Promise
           type: 'catalog',
           slug: link.slug,
           label: match?.name ?? link.label,
-          is_primary_icon: !!(link.is_primary_icon ?? (link as any).isPrimaryIcon),
+          is_primary_icon: !!(link.is_primary_icon ?? link.isPrimaryIcon),
         })
       } else {
         const parts = splitTechnologyLabel(link.label)
@@ -158,10 +158,11 @@ async function normalizeInitialTechnologyLinks(element: LibraryElement): Promise
     }
   }
 
-  // If no catalog item is primary, try to match against element.logo_url or fallback to first catalog item
+  // If no catalog item is primary, try to match against element.logo_url. An
+  // explicit empty logo_url means the user deselected technology icons.
   const deduped = dedupeTechnologyLinks(normalized)
   const hasPrimary = deduped.some(l => l.type === 'catalog' && l.is_primary_icon)
-  if (!hasPrimary) {
+  if (!hasPrimary && element.logo_url !== '') {
     let bestMatchIndex = -1
     if (element.logo_url) {
       bestMatchIndex = deduped.findIndex(l => l.type === 'catalog' && l.slug && element.logo_url?.toLowerCase().includes(l.slug.toLowerCase()))
@@ -169,11 +170,6 @@ async function normalizeInitialTechnologyLinks(element: LibraryElement): Promise
 
     if (bestMatchIndex !== -1) {
       deduped[bestMatchIndex].is_primary_icon = true
-    } else {
-      const firstCatalog = deduped.find(l => l.type === 'catalog')
-      if (firstCatalog) {
-        firstCatalog.is_primary_icon = true
-      }
     }
   }
 
@@ -218,6 +214,11 @@ export interface ElementPanelProps extends ElementPanelSlots {
   autoSave?: boolean
   onDelete?: (id: number) => void
   onPermanentDelete?: (id: number) => void
+  onMerge?: (id: number) => void
+  visibilityOverrideDelta?: number
+  onPromoteVisibility?: (id: number) => Promise<void> | void
+  onDemoteVisibility?: (id: number) => Promise<void> | void
+  onResetVisibility?: (id: number) => Promise<void> | void
   orgId?: string
   links?: ViewConnector[]
   parentLinks?: ViewConnector[]
@@ -231,7 +232,7 @@ export interface ElementPanelProps extends ElementPanelSlots {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: Element Properties, Element Details.
  */
-function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDelete, onPermanentDelete, orgId, links = [], parentLinks = [], hasBackdrop = true, availableTags = [], elementPanelAfterContentSlot }: ElementPanelProps) {
+function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDelete, onPermanentDelete, onMerge, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, orgId, links = [], parentLinks = [], hasBackdrop = true, availableTags = [], elementPanelAfterContentSlot }: ElementPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isEdit = !!element
   const isReadOnly = !canEdit
@@ -276,11 +277,11 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
       setTypeResults([])
       setUrl(element.url ?? '')
       setTags(element.tags ?? [])
-      setExplicitLogoClear(false)
+      setExplicitLogoClear(element.logo_url === '')
 
       const linksFromElement = (element.technology_connectors ?? []).map(tl => ({
         ...tl,
-        is_primary_icon: !!(tl.is_primary_icon ?? (tl as any).isPrimaryIcon),
+        is_primary_icon: !!(tl.is_primary_icon ?? tl.isPrimaryIcon),
       }))
       const fallbackLinks: TechnologyConnector[] = linksFromElement.length > 0
         ? linksFromElement
@@ -333,14 +334,14 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
   }, [element, isOpen])
 
   const buildPayloadAndFingerprint = useCallback(async () => {
-    const primaryLink = technologyLinks.find((link) => link.type === 'catalog' && !!(link.is_primary_icon ?? (link as any).isPrimaryIcon) && link.slug)
+    const primaryLink = technologyLinks.find((link) => link.type === 'catalog' && !!(link.is_primary_icon ?? link.isPrimaryIcon) && link.slug)
     const primarySlug = primaryLink?.slug
 
     const normalizedLinks = technologyLinks.map((link) => ({
       type: link.type,
       slug: link.type === 'catalog' ? link.slug : undefined,
       label: link.label,
-      is_primary_icon: !!(link.is_primary_icon ?? (link as any).isPrimaryIcon),
+      is_primary_icon: !!(link.is_primary_icon ?? link.isPrimaryIcon),
     }))
 
     const normalizedType = type.trim().toLowerCase()
@@ -420,9 +421,9 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
     })
   }
 
-  const handleClose = useCallback(() => {
+  const handleClose = useCallback(async () => {
     if (autoSaveEdit) {
-      void saveIfDirtyRef.current?.()
+      await saveIfDirtyRef.current?.()
     }
     onClose()
   }, [autoSaveEdit, onClose])
@@ -526,13 +527,12 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
         type: 'catalog',
         slug: item.defaultSlug,
         label: item.name,
-        is_primary_icon: !hasPrimaryCatalog,
+        is_primary_icon: !explicitLogoClear && !hasPrimaryCatalog,
       },
     ]))
     setTechnologyQuery('')
     setTechnologyResults([])
     setTechnologyMeta((prev) => ({ ...prev, [item.defaultSlug]: item }))
-    setExplicitLogoClear(false)
     scheduleAutoSave()
   }
 
@@ -572,7 +572,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
     scheduleAutoSave()
   }
 
-  const selectedPrimarySlug = technologyLinks.find((link) => link.type === 'catalog' && !!(link.is_primary_icon ?? (link as any).isPrimaryIcon) && !!link.slug)?.slug ?? ''
+  const selectedPrimarySlug = technologyLinks.find((link) => link.type === 'catalog' && !!(link.is_primary_icon ?? link.isPrimaryIcon) && !!link.slug)?.slug ?? ''
 
   const commitTypeFromQuery = () => {
     if (isReadOnly) return
@@ -595,7 +595,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
     if (isReadOnly || !name.trim()) return
     setLoading(true)
     try {
-      const primaryLink = technologyLinks.find((link) => link.type === 'catalog' && !!(link.is_primary_icon ?? (link as any).isPrimaryIcon) && link.slug)
+      const primaryLink = technologyLinks.find((link) => link.type === 'catalog' && !!(link.is_primary_icon ?? link.isPrimaryIcon) && link.slug)
       const primaryMetadata = primaryLink?.slug
         ? (technologyMeta[primaryLink.slug] ?? await getTechnologyCatalogItemBySlug(primaryLink.slug))
         : null
@@ -604,7 +604,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
         type: link.type,
         slug: link.type === 'catalog' ? link.slug : undefined,
         label: link.label,
-        is_primary_icon: !!(link.is_primary_icon ?? (link as any).isPrimaryIcon),
+        is_primary_icon: !!(link.is_primary_icon ?? link.isPrimaryIcon),
       }))
 
       const normalizedType = type.trim().toLowerCase()
@@ -862,7 +862,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                     const meta = link.slug ? technologyMeta[link.slug] : undefined
                     const sourceUrl = meta?.websiteUrl || meta?.docsUrl
                     const isSelectable = link.type === 'catalog' && !!link.slug && !isReadOnly
-                    const isPrimaryIcon = link.type === 'catalog' && !!(link.is_primary_icon ?? (link as any).isPrimaryIcon) && !!link.slug
+                    const isPrimaryIcon = link.type === 'catalog' && !!(link.is_primary_icon ?? link.isPrimaryIcon) && !!link.slug
                     return (
                       <WrapItem key={`${link.type}:${link.slug ?? link.label}`}>
                         <Popover trigger={isMobile ? 'click' : 'hover'} placement="top" closeOnBlur>
@@ -1034,6 +1034,43 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
 
             {elementPanelAfterContentSlot}
 
+            {element && (onPromoteVisibility || onDemoteVisibility || onResetVisibility) && (
+              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={2}>
+                <HStack justify="space-between" mb={2}>
+                  <FormLabel fontSize="xs" fontWeight="bold" color="gray.400" mb={0}>DENSITY</FormLabel>
+                  {visibilityOverrideDelta !== 0 && (
+                    <Badge colorScheme={visibilityOverrideDelta > 0 ? 'teal' : 'orange'} variant="subtle">
+                      {visibilityOverrideDelta > 0 ? `+${visibilityOverrideDelta}` : visibilityOverrideDelta}
+                    </Badge>
+                  )}
+                </HStack>
+                <HStack spacing={2}>
+                  <Button variant="subtle" size="sm" color="teal.200" _hover={{ bg: 'teal.900', color: 'teal.100' }} onClick={() => onPromoteVisibility?.(element.id)} flex={1} isDisabled={isReadOnly}>
+                    Promote
+                  </Button>
+                  <Button variant="subtle" size="sm" color="orange.200" _hover={{ bg: 'orange.900', color: 'orange.100' }} onClick={() => onDemoteVisibility?.(element.id)} flex={1} isDisabled={isReadOnly}>
+                    Demote
+                  </Button>
+                  {visibilityOverrideDelta !== 0 && (
+                    <Button variant="ghost" size="sm" onClick={() => onResetVisibility?.(element.id)} isDisabled={isReadOnly}>
+                      Reset
+                    </Button>
+                  )}
+                </HStack>
+              </Box>
+            )}
+
+
+
+            {isEdit && canEdit && onMerge && (
+              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={2}>
+                <Button variant="subtle" size="sm" color="teal.200" _hover={{ bg: 'teal.900', color: 'teal.100' }}
+                  onClick={() => onMerge(element.id)} w="full">
+                  Merge
+                </Button>
+              </Box>
+            )}
+
             {isEdit && canEdit && (
               <HStack borderTop="1px solid" borderColor="whiteAlpha.100" pt={2} spacing={2}>
                 <Button variant="subtle" size="sm" color="white" _hover={{ bg: 'whiteAlpha.100' }} onClick={handleDelete} flex={1}>
@@ -1072,7 +1109,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
         onClose={confirmPermanentDelete.onClose}
         onConfirm={handlePermanentDelete}
         title="Delete Element"
-        body="Permanently delete this element? It will be removed from all views and cannot be recovered."
+        body="This permanently deletes the element from the library and cannot be reverted."
         confirmLabel="Delete Permanently"
       />
     </>

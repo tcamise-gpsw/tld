@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Box, Badge, HStack, Input, Text, VStack } from '@chakra-ui/react'
 import type { LibraryElement } from '../types'
 import { TYPE_COLORS } from '../types'
+import { useElementSearch } from '../hooks/useElementSearch'
 
 interface Props {
   x: number
@@ -32,7 +33,7 @@ export default function InlineElementAdder({
   title,
   getSecondaryLabel,
 }: Props) {
-  const [query, setQuery] = useState('')
+  const { query, setQuery, remoteElements } = useElementSearch()
   const [activeIndex, setActiveIndex] = useState(0)
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -44,12 +45,16 @@ export default function InlineElementAdder({
 
   const filtered = (() => {
     if (!query.trim()) return []
+    const byID = new Map<number, LibraryElement>()
+    remoteElements.forEach((element) => byID.set(element.id, element))
+    allElements.forEach((element) => byID.set(element.id, element))
+    const candidates = Array.from(byID.values())
     try {
       const re = new RegExp(query, 'i')
-      return allElements.filter((o) => re.test(o.name)).slice(0, 8)
+      return candidates.filter((o) => re.test(o.name)).slice(0, 8)
     } catch {
       const q = query.toLowerCase()
-      return allElements.filter((o) => o.name.toLowerCase().includes(q)).slice(0, 8)
+      return candidates.filter((o) => o.name.toLowerCase().includes(q)).slice(0, 8)
     }
   })()
 

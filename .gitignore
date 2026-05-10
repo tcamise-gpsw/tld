@@ -4,3 +4,6 @@ frontend/public
 tmp
 frontend/*.tgz
 .agents
+.claude/skills/impeccable
+skills-lock.json
+.DS_Store

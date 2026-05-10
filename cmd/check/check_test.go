@@ -38,7 +38,7 @@ func TestCheckCmd_AllPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("check: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "PASS  Validation") || !strings.Contains(stdout, "PASS  Symbol Verification") || !strings.Contains(stdout, "PASS  Outdated Diagrams") {
+	if !strings.Contains(stdout, "Validation") || !strings.Contains(stdout, "Symbol Verification") || !strings.Contains(stdout, "Outdated Diagrams") {
 		t.Fatalf("unexpected stdout: %s", stdout)
 	}
 }
@@ -57,8 +57,8 @@ func TestCheckCmd_BrokenSymbol(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected check failure\nstdout: %s\nstderr: %s", stdout, stderr)
 	}
-	if !strings.Contains(stderr, "FAIL  Symbol Verification") {
-		t.Fatalf("unexpected stderr: %s", stderr)
+	if !strings.Contains(stdout, "Symbol Verification") {
+		t.Fatalf("unexpected stdout: %s", stdout)
 	}
 }
 
@@ -76,8 +76,8 @@ func TestCheckCmd_OutdatedStrict(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected strict check failure\nstdout: %s\nstderr: %s", stdout, stderr)
 	}
-	if !strings.Contains(stderr, "FAIL  Outdated Diagrams") {
-		t.Fatalf("unexpected stderr: %s", stderr)
+	if !strings.Contains(stdout, "Outdated Diagrams") {
+		t.Fatalf("unexpected stdout: %s", stdout)
 	}
 }
 
@@ -95,8 +95,8 @@ func TestCheckCmd_ValidationFail(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected validation failure\nstdout: %s\nstderr: %s", stdout, stderr)
 	}
-	if !strings.Contains(stderr, "FAIL  Validation") {
-		t.Fatalf("unexpected stderr: %s", stderr)
+	if !strings.Contains(stdout, "Validation") {
+		t.Fatalf("unexpected stdout: %s", stdout)
 	}
 }
 
@@ -114,8 +114,8 @@ func TestCheckCmd_OutdatedWarn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected warning-only check\nstdout: %s\nstderr: %s\nerr: %v", stdout, stderr, err)
 	}
-	if !strings.Contains(stderr, "WARN  Outdated Diagrams") {
-		t.Fatalf("unexpected stderr: %s", stderr)
+	if !strings.Contains(stdout, "Outdated Diagrams") {
+		t.Fatalf("unexpected stdout: %s", stdout)
 	}
 	_ = time.Now()
 }

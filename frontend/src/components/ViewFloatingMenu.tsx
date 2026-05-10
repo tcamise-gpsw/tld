@@ -2,7 +2,7 @@ import React, { memo } from 'react'
 import type { ViewFloatingMenuSlots } from '../slots'
 
 import {
-  HStack, Tooltip, Button, Box, Text, Popover, PopoverTrigger, Portal, PopoverContent, PopoverBody, IconButton, useDisclosure
+  HStack, Tooltip, Button, Box, Text, Popover, PopoverTrigger, Portal, PopoverContent, PopoverBody, IconButton, Slider, SliderTrack, SliderFilledTrack, SliderThumb, useDisclosure
 } from '@chakra-ui/react'
 import { DownloadIcon } from '@chakra-ui/icons'
 import {
@@ -17,6 +17,7 @@ import {
   TagsIcon,
 } from './Icons'
 import { KbdHint } from './PanelUI'
+import { RedoSvg, UndoSvg } from './ViewDrawMenu'
 import { useViewEditorContext } from '../pages/ViewEditor/context'
 import type { Tag, ViewLayer } from '../types'
 
@@ -35,6 +36,13 @@ export interface ViewFloatingMenuProps extends ViewFloatingMenuSlots {
   onShare?: () => void
   focusMode: boolean
   onFocusModeChange: (enabled: boolean) => void
+  densityLevel?: number
+  onDensityLevelChange?: (level: number) => void
+  canUndo?: boolean
+  canRedo?: boolean
+  undoRedoDisabled?: boolean
+  onUndo?: () => void
+  onRedo?: () => void
 
   // Tag-related props
   allTags: string[]
@@ -73,6 +81,13 @@ function ViewFloatingMenu({
   onExport,
   focusMode,
   onFocusModeChange,
+  densityLevel = 0,
+  onDensityLevelChange,
+  canUndo = false,
+  canRedo = false,
+  undoRedoDisabled = false,
+  onUndo,
+  onRedo,
   allTags,
   layers,
   tagColors,
@@ -90,6 +105,11 @@ function ViewFloatingMenu({
 }: ViewFloatingMenuProps) {
   const { canEdit } = useViewEditorContext()
   const { isOpen: isTagsOpen, onClose: onTagsClose, onToggle: onTagsToggle } = useDisclosure()
+  const [draftDensityLevel, setDraftDensityLevel] = React.useState(densityLevel)
+
+  React.useEffect(() => {
+    setDraftDensityLevel(densityLevel)
+  }, [densityLevel])
 
   return (
     <HStack
@@ -130,6 +150,46 @@ function ViewFloatingMenu({
           </HStack>
         </Button>
       </Tooltip>
+
+      {(canUndo || canRedo) && (
+        <>
+          <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
+          {canUndo && (
+            <Tooltip label="Undo" placement="top" openDelay={200}>
+              <IconButton
+                aria-label="Undo"
+                icon={<UndoSvg />}
+                variant="ghost"
+                h="28px"
+                minW="28px"
+                px={0}
+                color="gray.300"
+                isDisabled={undoRedoDisabled}
+                _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
+                _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
+                onClick={onUndo}
+              />
+            </Tooltip>
+          )}
+          {canRedo && (
+            <Tooltip label="Redo" placement="top" openDelay={200}>
+              <IconButton
+                aria-label="Redo"
+                icon={<RedoSvg />}
+                variant="ghost"
+                h="28px"
+                minW="28px"
+                px={0}
+                color="gray.300"
+                isDisabled={undoRedoDisabled}
+                _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
+                _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
+                onClick={onRedo}
+              />
+            </Tooltip>
+          )}
+        </>
+      )}
 
       {!hideFocusView && (
         <>
@@ -262,6 +322,55 @@ function ViewFloatingMenu({
             </Portal>
           </Popover>
           <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
+        </>
+      )}
+
+      {onDensityLevelChange && (
+        <>
+          <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
+          <Tooltip label={`Density ${draftDensityLevel}`} placement="top" openDelay={200}>
+            <Box
+              w="92px"
+              h="28px"
+              px={2.5}
+              display="flex"
+              alignItems="center"
+              bg="whiteAlpha.50"
+              rounded="md"
+            >
+              <Slider
+                aria-label="Density"
+                min={-2}
+                max={2}
+                step={1}
+                value={draftDensityLevel}
+                onChange={setDraftDensityLevel}
+                onChangeEnd={(value) => {
+                  setDraftDensityLevel(value)
+                  onDensityLevelChange(value)
+                }}
+                focusThumbOnChange={false}
+              >
+                <SliderTrack h="3px" bg="whiteAlpha.200">
+                  <SliderFilledTrack bg="var(--accent)" />
+                </SliderTrack>
+                {[-2, -1, 0, 1, 2].map((value) => (
+                  <Box
+                    key={value}
+                    position="absolute"
+                    left={`${((value + 2) / 4) * 100}%`}
+                    top="50%"
+                    transform="translate(-50%, -50%)"
+                    w="1px"
+                    h="9px"
+                    bg={draftDensityLevel >= value ? 'var(--accent)' : 'whiteAlpha.400'}
+                    pointerEvents="none"
+                  />
+                ))}
+                <SliderThumb boxSize="12px" bg="white" border="2px solid" borderColor="var(--accent)" />
+              </Slider>
+            </Box>
+          </Tooltip>
         </>
       )}
 
