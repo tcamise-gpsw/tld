@@ -552,6 +552,8 @@ export interface ZUIHiddenProxyBadge {
   targetAnchorElementId: number
   sourceNodeId: string
   targetNodeId: string
+  sourceHandle: string | null
+  targetHandle: string | null
   count: number
   details: ProxyConnectorDetails
 }
@@ -754,13 +756,13 @@ export function resolveZUIProxyConnectors(
     return candidates
   }
   const grouped = new Map<string, ProxyConnectorLeaf[]>()
-  const nativeVisiblePairs = new Set<string>()
+  const nativeVisiblePairs = new Map<string, Connector>()
 
   for (const connector of connectors) {
     if (!visibleElements.has(connector.source_element_id) || !visibleElements.has(connector.target_element_id)) continue
     if (!isNativelyRenderedInZUI(connector, connector.source_element_id, connector.target_element_id, visibleNodeIdsByElementId)) continue
     const [leftAnchorElementId, rightAnchorElementId] = canonicalPairElements(connector.source_element_id, connector.target_element_id)
-    nativeVisiblePairs.add([leftAnchorElementId, rightAnchorElementId].join('::'))
+    nativeVisiblePairs.set([leftAnchorElementId, rightAnchorElementId].join('::'), connector)
   }
 
   for (const connector of connectors) {
@@ -871,15 +873,22 @@ export function resolveZUIProxyConnectors(
         endpointCandidates(leaf.ownerViewId, leaf.target.actualElementId)[0]?.anchorElementId === leaf.target.anchorElementId
       return sourceOk && targetOk
     })
-    const pairHasNativeDirect = nativeVisiblePairs.has(key)
-    if (pairHasNativeDirect) {
+    const nativeDirectConnector = nativeVisiblePairs.get(key)
+    if (nativeDirectConnector) {
       if (isDirectChildBadgeOnly) {
+        const nativeSourceIsCanonical = nativeDirectConnector.source_element_id === canonicalSourceAnchorElementId
         hiddenBadges.push({
           key: `badge:${key}`,
           sourceAnchorElementId: canonicalSourceAnchorElementId,
           targetAnchorElementId: canonicalTargetAnchorElementId,
           sourceNodeId: visibleNodeIdsByElementId.get(canonicalSourceAnchorElementId) ?? '',
           targetNodeId: visibleNodeIdsByElementId.get(canonicalTargetAnchorElementId) ?? '',
+          sourceHandle: nativeSourceIsCanonical
+            ? (nativeDirectConnector.source_handle ?? 'right')
+            : (nativeDirectConnector.target_handle ?? 'left'),
+          targetHandle: nativeSourceIsCanonical
+            ? (nativeDirectConnector.target_handle ?? 'left')
+            : (nativeDirectConnector.source_handle ?? 'right'),
           count: details.count,
           details,
         })

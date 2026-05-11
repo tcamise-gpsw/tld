@@ -10,6 +10,12 @@ import type { LayoutNode, ZUIViewState, HoveredItem } from './types'
 import { getExpandThresholds, pickEdgeLabelPosition, type ScreenRect } from './renderer'
 import type { CrossBranchContextSettings } from '../../crossBranch/types'
 import { DEFAULT_MIN_CONNECTOR_ANCHOR_ALPHA } from '../../crossBranch/settings'
+import {
+  DEFAULT_SOURCE_HANDLE_SIDE,
+  DEFAULT_TARGET_HANDLE_SIDE,
+  getHandleFlowPosition,
+  type LogicalHandleSide,
+} from '../../utils/edgeDistribution'
 
 export interface VisibleNodeAnchor {
   nodeId: string
@@ -90,8 +96,10 @@ function collectVisibleAnchorForNode(
   parentAbsScale: number,
   parentChildOffsetX: number,
   parentChildOffsetY: number,
-) {
-  if (hiddenTags.size > 0 && node.tags.some((tag) => hiddenTags.has(tag))) return { selfDrawn: false }
+): { selfDrawn: boolean; descendantDrawn: boolean } {
+  if (hiddenTags.size > 0 && node.tags.some((tag) => hiddenTags.has(tag))) {
+    return { selfDrawn: false, descendantDrawn: false }
+  }
 
   const absX = parentAbsX + (node.worldX - parentChildOffsetX) * parentAbsScale
   const absY = parentAbsY + (node.worldY - parentChildOffsetY) * parentAbsScale
@@ -99,7 +107,7 @@ function collectVisibleAnchorForNode(
   const absW = node.worldW * absScale
   const absH = node.worldH * absScale
   const screenW = absW * view.zoom
-  if (screenW < 2) return { selfDrawn: false }
+  if (screenW < 2) return { selfDrawn: false, descendantDrawn: false }
 
   const hasChildren = node.children && node.children.length > 0
   const t = hasChildren ? transitionT(screenW, thresholds.start, thresholds.end) : 0
@@ -122,7 +130,7 @@ function collectVisibleAnchorForNode(
     })
   }
 
-  let hasDirectChildDrawn = false
+  let hasVisibleDescendant = false
   if (hasChildren && t > 0.05) {
     for (const child of node.children) {
       const childResult = collectVisibleAnchorForNode(
@@ -139,11 +147,11 @@ function collectVisibleAnchorForNode(
         node.childOffsetX,
         node.childOffsetY,
       )
-      hasDirectChildDrawn = hasDirectChildDrawn || childResult.selfDrawn
+      hasVisibleDescendant = hasVisibleDescendant || childResult.selfDrawn || childResult.descendantDrawn
     }
   }
 
-  if (!selfDrawn && hasDirectChildDrawn) {
+  if (!selfDrawn && hasVisibleDescendant) {
     registerVisibleAnchor(node, visibleAnchors, byNodeId, {
       nodeId: node.id,
       elementId: node.elementId,
@@ -157,7 +165,7 @@ function collectVisibleAnchorForNode(
     })
   }
 
-  return { selfDrawn }
+  return { selfDrawn, descendantDrawn: selfDrawn || hasVisibleDescendant }
 }
 
 function collectVisibleAnchorsInNodes(
@@ -285,6 +293,84 @@ function getDirectAnchorPoints(source: VisibleNodeAnchor, target: VisibleNodeAnc
   const sourcePoint = getDirectAnchorPoint(source, target)
   const targetPoint = getDirectAnchorPoint(target, source)
   return { sourcePoint, targetPoint }
+}
+
+type AnchorSide = 'top' | 'bottom' | 'left' | 'right'
+
+interface AnchorPoint {
+  x: number
+  y: number
+  side: AnchorSide
+}
+
+interface ProxyBezierBadgeGeometry {
+  midX: number
+  midY: number
+  tangentX: number
+  tangentY: number
+}
+
+function bezierControlPoint(
+  point: AnchorPoint,
+  stem: number,
+): AnchorPoint {
+  switch (point.side) {
+    case 'left':
+      return { x: point.x - stem, y: point.y, side: point.side }
+    case 'right':
+      return { x: point.x + stem, y: point.y, side: point.side }
+    case 'top':
+      return { x: point.x, y: point.y - stem, side: point.side }
+    case 'bottom':
+      return { x: point.x, y: point.y + stem, side: point.side }
+  }
+}
+
+export function getProxyBezierBadgeGeometry(
+  source: VisibleNodeAnchor,
+  target: VisibleNodeAnchor,
+  options: {
+    sourceHandle?: string | null
+    targetHandle?: string | null
+    sourceFallback?: LogicalHandleSide
+    targetFallback?: LogicalHandleSide
+  } = {},
+): ProxyBezierBadgeGeometry {
+  const sourcePoint = getHandleFlowPosition(
+    source.worldX,
+    source.worldY,
+    source.worldW,
+    source.worldH,
+    options.sourceHandle,
+    options.sourceFallback ?? DEFAULT_SOURCE_HANDLE_SIDE,
+  )
+  const targetPoint = getHandleFlowPosition(
+    target.worldX,
+    target.worldY,
+    target.worldW,
+    target.worldH,
+    options.targetHandle,
+    options.targetFallback ?? DEFAULT_TARGET_HANDLE_SIDE,
+  )
+  const dx = Math.abs(targetPoint.x - sourcePoint.x)
+  const dy = Math.abs(targetPoint.y - sourcePoint.y)
+  const sourceStem = Math.max(
+    (sourcePoint.side === 'left' || sourcePoint.side === 'right' ? dx : dy) * 0.5,
+    (sourcePoint.side === 'left' || sourcePoint.side === 'right' ? source.worldW : source.worldH) * 0.5,
+  )
+  const targetStem = Math.max(
+    (targetPoint.side === 'left' || targetPoint.side === 'right' ? dx : dy) * 0.5,
+    (targetPoint.side === 'left' || targetPoint.side === 'right' ? target.worldW : target.worldH) * 0.5,
+  )
+  const cp1 = bezierControlPoint(sourcePoint, sourceStem)
+  const cp2 = bezierControlPoint(targetPoint, targetStem)
+
+  return {
+    midX: 0.125 * sourcePoint.x + 0.375 * cp1.x + 0.375 * cp2.x + 0.125 * targetPoint.x,
+    midY: 0.125 * sourcePoint.y + 0.375 * cp1.y + 0.375 * cp2.y + 0.125 * targetPoint.y,
+    tangentX: -0.75 * sourcePoint.x - 0.75 * cp1.x + 0.75 * cp2.x + 0.75 * targetPoint.x,
+    tangentY: -0.75 * sourcePoint.y - 0.75 * cp1.y + 0.75 * cp2.y + 0.75 * targetPoint.y,
+  }
 }
 
 function getDevicePixelRatio(): number {
@@ -536,9 +622,18 @@ export function drawVisibleDirectProxyBadges(
     const alpha = Math.min(source.renderAlpha, target.renderAlpha)
     if (alpha < 0.01) continue
 
-    const { sourcePoint, targetPoint } = getDirectAnchorPoints(source, target)
-    const midX = (sourcePoint.x + targetPoint.x) / 2
-    const midY = (sourcePoint.y + targetPoint.y) / 2
+    const sourceFallback = badge.details.connectors[0]?.connector.source_element_id === badge.sourceAnchorElementId
+      ? DEFAULT_SOURCE_HANDLE_SIDE
+      : DEFAULT_TARGET_HANDLE_SIDE
+    const targetFallback = badge.details.connectors[0]?.connector.target_element_id === badge.targetAnchorElementId
+      ? DEFAULT_TARGET_HANDLE_SIDE
+      : DEFAULT_SOURCE_HANDLE_SIDE
+    const { midX, midY, tangentX, tangentY } = getProxyBezierBadgeGeometry(source, target, {
+      sourceHandle: badge.sourceHandle,
+      targetHandle: badge.targetHandle,
+      sourceFallback,
+      targetFallback,
+    })
     const label = `+${badge.count}`
 
     ctx.save()
@@ -550,8 +645,8 @@ export function drawVisibleDirectProxyBadges(
       midY,
       badgeMetrics.worldW,
       badgeMetrics.worldH,
-      targetPoint.x - sourcePoint.x,
-      targetPoint.y - sourcePoint.y,
+      tangentX,
+      tangentY,
       occupiedLabelRects,
     )
     drawFixedScreenProxyBadge(

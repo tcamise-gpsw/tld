@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import type { BBox, DiagramGroupLayout, LayoutNode, ZUIViewState, HoveredItem } from './types'
 import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY } from './renderer'
+import {
+  DEFAULT_SOURCE_HANDLE_SIDE,
+  DEFAULT_TARGET_HANDLE_SIDE,
+  getHandleFlowPosition,
+} from '../../utils/edgeDistribution'
 
 export function constrainViewState(view: ZUIViewState, canvasW: number, canvasH: number, bbox: BBox): ZUIViewState {
   const padding = Math.min(600, canvasW * 0.45, canvasH * 0.45)
@@ -45,6 +50,8 @@ interface DeepestNodeResult {
   absH: number
   cumulativeScale: number
 }
+
+type EdgeRoutePoint = { x: number; y: number }
 
 interface NodeSpatialIndex {
   cellSize: number
@@ -194,6 +201,7 @@ type IndexedEdge =
     y2: number
     midX: number
     midY: number
+    points: EdgeRoutePoint[]
     sourceLabel: string
     targetLabel: string
     label: string
@@ -209,6 +217,7 @@ type IndexedEdge =
     y2: number
     midX: number
     midY: number
+    points: EdgeRoutePoint[]
     sourceLabel: string
     targetLabel: string
     diagramId: number
@@ -227,10 +236,11 @@ function cellKey(cx: number, cy: number): string {
 }
 
 function addEdgeToSpatialIndex(index: EdgeSpatialIndex, edge: IndexedEdge): void {
-  const minX = Math.min(edge.x1, edge.x2)
-  const maxX = Math.max(edge.x1, edge.x2)
-  const minY = Math.min(edge.y1, edge.y2)
-  const maxY = Math.max(edge.y1, edge.y2)
+  const points = edge.points.length > 0 ? edge.points : [{ x: edge.x1, y: edge.y1 }, { x: edge.x2, y: edge.y2 }]
+  const minX = Math.min(...points.map((point) => point.x))
+  const maxX = Math.max(...points.map((point) => point.x))
+  const minY = Math.min(...points.map((point) => point.y))
+  const maxY = Math.max(...points.map((point) => point.y))
   const startX = Math.floor(minX / index.cellSize)
   const endX = Math.floor(maxX / index.cellSize)
   const startY = Math.floor(minY / index.cellSize)
@@ -249,6 +259,128 @@ function addEdgeToSpatialIndex(index: EdgeSpatialIndex, edge: IndexedEdge): void
   }
 }
 
+function normalizeEdgeRouteType(type: string | null | undefined): 'bezier' | 'straight' | 'step' | 'smoothstep' {
+  if (type === 'straight' || type === 'step' || type === 'smoothstep') return type
+  return 'bezier'
+}
+
+function cubicBezierPoint(
+  p0: EdgeRoutePoint,
+  p1: EdgeRoutePoint,
+  p2: EdgeRoutePoint,
+  p3: EdgeRoutePoint,
+  t: number,
+): EdgeRoutePoint {
+  const mt = 1 - t
+  const mt2 = mt * mt
+  const t2 = t * t
+  return {
+    x: mt2 * mt * p0.x + 3 * mt2 * t * p1.x + 3 * mt * t2 * p2.x + t2 * t * p3.x,
+    y: mt2 * mt * p0.y + 3 * mt2 * t * p1.y + 3 * mt * t2 * p2.y + t2 * t * p3.y,
+  }
+}
+
+function buildEdgeRoutePoints(
+  source: LayoutNode,
+  target: LayoutNode,
+  edge: DiagramGroupLayout['edges'][number],
+): { points: EdgeRoutePoint[]; midX: number; midY: number } {
+  const sourcePoint = getHandleFlowPosition(
+    source.worldX,
+    source.worldY,
+    source.worldW,
+    source.worldH,
+    edge.sourceHandle,
+    DEFAULT_SOURCE_HANDLE_SIDE,
+  )
+  const targetPoint = getHandleFlowPosition(
+    target.worldX,
+    target.worldY,
+    target.worldW,
+    target.worldH,
+    edge.targetHandle,
+    DEFAULT_TARGET_HANDLE_SIDE,
+  )
+  const type = normalizeEdgeRouteType(edge.type)
+
+  if (type === 'bezier') {
+    const dx = Math.abs(targetPoint.x - sourcePoint.x)
+    const dy = Math.abs(targetPoint.y - sourcePoint.y)
+    const sourceStem = Math.max(
+      (sourcePoint.side === 'left' || sourcePoint.side === 'right' ? dx : dy) * 0.5,
+      (sourcePoint.side === 'left' || sourcePoint.side === 'right' ? source.worldW : source.worldH) * 0.5,
+    )
+    const targetStem = Math.max(
+      (targetPoint.side === 'left' || targetPoint.side === 'right' ? dx : dy) * 0.5,
+      (targetPoint.side === 'left' || targetPoint.side === 'right' ? target.worldW : target.worldH) * 0.5,
+    )
+    const cp1 = {
+      x: sourcePoint.x + (sourcePoint.side === 'left' ? -sourceStem : sourcePoint.side === 'right' ? sourceStem : 0),
+      y: sourcePoint.y + (sourcePoint.side === 'top' ? -sourceStem : sourcePoint.side === 'bottom' ? sourceStem : 0),
+    }
+    const cp2 = {
+      x: targetPoint.x + (targetPoint.side === 'left' ? -targetStem : targetPoint.side === 'right' ? targetStem : 0),
+      y: targetPoint.y + (targetPoint.side === 'top' ? -targetStem : targetPoint.side === 'bottom' ? targetStem : 0),
+    }
+    const p0 = { x: sourcePoint.x, y: sourcePoint.y }
+    const p3 = { x: targetPoint.x, y: targetPoint.y }
+    const points = Array.from({ length: 17 }, (_, index) => cubicBezierPoint(p0, cp1, cp2, p3, index / 16))
+    const mid = cubicBezierPoint(p0, cp1, cp2, p3, 0.5)
+    return { points, midX: mid.x, midY: mid.y }
+  }
+
+  if (type === 'step' || type === 'smoothstep') {
+    const midX = (sourcePoint.x + targetPoint.x) / 2
+    const midY = (sourcePoint.y + targetPoint.y) / 2
+    const sourceOrth = sourcePoint.side === 'left' || sourcePoint.side === 'right' ? 'h' : 'v'
+    const targetOrth = targetPoint.side === 'left' || targetPoint.side === 'right' ? 'h' : 'v'
+    const points: EdgeRoutePoint[] = [{ x: sourcePoint.x, y: sourcePoint.y }]
+
+    if (sourceOrth === 'h' && targetOrth === 'h') {
+      points.push({ x: midX, y: sourcePoint.y }, { x: midX, y: targetPoint.y })
+    } else if (sourceOrth === 'v' && targetOrth === 'v') {
+      points.push({ x: sourcePoint.x, y: midY }, { x: targetPoint.x, y: midY })
+    } else if (sourceOrth === 'h' && targetOrth === 'v') {
+      points.push({ x: targetPoint.x, y: sourcePoint.y })
+    } else {
+      points.push({ x: sourcePoint.x, y: targetPoint.y })
+    }
+    points.push({ x: targetPoint.x, y: targetPoint.y })
+    const midIndex = Math.floor((points.length - 1) / 2)
+    return {
+      points,
+      midX: (points[midIndex].x + points[midIndex + 1].x) / 2,
+      midY: (points[midIndex].y + points[midIndex + 1].y) / 2,
+    }
+  }
+
+  const points = [{ x: sourcePoint.x, y: sourcePoint.y }, { x: targetPoint.x, y: targetPoint.y }]
+  return {
+    points,
+    midX: (sourcePoint.x + targetPoint.x) / 2,
+    midY: (sourcePoint.y + targetPoint.y) / 2,
+  }
+}
+
+function nearestDistanceSquaredToRoute(worldX: number, worldY: number, points: EdgeRoutePoint[]): number {
+  let best = Number.POSITIVE_INFINITY
+  for (let index = 1; index < points.length; index++) {
+    const start = points[index - 1]
+    const end = points[index]
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const lengthSquared = dx * dx + dy * dy
+    if (lengthSquared === 0) continue
+
+    let t = ((worldX - start.x) * dx + (worldY - start.y) * dy) / lengthSquared
+    t = Math.max(0, Math.min(1, t))
+    const nearestX = start.x + t * dx
+    const nearestY = start.y + t * dy
+    best = Math.min(best, (worldX - nearestX) ** 2 + (worldY - nearestY) ** 2)
+  }
+  return best
+}
+
 function buildEdgeSpatialIndex(groups: DiagramGroupLayout[]): EdgeSpatialIndex {
   const index: EdgeSpatialIndex = { cellSize: EDGE_INDEX_CELL_SIZE, cells: new Map() }
 
@@ -263,18 +395,18 @@ function buildEdgeSpatialIndex(groups: DiagramGroupLayout[]): EdgeSpatialIndex {
       const target = nodeMap.get(edge.targetId)
       if (!source || !target) continue
 
-      const x1 = source.worldX + source.worldW / 2
-      const y1 = source.worldY + source.worldH / 2
-      const x2 = target.worldX + target.worldW / 2
-      const y2 = target.worldY + target.worldH / 2
+      const route = buildEdgeRoutePoints(source, target, edge)
+      const first = route.points[0]
+      const last = route.points[route.points.length - 1]
       addEdgeToSpatialIndex(index, {
         kind: 'edge',
-        x1,
-        y1,
-        x2,
-        y2,
-        midX: (x1 + x2) / 2,
-        midY: (y1 + y2) / 2,
+        x1: first.x,
+        y1: first.y,
+        x2: last.x,
+        y2: last.y,
+        midX: route.midX,
+        midY: route.midY,
+        points: route.points,
         sourceLabel: source.label,
         targetLabel: target.label,
         label: edge.label || 'Connection',
@@ -298,6 +430,7 @@ function buildEdgeSpatialIndex(groups: DiagramGroupLayout[]): EdgeSpatialIndex {
         y2,
         midX: (x1 + x2) / 2,
         midY: (y1 + y2) / 2,
+        points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
         sourceLabel: group.label,
         targetLabel: node.label,
         diagramId: group.diagramId,
@@ -330,17 +463,7 @@ function findHoveredEdge(
       if (!bucket) continue
 
       for (const edge of bucket) {
-        const dx = edge.x2 - edge.x1
-        const dy = edge.y2 - edge.y1
-        const l2 = dx * dx + dy * dy
-        if (l2 === 0) continue
-
-        let t = ((worldX - edge.x1) * dx + (worldY - edge.y1) * dy) / l2
-        t = Math.max(0, Math.min(1, t))
-
-        const nearestX = edge.x1 + t * dx
-        const nearestY = edge.y1 + t * dy
-        const distSquared = (worldX - nearestX) ** 2 + (worldY - nearestY) ** 2
+        const distSquared = nearestDistanceSquaredToRoute(worldX, worldY, edge.points)
         if (distSquared < bestDistSquared) {
           bestDistSquared = distSquared
           bestEdge = edge

@@ -75,6 +75,18 @@ func (s *WorkspaceService) CreateView(
 		return nil, err
 	}
 
+	if ownerElementID != nil {
+		views, err := s.Store.ListViews(ctx, workspaceID)
+		if err != nil {
+			return nil, storeErr("list views", err)
+		}
+		for _, view := range views {
+			if view.GetOwnerElementId() == *ownerElementID {
+				return connect.NewResponse(&diagv1.CreateViewResponse{View: view}), nil
+			}
+		}
+	}
+
 	v, err := s.Store.CreateView(ctx, workspaceID, ownerElementID, strings.TrimSpace(m.GetName()), label, false)
 	if err != nil {
 		if strings.Contains(err.Error(), "views_owner_or_root") {

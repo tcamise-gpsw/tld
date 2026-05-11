@@ -387,8 +387,10 @@ func (h *recordingHooks) AfterWrite(_ context.Context, _ uuid.UUID, action strin
 }
 
 type contractStore struct {
+	listViews       func(context.Context, uuid.UUID) ([]*diagv1.View, error)
 	listElements    func(context.Context, uuid.UUID, int32, int32, string) ([]*diagv1.Element, int, error)
 	getElement      func(context.Context, int32, uuid.UUID) (*diagv1.Element, error)
+	createView      func(context.Context, uuid.UUID, *int32, string, *string, bool) (*diagv1.View, error)
 	updateElement   func(context.Context, int32, uuid.UUID, ElementInput) (*diagv1.Element, error)
 	getView         func(context.Context, int32, uuid.UUID) (*diagv1.View, error)
 	updateView      func(context.Context, int32, uuid.UUID, string, *string) (*diagv1.View, error)
@@ -402,6 +404,9 @@ type contractStore struct {
 var _ Store = (*contractStore)(nil)
 
 func (s *contractStore) ListViews(context.Context, uuid.UUID) ([]*diagv1.View, error) {
+	if s.listViews != nil {
+		return s.listViews(context.Background(), uuid.Nil)
+	}
 	return nil, nil
 }
 func (s *contractStore) GetViews(context.Context, uuid.UUID, *int32, *bool, string, int, int) ([]*diagv1.View, int, error) {
@@ -413,7 +418,10 @@ func (s *contractStore) GetView(ctx context.Context, id int32, workspaceID uuid.
 	}
 	return &diagv1.View{Id: id}, nil
 }
-func (s *contractStore) CreateView(context.Context, uuid.UUID, *int32, string, *string, bool) (*diagv1.View, error) {
+func (s *contractStore) CreateView(ctx context.Context, workspaceID uuid.UUID, ownerElementID *int32, name string, label *string, isRoot bool) (*diagv1.View, error) {
+	if s.createView != nil {
+		return s.createView(ctx, workspaceID, ownerElementID, name, label, isRoot)
+	}
 	return nil, nil
 }
 func (s *contractStore) UpdateView(ctx context.Context, id int32, workspaceID uuid.UUID, name string, label *string) (*diagv1.View, error) {
