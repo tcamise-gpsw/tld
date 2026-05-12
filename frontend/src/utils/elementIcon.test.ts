@@ -25,4 +25,10 @@ describe('resolveElementIconUrl', () => {
       { type: 'catalog', slug: 'golang', label: 'Go', is_primary_icon: true },
     ])).toBeNull()
   })
+
+  it('does not infer icons from custom technology labels when logo_url is missing', () => {
+    expect(resolveElementIconUrl(null, [
+      { type: 'custom', label: 'kafka' },
+    ])).toBeNull()
+  })
 })

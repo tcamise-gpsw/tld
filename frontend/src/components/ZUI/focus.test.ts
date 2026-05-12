@@ -284,6 +284,26 @@ function expectScreenRectVisible(
 }
 
 describe('ZUI focus targets', () => {
+  it('derives ZUI node icons from assigned catalog technology connectors', () => {
+    const data: ExploreData = {
+      tree: [treeNode(1, 'Root', null, null)],
+      navigations: [],
+      views: {
+        1: {
+          placements: [{
+            ...placed(1, 1, 0, 0),
+            technology_connectors: [{ type: 'catalog', slug: 'golang', label: 'Go', is_primary_icon: true }],
+          }],
+          connectors: [],
+        },
+      },
+    }
+
+    const layout = computeLayout(data)
+
+    expect(layout.groups[0]?.nodes[0]?.logoUrl).toBe('/icons/golang.png')
+  })
+
   it('rebases a high-zoom camera to a small centered render transform', () => {
     const rebase = getCameraRebase(
       { x: -147_317_059.10654327, y: -184_315_493.52577353, zoom: 906_732.1382976775 },

@@ -66,7 +66,7 @@ export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: 
   })
 
   const [forceConfig, setForceConfig] = useState<ForceConfig>({
-    linkDistance: 180,
+    linkDistance: 300,
     chargeStrength: -150,
     collideRadius: 130,
     iterations: 300,
@@ -576,17 +576,17 @@ export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: 
           </Button>
           {/* Apply button */}
           <VStack spacing={2} w="full">
-          <Button
-            size="sm"
-            w="full"
-            variant="outline"
-            colorScheme="blue"
-            onClick={adjustConnectorsConfirm.onOpen}
-            isLoading={collisionRunning}
-            isDisabled={!canEdit || !view}
-            loadingText="Removing Connector Collisions..."
-            fontWeight="bold"
-            fontSize="xs"
+            <Button
+              size="sm"
+              w="full"
+              variant="outline"
+              colorScheme="blue"
+              onClick={adjustConnectorsConfirm.onOpen}
+              isLoading={collisionRunning}
+              isDisabled={!canEdit || !view}
+              loadingText="Removing Connector Collisions..."
+              fontWeight="bold"
+              fontSize="xs"
               letterSpacing="0.05em"
               textTransform="uppercase"
               h="32px"
