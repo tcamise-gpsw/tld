@@ -375,7 +375,7 @@ function ViewEditorInner({
   }, [])
 
   const [layers, setLayers] = useState<import('../../types').ViewLayer[]>([])
-  const [hiddenLayerTags, setHiddenLayerTags] = useState<string[]>([])
+  const [hiddenLayerTags, setHiddenLayerTags] = useState<string[]>(() => demoOptions?.defaultHiddenLayerTags ?? [])
   const hiddenLayerTagsRef = useRef<string[]>([])
   hiddenLayerTagsRef.current = hiddenLayerTags
   const [hoveredLayerTags, setHoveredLayerTags] = useState<string[] | null>(null)

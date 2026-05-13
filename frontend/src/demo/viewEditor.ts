@@ -8,6 +8,7 @@ export interface ViewEditorDemoOptions {
   disableOnboarding?: boolean
   hideFocusView?: boolean
   hideExpandExtras?: boolean
+  defaultHiddenLayerTags?: string[]
 }
 
 export const DEMO_VIEW_EDITOR_OPTIONS: Omit<ViewEditorDemoOptions, 'revealProgress'> = {
@@ -16,6 +17,7 @@ export const DEMO_VIEW_EDITOR_OPTIONS: Omit<ViewEditorDemoOptions, 'revealProgre
   disableOnboarding: true,
   hideFocusView: true,
   hideExpandExtras: true,
+  defaultHiddenLayerTags: ['view_layers:admin', 'view_layers:ops'],
 }
 
 
