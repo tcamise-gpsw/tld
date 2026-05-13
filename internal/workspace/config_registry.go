@@ -154,6 +154,11 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 	if strings.TrimSpace(cfg.ServerURL) != "" && !validHTTPURL(cfg.ServerURL) {
 		add("server_url", "must be a valid URL")
 	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Apply.Target)) {
+	case "", "auto", "local", "remote":
+	default:
+		add("apply.target", "must be auto, local, or remote")
+	}
 	if cfg.Validation.Level < 1 || cfg.Validation.Level > 3 {
 		add("validation.level", "must be 1, 2, or 3")
 	}
@@ -304,6 +309,7 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "server_url", Env: []string{"TLD_SERVER_URL"}, Description: "tlDiagram cloud/server URL used by sync commands."},
 	{Key: "api_key", Env: []string{"TLD_API_KEY"}, Description: "API key used to authenticate with tlDiagram.", Secret: true},
 	{Key: "org_id", Env: []string{"TLD_ORG_ID"}, Description: "Default tlDiagram organization/workspace identifier."},
+	{Key: "apply.target", Env: []string{"TLD_APPLY_TARGET"}, Description: "Default apply target: auto, local, or remote."},
 	{Key: "validation.level", Description: "Architectural warning strictness: 1 minimal, 2 standard, 3 strict."},
 	{Key: "validation.allow_low_insight", Description: "Allow low-insight generated warning groups."},
 	{Key: "validation.include_rules", Description: "Additional architectural warning rule codes to include."},
@@ -432,6 +438,7 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"server_url", "TLD_SERVER_URL"},
 		{"api_key", "TLD_API_KEY"},
 		{"org_id", "TLD_ORG_ID"},
+		{"apply.target", "TLD_APPLY_TARGET"},
 		{"serve.host", "TLD_HOST"},
 		{"serve.port", "PORT"},
 		{"serve.data_dir", "TLD_DATA_DIR"},
@@ -521,6 +528,8 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.APIKey = value
 	case "org_id":
 		cfg.WorkspaceID = strings.TrimSpace(value)
+	case "apply.target":
+		cfg.Apply.Target = strings.ToLower(strings.TrimSpace(value))
 	case "validation.level":
 		v, err := parseInt(value)
 		if err != nil {
@@ -735,6 +744,8 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.APIKey
 	case "org_id":
 		return cfg.WorkspaceID
+	case "apply.target":
+		return cfg.Apply.Target
 	case "validation.level":
 		return cfg.Validation.Level
 	case "validation.allow_low_insight":
@@ -837,6 +848,11 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	addScalar(mapping, "api_key", cfg.APIKey, desc("api_key"))
 	addScalar(mapping, "org_id", cfg.WorkspaceID, desc("org_id"))
 
+	apply := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	addScalar(apply, "target", cfg.Apply.Target, desc("apply.target"))
+	appendUnknownEntries(apply, mappingValueNode(existing, "apply"), setOf("target"))
+	addMap(mapping, "apply", apply, "CLI apply target settings.")
+
 	validation := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	addScalar(validation, "level", cfg.Validation.Level, desc("validation.level"))
 	addScalar(validation, "allow_low_insight", cfg.Validation.AllowLowInsight, desc("validation.allow_low_insight"))
@@ -919,7 +935,7 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	appendUnknownEntries(completion, mappingValueNode(existing, "completion"), setOf("remote"))
 	addMap(mapping, "completion", completion, "Shell completion settings.")
 
-	appendUnknownEntries(mapping, existing, setOf("server_url", "api_key", "org_id", "validation", "serve", "watch", "completion"))
+	appendUnknownEntries(mapping, existing, setOf("server_url", "api_key", "org_id", "apply", "validation", "serve", "watch", "completion"))
 	return root
 }
 

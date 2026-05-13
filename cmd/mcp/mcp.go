@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/mertcikla/tld/v2/cmd/apply"
+	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/cmd/plan"
 	"github.com/mertcikla/tld/v2/cmd/pull"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
@@ -114,7 +115,7 @@ func errResult(err error) (*mcpsdk.CallToolResult, result, error) {
 	}, result{Message: err.Error()}, nil
 }
 
-func registerTools(server *mcpsdk.Server, wdir *string) {
+func registerTools(server *mcpsdk.Server, cmd *cobra.Command, wdir *string, dataDir string) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "tld_add",
 		Description: "Add or update an element in elements.yaml.",
@@ -147,6 +148,9 @@ func registerTools(server *mcpsdk.Server, wdir *string) {
 		}
 		if err := workspace.UpsertElement(*wdir, ref, spec); err != nil {
 			return errResult(fmt.Errorf("upsert element: %w", err))
+		}
+		if err := crudsync.ApplyAfterMutation(cmd, *wdir, dataDir); err != nil {
+			return errResult(err)
 		}
 		return textResult(fmt.Sprintf("upserted element %s", ref))
 	})
@@ -185,6 +189,9 @@ func registerTools(server *mcpsdk.Server, wdir *string) {
 		if err := workspace.AppendConnector(*wdir, spec); err != nil {
 			return errResult(fmt.Errorf("append connector: %w", err))
 		}
+		if err := crudsync.ApplyAfterMutation(cmd, *wdir, dataDir); err != nil {
+			return errResult(err)
+		}
 		return textResult(fmt.Sprintf("connector %s -> %s in view %s", a.From, a.To, view))
 	})
 
@@ -194,6 +201,9 @@ func registerTools(server *mcpsdk.Server, wdir *string) {
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, a removeElementArgs) (*mcpsdk.CallToolResult, result, error) {
 		if err := workspace.RemoveElement(*wdir, a.Ref); err != nil {
 			return errResult(fmt.Errorf("remove element: %w", err))
+		}
+		if err := crudsync.ApplyAfterMutation(cmd, *wdir, dataDir); err != nil {
+			return errResult(err)
 		}
 		return textResult(fmt.Sprintf("removed element %s", a.Ref))
 	})
@@ -206,6 +216,11 @@ func registerTools(server *mcpsdk.Server, wdir *string) {
 		if err != nil {
 			return errResult(fmt.Errorf("remove connector: %w", err))
 		}
+		if n > 0 {
+			if err := crudsync.ApplyAfterMutation(cmd, *wdir, dataDir); err != nil {
+				return errResult(err)
+			}
+		}
 		return textResult(fmt.Sprintf("removed %d connector(s)", n))
 	})
 
@@ -215,6 +230,9 @@ func registerTools(server *mcpsdk.Server, wdir *string) {
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, a renameArgs) (*mcpsdk.CallToolResult, result, error) {
 		if err := workspace.RenameElement(*wdir, a.From, a.To); err != nil {
 			return errResult(fmt.Errorf("rename element: %w", err))
+		}
+		if err := crudsync.ApplyAfterMutation(cmd, *wdir, dataDir); err != nil {
+			return errResult(err)
 		}
 		return textResult(fmt.Sprintf("renamed %s -> %s", a.From, a.To))
 	})
@@ -226,6 +244,9 @@ func registerTools(server *mcpsdk.Server, wdir *string) {
 		if err := workspace.UpdateElementField(*wdir, a.Ref, a.Field, a.Value); err != nil {
 			return errResult(fmt.Errorf("update element: %w", err))
 		}
+		if err := crudsync.ApplyAfterMutation(cmd, *wdir, dataDir); err != nil {
+			return errResult(err)
+		}
 		return textResult(fmt.Sprintf("updated element %s: %s=%q", a.Ref, a.Field, a.Value))
 	})
 
@@ -235,6 +256,9 @@ func registerTools(server *mcpsdk.Server, wdir *string) {
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, a updateConnectorArgs) (*mcpsdk.CallToolResult, result, error) {
 		if err := workspace.UpdateConnectorField(*wdir, a.Ref, a.Field, a.Value); err != nil {
 			return errResult(fmt.Errorf("update connector: %w", err))
+		}
+		if err := crudsync.ApplyAfterMutation(cmd, *wdir, dataDir); err != nil {
+			return errResult(err)
 		}
 		return textResult(fmt.Sprintf("updated connector %s: %s=%q", a.Ref, a.Field, a.Value))
 	})
@@ -466,7 +490,7 @@ Accepts the same --host, --port, --data-dir flags as 'tld serve'.`,
 			}
 
 			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "tld", Version: "0.1.0"}, nil)
-			registerTools(server, wdir)
+			registerTools(server, cmd, wdir, dataDir)
 			addPullTool(server, wdir)
 			addPlanTool(server, wdir)
 			addApplyTool(server, wdir)

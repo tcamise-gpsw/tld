@@ -121,6 +121,10 @@ func TestConnectCmd_ElementsWithMultiplePlacementsSucceeds(t *testing.T) {
 	cmd.MustInitWorkspace(t, dir)
 	// Create an element with 2 placements manually in elements.yaml
 	elements := map[string]*workspace.Element{
+		"other": {
+			Name: "Other", Kind: "workspace", HasView: true,
+			Placements: []workspace.ViewPlacement{{ParentRef: "root"}},
+		},
 		"api": {
 			Name: "API", Kind: "service",
 			Placements: []workspace.ViewPlacement{

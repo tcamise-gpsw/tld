@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -57,11 +58,17 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("append connector: %w", err)
 			}
+			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
+				if cmdutil.WantsJSON(*format) {
+					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "connect", err)
+				}
+				return err
+			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "connect", "connect", fmt.Sprintf("%s:%s", from, to))
 			}
 			term.Successf(cmd.OutOrStdout(), "Connector %s → %s added in view %s", from, to, view)
-			term.Hint(cmd.OutOrStdout(), "Run 'tld apply' to push to cloud.")
+			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
 			return nil
 		},
 	}

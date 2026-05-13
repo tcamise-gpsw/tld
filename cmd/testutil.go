@@ -17,6 +17,7 @@ import (
 	diagv1connect "buf.build/gen/go/tldiagramcom/diagram/connectrpc/go/diag/v1/diagv1connect"
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -237,8 +238,30 @@ func SetupApplyWorkspace(t *testing.T, dir, serverURL string) {
 
 func SeedElementWorkspace(t *testing.T, dir string) {
 	t.Helper()
+	oldTarget, hadTarget := os.LookupEnv("TLD_APPLY_TARGET")
+	if err := os.Setenv("TLD_APPLY_TARGET", "local"); err != nil {
+		t.Fatalf("set TLD_APPLY_TARGET: %v", err)
+	}
+	defer func() {
+		if hadTarget {
+			_ = os.Setenv("TLD_APPLY_TARGET", oldTarget)
+			return
+		}
+		_ = os.Unsetenv("TLD_APPLY_TARGET")
+	}()
 	MustRunCmd(t, dir, "add", "Platform", "--ref", "platform", "--kind", "workspace")
 	MustRunCmd(t, dir, "add", "API", "--ref", "api", "--parent", "platform", "--kind", "service")
 	MustRunCmd(t, dir, "add", "DB", "--ref", "db", "--parent", "platform", "--kind", "database")
 	MustRunCmd(t, dir, "connect", "--from", "api", "--to", "db", "--label", "reads")
+	if err := os.Remove(filepath.Join(dir, ".tld.lock")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove seed lockfile: %v", err)
+	}
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatalf("load seeded workspace: %v", err)
+	}
+	ws.Meta = nil
+	if err := workspace.Save(ws); err != nil {
+		t.Fatalf("clear seed metadata: %v", err)
+	}
 }

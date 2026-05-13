@@ -27,19 +27,18 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 	var verbose bool
 	var recreateIDs bool
 	var forceApply bool
+	var target string
+	var dataDir string
 
 	c := &cobra.Command{
 		Use:   "apply",
-		Short: "Apply plan to the tldiagram.com",
+		Short: "Apply plan to the configured workspace target",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ws, err := cmdutil.LoadWorkspace(*wdir)
 			if err != nil {
-				if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "apply", err)
+				if commandWantsJSON(cmd) {
+					return cmdutil.WriteCommandError(cmd.OutOrStdout(), commandCompactJSON(cmd), "apply", err)
 				}
-				return err
-			}
-			if err := cmdutil.EnsureAPIKey(ws.Config.APIKey); err != nil {
 				return err
 			}
 			if errs := ws.ValidateWithOpts(workspace.ValidationOptions{SkipSymbols: true}); len(errs) > 0 {
@@ -58,6 +57,19 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 			meta, err := workspace.LoadMetadata(*wdir)
 			if err != nil {
 				return fmt.Errorf("load metadata: %w", err)
+			}
+			var previousMeta *workspace.Meta
+			if lockFile != nil {
+				previousMeta = lockFile.Metadata
+			}
+			runner, err := NewRunner(ws.Config, target, dataDir, debug, previousMeta)
+			if err != nil {
+				return err
+			}
+			if runner.Name() == TargetRemote {
+				if err := cmdutil.EnsureAPIKey(ws.Config.APIKey); err != nil {
+					return err
+				}
 			}
 			repoCtx := cmdutil.DetectRepoScope(cmdutil.GetWorkingDir(), *wdir)
 			if repoCtx.Name != "" && repoCtx.MatchesWorkspaceRepo(ws) {
@@ -78,14 +90,14 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 				}
 			}
 			total := len(req.Elements) + diagramCount + len(req.Connectors)
-			if !cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
+			if !commandWantsJSON(cmd) {
 				term.Label(cmd.OutOrStdout(), 20, "Plan", fmt.Sprintf("%d elements, %d diagrams, %d connectors (%d total resources)",
 					len(req.Elements), diagramCount, len(req.Connectors), total))
 			}
 
 			// Check for version conflicts if lock file exists
 			scanner := bufio.NewScanner(cmd.InOrStdin())
-			if lockFile != nil && !force && !forceApply {
+			if runner.SupportsDryRun() && lockFile != nil && !force && !forceApply {
 				currentHash, hashErr := workspace.CalculateWorkspaceHash(*wdir)
 				if hashErr == nil && lockFile.WorkspaceHash != "" && currentHash == lockFile.WorkspaceHash {
 					hasDrift, err := serverHasDrift(cmd.Context(), ws, plan)
@@ -107,7 +119,7 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 					}
 				}
 			}
-			if lockFile != nil && !force {
+			if runner.SupportsDryRun() && lockFile != nil && !force {
 				newPlan, err := detectAndHandleConflicts(cmd, ws, lockFile, meta, plan, scanner, *wdir, recreateIDs)
 				if err != nil {
 					return err
@@ -117,11 +129,11 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 					req = plan.Request
 				}
 			}
-			if lockFile != nil && force {
+			if runner.SupportsDryRun() && lockFile != nil && force {
 				newPlan, retryCount, err := autoPullAndRebuild(cmd, ws, lockFile, plan, *wdir, recreateIDs)
 				if err != nil {
-					if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
-						return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "apply", err)
+					if commandWantsJSON(cmd) {
+						return cmdutil.WriteCommandError(cmd.OutOrStdout(), commandCompactJSON(cmd), "apply", err)
 					}
 					return err
 				}
@@ -144,14 +156,13 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 				}
 			}
 
-			c := client.New(ws.Config.ServerURL, ws.Config.APIKey, debug)
-			resp, err := c.ApplyWorkspacePlan(cmd.Context(), connect.NewRequest(req))
+			resp, err := runner.ApplyWorkspacePlan(cmd.Context(), req)
 			if err != nil {
-				if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "apply", err)
+				if commandWantsJSON(cmd) {
+					return cmdutil.WriteCommandError(cmd.OutOrStdout(), commandCompactJSON(cmd), "apply", err)
 				}
 				term.Fail(cmd.ErrOrStderr(), fmt.Sprintf("Apply failed: %v", err))
-				term.Label(cmd.ErrOrStderr(), 12, "Target URL", client.NormalizeURL(ws.Config.ServerURL))
+				term.Label(cmd.ErrOrStderr(), 12, "Target", runner.TargetLabel())
 
 				if connectErr := new(connect.Error); errors.As(err, &connectErr) {
 					term.Label(cmd.ErrOrStderr(), 12, "Code", connectErr.Code().String())
@@ -169,7 +180,7 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 			}
 
 			currentWS := ws
-			renames, err := applyCanonicalRefs(*wdir, resp.Msg)
+			renames, err := applyCanonicalRefs(*wdir, resp)
 			if err != nil {
 				return fmt.Errorf("apply canonical refs: %w", err)
 			}
@@ -178,18 +189,18 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("reload workspace after canonical ref rename: %w", err)
 				}
-				if !cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
+				if !commandWantsJSON(cmd) {
 					for _, rename := range renames {
 						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  ref renamed: %s -> %s\n", rename.from, rename.to)
 					}
 				}
 			}
 
-			if err := updatePlanMetadataFromResponse(*wdir, meta, currentWS, plan, resp.Msg); err != nil {
+			if err := updatePlanMetadataFromResponse(*wdir, meta, currentWS, plan, resp); err != nil {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update metadata: %v\n", err)
 			}
 
-			if err := updateLockFileFromResponse(*wdir, lockFile, currentWS, meta, resp.Msg); err != nil {
+			if err := updateLockFileFromResponse(*wdir, lockFile, currentWS, meta, resp); err != nil {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update lock file: %v\n", err)
 			}
 			currentWS.Meta = meta
@@ -197,15 +208,15 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 				term.Warnf(cmd.ErrOrStderr(), "Failed to rewrite workspace metadata: %v", err)
 			}
 
-			if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
-				return cmdutil.WriteJSON(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", cmdutil.BuildApplyJSON(currentWS, resp.Msg, retries))
+			if commandWantsJSON(cmd) {
+				return cmdutil.WriteJSON(cmd.OutOrStdout(), commandCompactJSON(cmd), cmdutil.BuildApplyJSON(currentWS, resp, retries))
 			}
 
-			reporter.RenderExecutionMarkdown(cmd.OutOrStdout(), plan, resp.Msg, true, verbose)
+			reporter.RenderExecutionMarkdown(cmd.OutOrStdout(), plan, resp, true, verbose)
 
-			if len(resp.Msg.Drift) > 0 {
-				term.Warnf(cmd.ErrOrStderr(), "%d drift item(s) detected", len(resp.Msg.Drift))
-				return fmt.Errorf("%d drift item(s) detected", len(resp.Msg.Drift))
+			if len(resp.Drift) > 0 {
+				term.Warnf(cmd.ErrOrStderr(), "%d drift item(s) detected", len(resp.Drift))
+				return fmt.Errorf("%d drift item(s) detected", len(resp.Drift))
 			}
 			return nil
 		},
@@ -216,7 +227,19 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "print each created resource")
 	c.Flags().BoolVar(&recreateIDs, "recreate-ids", false, "ignore existing resource IDs and let the server generate new ones")
 	c.Flags().BoolVar(&forceApply, "force-apply", false, "bypass the pre-apply server drift warning")
+	c.Flags().StringVar(&target, "target", "", "apply target: auto, local, or remote")
+	c.Flags().StringVar(&dataDir, "data-dir", "", "data directory for local target state")
 	return c
+}
+
+func commandWantsJSON(cmd *cobra.Command) bool {
+	flag := cmd.Root().PersistentFlags().Lookup("format")
+	return flag != nil && cmdutil.WantsJSON(flag.Value.String())
+}
+
+func commandCompactJSON(cmd *cobra.Command) bool {
+	flag := cmd.Root().PersistentFlags().Lookup("compact")
+	return flag != nil && flag.Value.String() == "true"
 }
 
 func serverHasDrift(ctx context.Context, ws *workspace.Workspace, plan *planner.Plan) (bool, error) {
@@ -241,7 +264,7 @@ func autoPullAndRebuild(cmd *cobra.Command, ws *workspace.Workspace, lockFile *w
 	if len(resp.Msg.Conflicts) == 0 {
 		return nil, 0, nil
 	}
-	if !cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
+	if !commandWantsJSON(cmd) {
 		term.Warnf(cmd.ErrOrStderr(), "Version conflict detected during force apply. Pulling and retrying once...")
 	}
 	newPlan, err := pullAndRebuildPlan(cmd, ws, lockFile, wdir, recreateIDs)

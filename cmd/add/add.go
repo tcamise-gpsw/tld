@@ -3,6 +3,7 @@ package add
 import (
 	"fmt"
 
+	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -69,11 +70,17 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("upsert element: %w", err)
 			}
+			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
+				if cmdutil.WantsJSON(*format) {
+					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "add", err)
+				}
+				return err
+			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "add", "add", r)
 			}
 			term.Successf(cmd.OutOrStdout(), "Added element %s to elements.yaml", r)
-			term.Hint(cmd.OutOrStdout(), "Run 'tld apply' to push to cloud.")
+			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
 			return nil
 		},
 	}

@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/mertcikla/tld/v2/pkg/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -500,6 +501,9 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 		var element *diagv1.Element
 		if planned.GetId() != 0 {
 			element, err = a.UpdateElement(ctx, planned.GetId(), uuid.Nil, input)
+			if errors.Is(err, sql.ErrNoRows) {
+				element, err = a.CreateElement(ctx, uuid.Nil, input)
+			}
 		} else {
 			element, err = a.CreateElement(ctx, uuid.Nil, input)
 		}
@@ -529,6 +533,10 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 			var view *diagv1.View
 			if planned.GetViewId() != 0 {
 				view, err = a.UpdateView(ctx, planned.GetViewId(), uuid.Nil, viewName, planned.ViewLabel)
+				if errors.Is(err, sql.ErrNoRows) {
+					ownerID := element.GetId()
+					view, err = a.CreateView(ctx, uuid.Nil, &ownerID, viewName, planned.ViewLabel, false)
+				}
 			} else {
 				ownerID := element.GetId()
 				view, err = a.CreateView(ctx, uuid.Nil, &ownerID, viewName, planned.ViewLabel, false)
@@ -625,6 +633,9 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 		var connector *diagv1.Connector
 		if planned.GetId() != 0 {
 			connector, err = a.UpdateConnector(ctx, planned.GetId(), uuid.Nil, input)
+			if errors.Is(err, sql.ErrNoRows) {
+				connector, err = a.CreateConnector(ctx, uuid.Nil, input)
+			}
 		} else {
 			connector, err = a.CreateConnector(ctx, uuid.Nil, input)
 		}
@@ -654,6 +665,59 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 	}
 
 	return resp, nil
+}
+
+// PruneMissingCLIResources removes resources previously owned by CLI metadata
+// when they no longer appear in the current plan. It deliberately only acts on
+// IDs from the prior metadata snapshot so watch/imported resources are left
+// alone.
+func (a *APIAdapter) PruneMissingCLIResources(ctx context.Context, workspaceID uuid.UUID, previous *workspace.Meta, req *diagv1.ApplyPlanRequest) error {
+	if previous == nil {
+		return nil
+	}
+
+	plannedElements := map[workspace.ResourceID]bool{}
+	plannedViews := map[workspace.ResourceID]bool{}
+	plannedConnectors := map[workspace.ResourceID]bool{}
+	for _, element := range req.GetElements() {
+		if element.GetId() != 0 {
+			plannedElements[workspace.ResourceID(element.GetId())] = true
+		}
+		if element.GetHasView() && element.GetViewId() != 0 {
+			plannedViews[workspace.ResourceID(element.GetViewId())] = true
+		}
+	}
+	for _, connector := range req.GetConnectors() {
+		if connector.GetId() != 0 {
+			plannedConnectors[workspace.ResourceID(connector.GetId())] = true
+		}
+	}
+
+	for _, metadata := range previous.Connectors {
+		if metadata == nil || metadata.ID == 0 || plannedConnectors[metadata.ID] {
+			continue
+		}
+		if err := a.DeleteConnector(ctx, int32(metadata.ID), workspaceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	for _, metadata := range previous.Views {
+		if metadata == nil || metadata.ID == 0 || plannedViews[metadata.ID] {
+			continue
+		}
+		if err := a.DeleteView(ctx, int32(metadata.ID), workspaceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	for _, metadata := range previous.Elements {
+		if metadata == nil || metadata.ID == 0 || plannedElements[metadata.ID] {
+			continue
+		}
+		if err := a.DeleteElement(ctx, int32(metadata.ID), workspaceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *APIAdapter) ListVersions(ctx context.Context, workspaceID uuid.UUID, limit int) ([]*diagv1.WorkspaceVersionInfo, error) {

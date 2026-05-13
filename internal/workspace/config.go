@@ -58,10 +58,16 @@ type Config struct {
 	ServerURL   string           `yaml:"server_url"`
 	APIKey      string           `yaml:"api_key"`
 	WorkspaceID string           `yaml:"org_id"`
+	Apply       ApplyConfig      `yaml:"apply"`
 	Validation  ValidationConfig `yaml:"validation"`
 	Serve       ServeConfig      `yaml:"serve"`
 	Watch       WatchConfig      `yaml:"watch"`
 	Completion  CompletionConfig `yaml:"completion"`
+}
+
+// ApplyConfig controls where CLI workspace plans are materialized.
+type ApplyConfig struct {
+	Target string `yaml:"target"`
 }
 
 // ValidationConfig represents workspace validation settings.
@@ -150,6 +156,9 @@ const DefaultValidationLevel = 2
 func DefaultConfig() *Config {
 	return &Config{
 		ServerURL: "https://tldiagram.com",
+		Apply: ApplyConfig{
+			Target: "auto",
+		},
 		Validation: ValidationConfig{
 			Level: DefaultValidationLevel,
 		},

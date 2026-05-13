@@ -68,7 +68,10 @@ func TestApplyCmd_WorkspaceIDInRequest(t *testing.T) {
 }
 
 func TestApplyCmd_ServerError_CodeInternal(t *testing.T) {
-	svc := &cmd.MockDiagramService{ApplyFunc: func(_ *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
+	svc := &cmd.MockDiagramService{ApplyFunc: func(req *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
+		if req.GetDryRun() {
+			return cmd.SuccessResponse(req), nil
+		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server exploded"))
 	}}
 	serverURL := cmd.NewMockServer(t, svc)

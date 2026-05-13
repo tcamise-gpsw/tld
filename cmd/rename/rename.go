@@ -3,6 +3,7 @@ package rename
 import (
 	"fmt"
 
+	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -28,12 +29,18 @@ func NewRenameCmd(wdir *string) *cobra.Command {
 				}
 				return fmt.Errorf("rename element: %w", err)
 			}
+			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
+				if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
+					return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "rename", err)
+				}
+				return err
+			}
 			if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "rename", "rename", fmt.Sprintf("%s -> %s", from, to))
 			}
 			term.Successf(cmd.OutOrStdout(), "Renamed element %s → %s", from, to)
 			term.Hint(cmd.OutOrStdout(), "References in connectors.yaml were updated automatically.")
-			term.Hint(cmd.OutOrStdout(), "Run 'tld apply' to push to cloud.")
+			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
 			return nil
 		},
 	}
