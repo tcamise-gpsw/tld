@@ -100,6 +100,8 @@ const nodeTypes = {
 const edgeTypes = { default: ViewBezierConnector, contextStraightConnector: ContextStraightConnector, proxyConnectorEdge: ProxyConnectorEdge }
 const EMPTY_LINKS: ViewConnector[] = []
 const VIEW_EDITOR_MIN_ZOOM_FLOOR = 0.12
+const VIEW_EDITOR_INITIAL_FIT_PADDING = 0.25
+const VIEW_EDITOR_FOCUS_FIT_PADDING = 0.35
 const VIEW_EDITOR_EMPTY_EXTENT_RATIO = 0.75
 const VIEW_EDITOR_PAN_MARGIN_RATIO = 0.25
 const VIEW_EDITOR_PAN_MARGIN_MIN = 180
@@ -157,6 +159,19 @@ function placementSnapshotsEqual(left: PlacedElement, right: PlacedElement) {
 
 function viewSnapshotsEqual(left: ViewMetadataSnapshot, right: ViewMetadataSnapshot) {
   return left.id === right.id && left.name === right.name && (left.level_label ?? '') === (right.level_label ?? '')
+}
+
+function nodesMatchCurrentView(nodes: RFNode[], elements: PlacedElement[], viewId: number | null) {
+  if (viewId === null || elements.length === 0) return false
+  if (!elements.every((element) => element.view_id === viewId)) return false
+
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  return elements.every((element) => {
+    const node = nodesById.get(String(element.element_id))
+    return node !== undefined &&
+      Math.abs(node.position.x - (element.position_x ?? 0)) < 0.5 &&
+      Math.abs(node.position.y - (element.position_y ?? 0)) < 0.5
+  })
 }
 
 function alphaColor(color: string, opacity: number): string {
@@ -674,7 +689,7 @@ function ViewEditorInner({
   useEffect(() => {
     const unsub = vscodeBridge.onMessage(async (msg: ExtensionToWebviewMessage) => {
       if (msg.type === 'focus-element') {
-        fitView({ nodes: [{ id: String(msg.elementId) }], duration: 800, padding: 100 })
+        fitView({ nodes: [{ id: String(msg.elementId) }], duration: 800, padding: VIEW_EDITOR_FOCUS_FIT_PADDING })
       } else if (msg.type === 'element-placed') {
         if (viewId === null) return
         try {
@@ -1279,6 +1294,7 @@ function ViewEditorInner({
     if (!rfReadyRef.current || !needsFitView.current) return
     const nodes = rfNodesRef.current
     if (nodes.length === 0) return
+    if (!nodesMatchCurrentView(nodes, viewElementsRef.current, viewIdRef.current)) return
     if (!nodes.every((n) => typeof n.width === 'number' && n.width > 0 && typeof n.height === 'number' && n.height > 0)) return
 
     if (clampedRevealProgress !== null) {
@@ -1288,12 +1304,16 @@ function ViewEditorInner({
       return
     }
 
-    const ok = safeFitView({ duration: 0, padding: 400 })
+    const ok = safeFitView({ duration: 0, padding: VIEW_EDITOR_INITIAL_FIT_PADDING, minZoom: computedMinZoom, maxZoom: 4 })
     if (ok) needsFitView.current = false
     else setTimeout(() => { if (needsFitView.current) maybeFitView() }, 50)
-  }, [applyDemoRevealViewport, clampedRevealProgress, safeFitView, rfNodesRef])
+  }, [applyDemoRevealViewport, clampedRevealProgress, computedMinZoom, safeFitView, rfNodesRef, viewElementsRef, viewIdRef])
 
   const onRFInit = useCallback(() => { rfReadyRef.current = true; maybeFitView() }, [maybeFitView])
+
+  useEffect(() => {
+    needsFitView.current = true
+  }, [viewId])
 
   useEffect(() => { maybeFitView() }, [rfNodes, maybeFitView])
 
@@ -1315,7 +1335,6 @@ function ViewEditorInner({
     closeElementPanelRef.current()
     closeConnectorPanelRef.current()
     closeProxyConnectorPanelRef.current()
-    needsFitView.current = true
   }, [clearEditHistory, viewId])
 
   // ── Dynamic viewport bounds ────────────────────────────────────────────────
