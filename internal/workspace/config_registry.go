@@ -233,6 +233,9 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 	if cfg.Watch.Layout.ChargeStrength == 0 {
 		add("watch.layout.charge_strength", "must be non-zero")
 	}
+	if d, err := time.ParseDuration(strings.TrimSpace(cfg.Updates.CheckInterval)); err != nil || d <= 0 {
+		add("updates.check_interval", "must be a positive duration such as 24h")
+	}
 
 	provider := strings.TrimSpace(cfg.Watch.Embedding.Provider)
 	switch provider {
@@ -352,6 +355,8 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "watch.layout.collide_radius", Env: []string{"LAYOUT_COLLIDE_RADIUS"}, Description: "Organic layout collision radius for generated watch views."},
 	{Key: "watch.layout.gravity_strength", Env: []string{"LAYOUT_GRAVITY_STRENGTH"}, Description: "Organic layout gravity strength for generated watch views."},
 	{Key: "completion.remote", Env: []string{"TLD_COMPLETION_REMOTE"}, Description: "Allow shell completion to query remote resources."},
+	{Key: "updates.auto", Env: []string{"TLD_UPDATES_AUTO"}, Description: "Automatically install available tld CLI updates during startup checks."},
+	{Key: "updates.check_interval", Env: []string{"TLD_UPDATES_CHECK_INTERVAL"}, Description: "Minimum time between GitHub update checks."},
 }
 
 func loadGlobalConfigState(repair bool) (*GlobalConfigState, error) {
@@ -464,6 +469,16 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 	}
 	if v := os.Getenv("TLD_COMPLETION_REMOTE"); v != "" {
 		if err := apply("completion.remote", "TLD_COMPLETION_REMOTE", v); err != nil {
+			return nil, err
+		}
+	}
+	if v := os.Getenv("TLD_UPDATES_AUTO"); v != "" {
+		if err := apply("updates.auto", "TLD_UPDATES_AUTO", v); err != nil {
+			return nil, err
+		}
+	}
+	if v := os.Getenv("TLD_UPDATES_CHECK_INTERVAL"); v != "" {
+		if err := apply("updates.check_interval", "TLD_UPDATES_CHECK_INTERVAL", v); err != nil {
 			return nil, err
 		}
 	}
@@ -730,6 +745,14 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.Completion.Remote = v
+	case "updates.auto":
+		v, err := parseBool(value)
+		if err != nil {
+			return err
+		}
+		cfg.Updates.Auto = v
+	case "updates.check_interval":
+		cfg.Updates.CheckInterval = strings.TrimSpace(value)
 	default:
 		return fmt.Errorf("unknown global config key %q", key)
 	}
@@ -830,6 +853,10 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.Watch.Layout.GravityStrength
 	case "completion.remote":
 		return cfg.Completion.Remote
+	case "updates.auto":
+		return cfg.Updates.Auto
+	case "updates.check_interval":
+		return cfg.Updates.CheckInterval
 	default:
 		return ""
 	}
@@ -935,7 +962,13 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	appendUnknownEntries(completion, mappingValueNode(existing, "completion"), setOf("remote"))
 	addMap(mapping, "completion", completion, "Shell completion settings.")
 
-	appendUnknownEntries(mapping, existing, setOf("server_url", "api_key", "org_id", "apply", "validation", "serve", "watch", "completion"))
+	updates := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	addScalar(updates, "auto", cfg.Updates.Auto, desc("updates.auto"))
+	addScalar(updates, "check_interval", cfg.Updates.CheckInterval, desc("updates.check_interval"))
+	appendUnknownEntries(updates, mappingValueNode(existing, "updates"), setOf("auto", "check_interval"))
+	addMap(mapping, "updates", updates, "CLI update check settings.")
+
+	appendUnknownEntries(mapping, existing, setOf("server_url", "api_key", "org_id", "apply", "validation", "serve", "watch", "completion", "updates"))
 	return root
 }
 

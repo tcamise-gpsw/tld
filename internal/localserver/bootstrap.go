@@ -3,6 +3,7 @@ package localserver
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,8 +33,9 @@ type ResourceCounts struct {
 // ServeOptions overrides the address that Bootstrap listens on.
 // An empty field means "use the lower-priority source".
 type ServeOptions struct {
-	Host string
-	Port string
+	Host     string
+	Port     string
+	StaticFS fs.FS
 }
 
 func envOrDefault(key, fallback string) string {
@@ -70,9 +72,13 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 		return nil, err
 	}
 
-	staticFS, err := assets.StaticFS()
-	if err != nil {
-		return nil, err
+	staticFS := o.StaticFS
+	if staticFS == nil {
+		embedded, err := assets.StaticFS()
+		if err != nil {
+			return nil, err
+		}
+		staticFS = embedded
 	}
 
 	sqliteStore, err := store.Open(dbPath, assets.FS)

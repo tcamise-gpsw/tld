@@ -63,6 +63,7 @@ type Config struct {
 	Serve       ServeConfig      `yaml:"serve"`
 	Watch       WatchConfig      `yaml:"watch"`
 	Completion  CompletionConfig `yaml:"completion"`
+	Updates     UpdatesConfig    `yaml:"updates"`
 }
 
 // ApplyConfig controls where CLI workspace plans are materialized.
@@ -150,6 +151,11 @@ type CompletionConfig struct {
 	Remote bool `yaml:"remote"`
 }
 
+type UpdatesConfig struct {
+	Auto          bool   `yaml:"auto"`
+	CheckInterval string `yaml:"check_interval"`
+}
+
 const DefaultValidationLevel = 2
 
 // DefaultConfig returns a Config struct populated with system defaults.
@@ -212,6 +218,10 @@ func DefaultConfig() *Config {
 				MaxTrackedFiles: 15000,
 				MaxLimitedFiles: 2000,
 			},
+		},
+		Updates: UpdatesConfig{
+			Auto:          false,
+			CheckInterval: "24h",
 		},
 	}
 }

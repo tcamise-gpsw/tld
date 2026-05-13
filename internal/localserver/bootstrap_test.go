@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/mertcikla/tld/v2/internal/localserver"
 )
@@ -91,7 +92,10 @@ func TestBootstrapReportsExistingDatabase(t *testing.T) {
 }
 
 func TestBootstrapServesEmbeddedAppIndex(t *testing.T) {
-	app, err := localserver.Bootstrap(t.TempDir())
+	mockFS := fstest.MapFS{
+		"frontend/dist/index.html": {Data: []byte("<!doctype html><html>app</html>")},
+	}
+	app, err := localserver.Bootstrap(t.TempDir(), localserver.ServeOptions{StaticFS: mockFS})
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
