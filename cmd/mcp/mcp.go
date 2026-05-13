@@ -431,9 +431,14 @@ func inferView(ws *workspace.Workspace, from, to string) string {
 
 // ensureServeRunning starts `tld serve` in the background if not already running.
 func ensureServeRunning(cmd *cobra.Command, host, port, dataDir string) error {
-	pid, err := localserver.ReadPID(localserver.PIDPath(dataDir))
-	if err == nil && localserver.IsRunning(pid) {
-		return nil
+	addr := localserver.ResolveAddr(localserver.ServeOptions{Host: host, Port: port})
+	reg, err := localserver.PruneProcessRegistry()
+	if err == nil {
+		for _, proc := range reg.Processes {
+			if proc.Addr == addr || (proc.Kind == localserver.ProcessKindServer && proc.DataDir == dataDir) {
+				return nil
+			}
+		}
 	}
 	exe, err := os.Executable()
 	if err != nil {

@@ -194,6 +194,6 @@ Use "tld [command] --help" for more information about a command
 
 ## Troubleshooting
 
-- **"Server already running"**: Run `tld stop` to clear the PID file and shut down the background process.
+- **"Server already running"**: Run `tld stop` to stop registered local `tld serve` and `tld watch` processes.
 - **UI not reflecting YAML changes**: Restart the server or ensure `tld serve` is running in the correct directory.
 - **Language support**: If a language isn't detected, ensure the parser is registered in `internal/analyzer`.

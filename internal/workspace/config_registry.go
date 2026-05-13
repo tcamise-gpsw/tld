@@ -316,7 +316,7 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "validation.exclude_rules", Description: "Architectural warning rule codes to suppress."},
 	{Key: "serve.host", Env: []string{"TLD_HOST", "TLD_ADDR"}, Description: "Host address for the local web server."},
 	{Key: "serve.port", Env: []string{"PORT", "TLD_ADDR"}, Description: "Port for the local web server."},
-	{Key: "serve.data_dir", Env: []string{"TLD_DATA_DIR"}, Description: "Directory for local database, logs, and pid files."},
+	{Key: "serve.data_dir", Env: []string{"TLD_DATA_DIR"}, Description: "Directory for local database and logs."},
 	{Key: "watch.languages", Env: []string{"TLD_WATCH_LANGUAGES"}, Description: "Comma-separated source languages watched by analyze/watch."},
 	{Key: "watch.watcher", Env: []string{"TLD_WATCH_WATCHER"}, Description: "File watcher backend: auto, fsnotify, or poll."},
 	{Key: "watch.poll_interval", Env: []string{"TLD_WATCH_POLL_INTERVAL"}, Description: "Polling interval used by the poll watcher."},

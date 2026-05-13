@@ -134,6 +134,15 @@ func NewWatchCmd() *cobra.Command {
 			serveOpts := localserver.ServeOptions{Host: serveCfg.Host, Port: serveCfg.Port}
 			addr := localserver.ResolveAddr(serveOpts)
 			url := "http://" + addr
+			if err := localserver.RegisterProcess(localserver.ProcessRecord{
+				Kind:    localserver.ProcessKindWatch,
+				PID:     os.Getpid(),
+				DataDir: dataDir,
+				Addr:    addr,
+			}); err != nil {
+				return fail("watch.process_register.failed", err)
+			}
+			defer func() { _ = localserver.RemoveProcess(os.Getpid()) }()
 			var srv *http.Server
 			if !noServe {
 				serveStarted := time.Now()
@@ -223,6 +232,14 @@ func NewWatchCmd() *cobra.Command {
 				return nil
 			}
 			repo := result.Repository
+			_ = localserver.RegisterProcess(localserver.ProcessRecord{
+				Kind:         localserver.ProcessKindWatch,
+				PID:          os.Getpid(),
+				DataDir:      dataDir,
+				Addr:         addr,
+				RepoRoot:     repo.RepoRoot,
+				RepositoryID: repo.ID,
+			})
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\r\033[K\n")
 			term.Separator(cmd.OutOrStdout())
 			term.Label(cmd.OutOrStdout(), 20, "Watching", repo.RepoRoot)

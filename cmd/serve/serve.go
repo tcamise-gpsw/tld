@@ -61,6 +61,15 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	if err != nil {
 		return err
 	}
+	if err := localserver.RegisterProcess(localserver.ProcessRecord{
+		Kind:    localserver.ProcessKindServer,
+		PID:     os.Getpid(),
+		DataDir: dataDir,
+		Addr:    app.Addr,
+	}); err != nil {
+		return err
+	}
+	defer func() { _ = localserver.RemoveProcess(os.Getpid()) }()
 
 	PrintLogo(cmd.OutOrStdout())
 	url := "http://" + app.Addr
@@ -96,7 +105,6 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 
 func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser bool) error {
 	started := time.Now()
-	pidPath := localserver.PIDPath(dataDir)
 	cfg, err := workspace.LoadGlobalConfig()
 	if err != nil {
 		return err
@@ -106,15 +114,19 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	url := "http://" + addr
 	initializedData := databaseWillBeInitialized(dataDir)
 
-	if pid, err := localserver.ReadPID(pidPath); err == nil && localserver.IsRunning(pid) {
+	if existing, ok := findRunningServerProcess(dataDir, addr); ok {
 		PrintLogo(cmd.OutOrStdout())
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Server already running (pid %d)\n", pid)
+		if existing.Addr != "" {
+			addr = existing.Addr
+			url = "http://" + addr
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Server already running (pid %d)\n", existing.PID)
 		ready, _ := getReady(url + "/api/ready")
 		printServeInfo(cmd.OutOrStdout(), url, serveStatus{
 			Mode:            "background",
 			InitializedData: initializedData,
 			Resources:       readyResources(ready),
-			PID:             new(pid),
+			PID:             new(existing.PID),
 			BindAddr:        addr,
 			Startup:         0,
 			DBPath:          localserver.DatabasePath(dataDir),
@@ -159,20 +171,15 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		return fmt.Errorf("start server process: %w", err)
 	}
 
-	if err := localserver.WritePID(pidPath, child.Process.Pid); err != nil {
-		_ = child.Process.Kill()
-		return fmt.Errorf("write pid file: %w", err)
-	}
-
 	ready, err := waitReady(url+"/api/ready", backgroundReadyTimeout)
 	if err != nil {
 		_ = child.Process.Kill()
-		_ = os.Remove(pidPath)
+		_ = localserver.RemoveProcess(child.Process.Pid)
 		return fmt.Errorf("server did not become ready: %w\nCheck logs: %s", err, localserver.LogPath(dataDir))
 	}
 
 	if !localserver.IsRunning(child.Process.Pid) {
-		_ = os.Remove(pidPath)
+		_ = localserver.RemoveProcess(child.Process.Pid)
 		return fmt.Errorf("server process exited immediately; check logs: %s", localserver.LogPath(dataDir))
 	}
 
@@ -191,6 +198,22 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		_ = cmdutil.OpenBrowser(url)
 	}
 	return nil
+}
+
+func findRunningServerProcess(dataDir, addr string) (localserver.ProcessRecord, bool) {
+	reg, err := localserver.PruneProcessRegistry()
+	if err != nil {
+		return localserver.ProcessRecord{}, false
+	}
+	for _, proc := range reg.Processes {
+		if proc.Addr == addr {
+			return proc, true
+		}
+		if proc.Kind == localserver.ProcessKindServer && proc.DataDir == dataDir {
+			return proc, true
+		}
+	}
+	return localserver.ProcessRecord{}, false
 }
 
 type serveStatus struct {

@@ -1,15 +1,26 @@
 package stop
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
+	assets "github.com/mertcikla/tld/v2"
 	"github.com/mertcikla/tld/v2/internal/localserver"
+	"github.com/mertcikla/tld/v2/internal/store"
 	"github.com/mertcikla/tld/v2/internal/term"
-	"github.com/mertcikla/tld/v2/internal/workspace"
+	watchpkg "github.com/mertcikla/tld/v2/internal/watch"
 	"github.com/spf13/cobra"
+)
+
+var (
+	processIsRunning = localserver.IsRunning
+	signalPID        = signalProcess
+	killPID          = killProcess
+	stopSleep        = time.Sleep
 )
 
 func NewStopCmd() *cobra.Command {
@@ -17,69 +28,130 @@ func NewStopCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the local tlDiagram web server",
-		Long: `Stop the tlDiagram web server started with 'tld serve'.
+		Short: "Stop local tlDiagram processes",
+		Long: `Stop local tlDiagram processes started by 'tld serve' or 'tld watch'.
 
-Sends SIGTERM and waits up to 10 seconds for a graceful shutdown.
-Use --kill to send SIGKILL immediately.`,
+Process state is read from the global tld process registry.
+Sends graceful stop requests and waits up to 10 seconds for shutdown.
+Use --kill to send SIGKILL immediately to all registered processes.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			dataDirFlag, _ := cmd.Flags().GetString("data-dir")
-			cfg, err := workspace.LoadGlobalConfig()
-			if err != nil {
-				return err
-			}
-			dataDir, err := workspace.ResolveDataDir(cfg, dataDirFlag)
-			if err != nil {
-				return err
-			}
-			return runStop(cmd, forceKill, dataDir)
+			return runStop(cmd, forceKill)
 		},
 	}
 
-	cmd.Flags().BoolVar(&forceKill, "kill", false, "force-stop with SIGKILL instead of SIGTERM")
-	cmd.Flags().String("data-dir", "", "directory for database and logs (overrides config and env)")
+	cmd.Flags().BoolVar(&forceKill, "kill", false, "force-stop with SIGKILL instead of graceful shutdown")
+	cmd.Flags().String("data-dir", "", "deprecated; process registry is global")
 	return cmd
 }
 
-func runStop(cmd *cobra.Command, forceKill bool, dataDir string) error {
-	pidPath := localserver.PIDPath(dataDir)
-	pid, err := localserver.ReadPID(pidPath)
+func runStop(cmd *cobra.Command, forceKill bool) error {
+	reg, err := localserver.LoadProcessRegistry()
 	if err != nil {
-		return fmt.Errorf("no server running")
+		return err
 	}
 
-	if !localserver.IsRunning(pid) {
-		_ = os.Remove(pidPath)
-		return fmt.Errorf("no server running")
+	live := make([]localserver.ProcessRecord, 0, len(reg.Processes))
+	for _, proc := range reg.Processes {
+		if processIsRunning(proc.PID) {
+			live = append(live, proc)
+			continue
+		}
+		_ = localserver.RemoveProcess(proc.PID)
 	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("find process %d: %w", pid, err)
+	if len(live) == 0 {
+		return fmt.Errorf("no tld processes running")
 	}
 
 	if forceKill {
-		if err := proc.Kill(); err != nil {
-			return fmt.Errorf("kill: %w", err)
+		var errs []string
+		for _, proc := range live {
+			if err := killPID(proc.PID); err != nil {
+				errs = append(errs, fmt.Sprintf("%s pid %d: %v", proc.Kind, proc.PID, err))
+				continue
+			}
+			_ = localserver.RemoveProcess(proc.PID)
+			term.Success(cmd.OutOrStdout(), fmt.Sprintf("%s killed (pid %d).", printableKind(proc.Kind), proc.PID))
 		}
-		_ = os.Remove(pidPath)
-		term.Success(cmd.OutOrStdout(), "Server killed.")
+		if len(errs) > 0 {
+			return fmt.Errorf("kill failed: %s", strings.Join(errs, "; "))
+		}
 		return nil
 	}
 
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("signal: %w", err)
+	var signalErrs []string
+	for _, proc := range live {
+		if proc.Kind == localserver.ProcessKindWatch {
+			_ = requestWatchStop(proc)
+		}
+		if err := signalPID(proc.PID, syscall.SIGTERM); err != nil {
+			if !processIsRunning(proc.PID) {
+				_ = localserver.RemoveProcess(proc.PID)
+				continue
+			}
+			signalErrs = append(signalErrs, fmt.Sprintf("%s pid %d: %v", proc.Kind, proc.PID, err))
+		}
+	}
+	if len(signalErrs) > 0 {
+		return fmt.Errorf("signal failed: %s", strings.Join(signalErrs, "; "))
 	}
 
 	deadline := time.Now().Add(10 * time.Second)
+	remaining := live
 	for time.Now().Before(deadline) {
-		if !localserver.IsRunning(pid) {
-			_ = os.Remove(pidPath)
-			term.Success(cmd.OutOrStdout(), "Server stopped.")
+		next := remaining[:0]
+		for _, proc := range remaining {
+			if processIsRunning(proc.PID) {
+				next = append(next, proc)
+				continue
+			}
+			_ = localserver.RemoveProcess(proc.PID)
+			term.Success(cmd.OutOrStdout(), fmt.Sprintf("%s stopped (pid %d).", printableKind(proc.Kind), proc.PID))
+		}
+		if len(next) == 0 {
 			return nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		remaining = next
+		stopSleep(200 * time.Millisecond)
 	}
 
-	return fmt.Errorf("server did not stop within 10s; use --kill to force")
+	return fmt.Errorf("%d tld process(es) did not stop within 10s; use --kill to force", len(remaining))
+}
+
+func requestWatchStop(proc localserver.ProcessRecord) error {
+	if proc.DataDir == "" {
+		return nil
+	}
+	sqliteStore, err := store.Open(localserver.DatabasePath(proc.DataDir), assets.FS)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sqliteStore.DB().Close() }()
+	return watchpkg.NewStore(sqliteStore.DB()).RequestStopActive(context.Background())
+}
+
+func printableKind(kind string) string {
+	switch kind {
+	case localserver.ProcessKindServer:
+		return "Server"
+	case localserver.ProcessKindWatch:
+		return "Watch"
+	default:
+		return "Process"
+	}
+}
+
+func signalProcess(pid int, sig os.Signal) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("find process: %w", err)
+	}
+	return proc.Signal(sig)
+}
+
+func killProcess(pid int) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("find process: %w", err)
+	}
+	return proc.Kill()
 }
