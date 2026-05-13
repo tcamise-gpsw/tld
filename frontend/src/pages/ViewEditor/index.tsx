@@ -88,7 +88,7 @@ import { useCrossBranchContextSettings } from '../../crossBranch/settings'
 import { removeConnectorGraphSnapshot, upsertConnectorGraphSnapshot, useWorkspaceGraphSnapshot } from '../../crossBranch/store'
 import type { ProxyConnectorDetails } from '../../crossBranch/types'
 import { useDemoRevealViewport, type ViewEditorDemoOptions } from '../../demo/viewEditor'
-import { buildElementLibraryItems, useStore, placedElementToLibraryElement } from '../../store/useStore'
+import { buildElementLibraryItems, useStore, placedElementToLibraryElement, resolveElementForUpdate } from '../../store/useStore'
 import { useWorkspaceVersionPreview } from '../../context/WorkspaceVersionContext'
 import { WATCH_REPRESENTATION_UPDATED_EVENT } from '../../components/WorkspacePanel'
 
@@ -786,7 +786,7 @@ function ViewEditorInner({
 
   const handleUpdateTags = useCallback(async (elementId: number, tags: string[]) => {
     if (!canEdit) return
-    const obj = selectedElement?.id === elementId ? selectedElement : allElements.find(o => o.id === elementId)
+    const obj = resolveElementForUpdate(elementId, selectedElement, allElements, viewElements)
     if (!obj) return
     try {
       const saved = await api.elements.update(elementId, {
@@ -801,7 +801,7 @@ function ViewEditorInner({
     } catch (err) {
       console.error('Failed to update tags:', err)
     }
-  }, [canEdit, selectedElement, allElements, applyElementSaved, pushElementEditAction, setSelectedElement])
+  }, [canEdit, selectedElement, allElements, viewElements, applyElementSaved, pushElementEditAction, setSelectedElement])
 
   const pushPlacementMoveAction = useCallback((before: PlacedElement, after: PlacedElement) => {
     if (placementSnapshotsEqual(before, after)) return

@@ -221,6 +221,21 @@ export function buildElementLibraryItems(allElements: LibraryElement[], viewElem
   return Array.from(byId.values())
 }
 
+export function resolveElementForUpdate(
+  elementId: number,
+  selectedElement: LibraryElement | null,
+  allElements: LibraryElement[],
+  viewElements: PlacedElement[],
+): LibraryElement | null {
+  if (selectedElement?.id === elementId) return selectedElement
+
+  const libraryElement = allElements.find((element) => element.id === elementId)
+  if (libraryElement) return libraryElement
+
+  const placedElement = viewElements.find((element) => element.element_id === elementId)
+  return placedElement ? placedElementToLibraryElement(placedElement) : null
+}
+
 export function mergeSavedElementIntoPlacements(elements: PlacedElement[], saved: LibraryElement): PlacedElement[] {
   return elements.map((element) =>
     element.element_id === saved.id

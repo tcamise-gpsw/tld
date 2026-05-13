@@ -10,6 +10,7 @@ import {
   mergeSavedElementIntoPlacements,
   removeConnectorFromList,
   removePlacedElement,
+  resolveElementForUpdate,
   selectConnectorById,
   selectElementById,
   selectExistingElementIds,
@@ -161,6 +162,16 @@ describe('pure view helpers', () => {
     const afterRemoval = buildElementLibraryItems([libraryElement(10), libraryElement(20)], removePlacedElement([onCanvas], 10))
     expect(afterRemoval.map((item) => item.id)).toEqual([10, 20])
     expect(afterRemoval[0]).toMatchObject({ id: 10, name: 'Saved' })
+  })
+
+  it('resolves update payloads from placed elements when the library store is empty', () => {
+    const placed = { ...element(10), tags: ['current'] }
+    const resolved = resolveElementForUpdate(10, null, [], [placed])
+
+    expect(resolved).toMatchObject({ id: 10, name: 'Element 10', tags: ['current'] })
+    expect(resolveElementForUpdate(20, libraryElement(20), [], [placed])?.id).toBe(20)
+    expect(resolveElementForUpdate(30, null, [libraryElement(30)], [placed])?.id).toBe(30)
+    expect(resolveElementForUpdate(40, null, [], [placed])).toBeNull()
   })
 
   it('upserts and removes connectors', () => {
