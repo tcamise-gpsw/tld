@@ -110,3 +110,30 @@ func TestConfigCommandEnvOverrideSource(t *testing.T) {
 		t.Fatalf("serve.port = %+v, want PORT env override", value)
 	}
 }
+
+func TestConfigCommandResetRewritesDefaults(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	dir := t.TempDir()
+	configPath := filepath.Join(configDir, "tld.yaml")
+
+	if err := os.WriteFile(configPath, []byte("server_url: https://example.invalid\napi_key: secret-value\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	stdout, _, err := RunCmd(t, dir, "config", "reset")
+	if err != nil {
+		t.Fatalf("config reset: %v\nstdout: %s", err, stdout)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "secret-value") || strings.Contains(content, "https://example.invalid") {
+		t.Fatalf("config reset did not replace existing values:\n%s", content)
+	}
+	if !strings.Contains(content, "server_url: https://tldiagram.com") || !strings.Contains(content, "serve:") {
+		t.Fatalf("config reset did not write defaults:\n%s", content)
+	}
+}

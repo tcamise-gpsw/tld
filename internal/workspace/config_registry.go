@@ -87,7 +87,7 @@ func ConfigDefinitionForKey(key string) (ConfigDefinition, bool) {
 }
 
 func LoadGlobalConfigState() (*GlobalConfigState, error) {
-	return loadGlobalConfigState(true)
+	return loadGlobalConfigState(false)
 }
 
 func LoadGlobalConfigStateNoRepair() (*GlobalConfigState, error) {

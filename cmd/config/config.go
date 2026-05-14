@@ -16,7 +16,7 @@ func NewConfigCmd() *cobra.Command {
 		Short: "Inspect and update the global tld configuration",
 		Long:  "Inspect and update the global tld.yaml configuration file.",
 	}
-	cmd.AddCommand(newPathCmd(), newListCmd(), newGetCmd(), newSetCmd(), newValidateCmd())
+	cmd.AddCommand(newPathCmd(), newListCmd(), newGetCmd(), newSetCmd(), newResetCmd(), newValidateCmd())
 	return cmd
 }
 
@@ -101,6 +101,25 @@ func newSetCmd() *cobra.Command {
 				return err
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Set %s\n", strings.ToLower(strings.TrimSpace(args[0])))
+			return nil
+		},
+	}
+}
+
+func newResetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset",
+		Short: "Reset the global config file to defaults",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := workspace.ResetGlobalConfig(); err != nil {
+				return err
+			}
+			path, err := workspace.ConfigPath()
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Reset %s\n", path)
 			return nil
 		},
 	}

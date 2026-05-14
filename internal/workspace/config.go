@@ -227,7 +227,7 @@ func DefaultConfig() *Config {
 }
 
 // LoadGlobalConfig reads the global config file, applies defaults to missing fields,
-// handles environment variable overrides, and persists any added defaults back to YAML.
+// and handles environment variable overrides.
 func LoadGlobalConfig() (*Config, error) {
 	state, err := LoadGlobalConfigState()
 	if err != nil {
@@ -243,6 +243,20 @@ func SaveGlobalConfig(cfg *Config) error {
 
 // EnsureGlobalConfig ensures the global config file exists with full defaults.
 func EnsureGlobalConfig() error {
+	path, err := ConfigPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return SaveGlobalConfig(DefaultConfig())
+}
+
+// ResetGlobalConfig rewrites the global config file with full defaults.
+func ResetGlobalConfig() error {
 	return SaveGlobalConfig(DefaultConfig())
 }
 

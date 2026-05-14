@@ -9,13 +9,14 @@ import (
 	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
-func TestLoadGlobalConfigStateReportsEnvSourcesAndDoesNotPersistOverrides(t *testing.T) {
+func TestLoadGlobalConfigStateReportsEnvSourcesAndDoesNotRewriteExistingConfig(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("TLD_CONFIG_DIR", configDir)
 	t.Setenv("TLD_API_KEY", "env-secret")
 
 	configPath := filepath.Join(configDir, "tld.yaml")
-	writeFile(t, configPath, "server_url: http://file.example\nunknown_root: keep-me\n")
+	original := "server_url: http://file.example\nunknown_root: keep-me\n"
+	writeFile(t, configPath, original)
 
 	state, err := workspace.LoadGlobalConfigState()
 	if err != nil {
@@ -44,11 +45,8 @@ func TestLoadGlobalConfigStateReportsEnvSourcesAndDoesNotPersistOverrides(t *tes
 	if strings.Contains(content, "env-secret") {
 		t.Fatalf("env override was persisted:\n%s", content)
 	}
-	if !strings.Contains(content, "unknown_root: keep-me") {
-		t.Fatalf("unknown key was not preserved:\n%s", content)
-	}
-	if !strings.Contains(content, "tlDiagram cloud/server URL") || !strings.Contains(content, "Shell completion settings") {
-		t.Fatalf("generated comments missing from config:\n%s", content)
+	if content != original {
+		t.Fatalf("config was rewritten:\n%s", content)
 	}
 }
 
@@ -79,6 +77,44 @@ func TestSetGlobalConfigValuePreservesUnknownAndValidates(t *testing.T) {
 
 	if err := workspace.SetGlobalConfigValue("watch.watcher", "bogus"); err == nil {
 		t.Fatal("expected invalid watcher to fail")
+	}
+}
+
+func TestEnsureGlobalConfigDoesNotRewriteExistingConfig(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	configPath := filepath.Join(configDir, "tld.yaml")
+	original := "server_url: https://example.invalid\napi_key: existing-secret\norg_id: existing-org\nunknown_root: keep-me\n"
+	writeFile(t, configPath, original)
+
+	if err := workspace.EnsureGlobalConfig(); err != nil {
+		t.Fatalf("EnsureGlobalConfig: %v", err)
+	}
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.ServerURL != "https://example.invalid" {
+		t.Fatalf("ServerURL = %q, want existing value", cfg.ServerURL)
+	}
+	if cfg.APIKey != "existing-secret" {
+		t.Fatalf("APIKey = %q, want existing-secret", cfg.APIKey)
+	}
+	if cfg.WorkspaceID != "existing-org" {
+		t.Fatalf("WorkspaceID = %q, want existing-org", cfg.WorkspaceID)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "unknown_root: keep-me") {
+		t.Fatalf("unknown key was not preserved:\n%s", content)
+	}
+	if content != original {
+		t.Fatalf("existing config was rewritten:\n%s", content)
 	}
 }
 
