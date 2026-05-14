@@ -168,12 +168,12 @@ func RenderPostApplyLocation(out io.Writer, runner Runner) {
 			if addr == "" {
 				addr = localserver.AddrFromEnv()
 			}
-			term.Label(out, 20, "Open app", term.URL(out, "http://"+addr))
+			term.Label(out, 20, "View at", term.URL(out, "http://"+addr))
 			return
 		}
 		term.Label(out, 20, "Start app", serveCommand(r.dataDir))
 	case remoteRunner:
-		term.Label(out, 20, "Open app", term.URL(out, CloudAppURL))
+		term.Label(out, 20, "View at", term.URL(out, CloudAppURL))
 	}
 }
 

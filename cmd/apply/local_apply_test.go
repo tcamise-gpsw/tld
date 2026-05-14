@@ -167,7 +167,7 @@ func TestApplyLocalTargetPrintsRunningServerURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply local: %v", err)
 	}
-	if !strings.Contains(stdout, "Open app:") || !strings.Contains(stdout, "http://127.0.0.1:9999") {
+	if !strings.Contains(stdout, "View at:") || !strings.Contains(stdout, "http://127.0.0.1:9999") {
 		t.Fatalf("stdout %q does not contain running server URL", stdout)
 	}
 }
