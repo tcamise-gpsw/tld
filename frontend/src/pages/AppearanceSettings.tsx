@@ -1,46 +1,32 @@
-import { Box, FormLabel, HStack, Select, Text, Tooltip, VStack, Wrap, WrapItem } from '@chakra-ui/react'
+import {
+  Box,
+  Button,
+  FormLabel,
+  HStack,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuList,
+  Text,
+  Tooltip,
+  VStack,
+  Wrap,
+  WrapItem,
+} from '@chakra-ui/react'
 import { ACCENT_OPTIONS, BACKGROUND_OPTIONS, ELEMENT_OPTIONS } from '../constants/colors'
 import { useTheme } from '../context/ThemeContext'
 import { useSourceEditor } from '../utils/sourceEditor'
-import type { SourceEditor } from '../api/client'
+import { ChevronDownIcon } from '../components/Icons'
 
 export default function AppearanceSettings({ compact = false }: { compact?: boolean }) {
   const { accent, setAccent, background, setBackground, elementColor, setElementColor } = useTheme()
   const { editor, setEditor } = useSourceEditor()
-  const swatchSize = compact ? '28px' : '32px'
+  const swatchSize = compact ? '21px' : '32px'
   const sectionGap = compact ? 5 : 8
 
   return (
     <VStack align="start" spacing={sectionGap} maxW={compact ? '320px' : '480px'} w="full">
-      <Box w="full">
-        <HStack justify="space-between" align="end" w="full" mb={compact ? 0 : 1}>
-          <Box>
-            <Text fontFamily="heading" fontSize={compact ? 'md' : 'lg'} fontWeight="bold" color="gray.100" mb={1}>
-              Theme
-            </Text>
-          </Box>
-        </HStack>
-      </Box>
 
-      <Box w="full">
-        <FormLabel mb={3} fontSize={compact ? 'xs' : 'sm'} textTransform="uppercase" letterSpacing="0.12em" color="gray.400">
-          Source Editor
-        </FormLabel>
-        <Select
-          size="sm"
-          value={editor}
-          onChange={(event) => setEditor(event.target.value as SourceEditor)}
-          bg="whiteAlpha.50"
-          borderColor="whiteAlpha.200"
-          color="gray.100"
-          maxW="220px"
-          _hover={{ borderColor: 'whiteAlpha.400' }}
-          _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px var(--chakra-colors-blue-400)' }}
-        >
-          <option value="zed">Zed</option>
-          <option value="vscode">VS Code</option>
-        </Select>
-      </Box>
 
       <Box w="full">
         <FormLabel mb={3} fontSize={compact ? 'xs' : 'sm'} textTransform="uppercase" letterSpacing="0.12em" color="gray.400">
@@ -152,6 +138,36 @@ export default function AppearanceSettings({ compact = false }: { compact?: bool
             )
           })}
         </Wrap>
+      </Box>
+
+      <Box w="full">
+        <FormLabel mb={3} fontSize={compact ? 'xs' : 'sm'} textTransform="uppercase" letterSpacing="0.12em" color="gray.400">
+          Editor
+        </FormLabel>
+        <Menu>
+          <MenuButton
+            as={Button}
+            size="sm"
+            variant="clay"
+            rightIcon={<ChevronDownIcon size={12} strokeWidth={4} />}
+            minW="140px"
+            textAlign="left"
+            bg="whiteAlpha.100"
+            color="gray.100"
+            _hover={{ bg: 'whiteAlpha.200' }}
+            _active={{ bg: 'whiteAlpha.300' }}
+          >
+            {editor === 'zed' ? 'Zed' : 'VS Code'}
+          </MenuButton>
+          <MenuList>
+            <MenuItem onClick={() => setEditor('zed')} fontWeight={editor === 'zed' ? 'bold' : 'normal'}>
+              Zed
+            </MenuItem>
+            <MenuItem onClick={() => setEditor('vscode')} fontWeight={editor === 'vscode' ? 'bold' : 'normal'}>
+              VS Code
+            </MenuItem>
+          </MenuList>
+        </Menu>
       </Box>
     </VStack>
   )
