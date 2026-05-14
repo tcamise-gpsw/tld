@@ -69,8 +69,8 @@ foreign:
 	if err != nil {
 		t.Fatalf("validate: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "Symbol verification") {
-		t.Errorf("stdout %q does not contain symbol verification pass", stdout)
+	if !strings.Contains(stdout, "Workspace valid") {
+		t.Errorf("stdout %q does not contain validation success", stdout)
 	}
 	if strings.Contains(stderr, "Foreign Service") || strings.Contains(stderr, "doesNotExist") {
 		t.Errorf("stderr %q should not mention the foreign repo symbol", stderr)

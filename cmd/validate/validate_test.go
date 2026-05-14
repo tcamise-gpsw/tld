@@ -23,7 +23,7 @@ func TestValidateCmd_ValidWorkspace(t *testing.T) {
 	if !strings.Contains(stdout, "Workspace valid") {
 		t.Errorf("stdout %q does not contain 'Workspace valid'", stdout)
 	}
-	if !strings.Contains(stdout, "1 elements") || !strings.Contains(stdout, "0 diagrams") {
+	if !strings.Contains(stdout, "1 elements") || !strings.Contains(stdout, "0 views") {
 		t.Errorf("stdout %q does not contain count summary", stdout)
 	}
 }

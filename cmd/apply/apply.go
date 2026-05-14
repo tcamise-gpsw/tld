@@ -71,6 +71,9 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 					return err
 				}
 			}
+			if !commandWantsJSON(cmd) {
+				RenderTargetInfo(cmd.OutOrStdout(), runner)
+			}
 			repoCtx := cmdutil.DetectRepoScope(cmdutil.GetWorkingDir(), *wdir)
 			if repoCtx.Name != "" && repoCtx.MatchesWorkspaceRepo(ws) {
 				ws.ActiveRepo = repoCtx.Name
@@ -218,6 +221,7 @@ func NewApplyCmd(wdir *string) *cobra.Command {
 				term.Warnf(cmd.ErrOrStderr(), "%d drift item(s) detected", len(resp.Drift))
 				return fmt.Errorf("%d drift item(s) detected", len(resp.Drift))
 			}
+			RenderPostApplyLocation(cmd.OutOrStdout(), runner)
 			return nil
 		},
 	}

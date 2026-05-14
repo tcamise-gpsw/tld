@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
+	"github.com/mertcikla/tld/v2/cmd/apply"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 
 	"connectrpc.com/connect"
@@ -19,6 +21,8 @@ func NewPlanCmd(wdir *string) *cobra.Command {
 	var recreateIDs bool
 	var verbose bool
 	var strictness int
+	var target string
+	var dataDir string
 
 	c := &cobra.Command{
 		Use:   "plan",
@@ -28,8 +32,14 @@ func NewPlanCmd(wdir *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := cmdutil.EnsureAPIKey(ws.Config.APIKey); err != nil {
+			runner, err := apply.NewRunner(ws.Config, target, dataDir, false, nil)
+			if err != nil {
 				return err
+			}
+			if runner.Name() == apply.TargetRemote {
+				if err := cmdutil.EnsureAPIKey(ws.Config.APIKey); err != nil {
+					return err
+				}
 			}
 
 			// Override strictness if flag is set
@@ -52,19 +62,6 @@ func NewPlanCmd(wdir *string) *cobra.Command {
 				return fmt.Errorf("build plan: %w", err)
 			}
 
-			// Perform dry run on the server to detect conflicts and drift
-			c := client.New(ws.Config.ServerURL, ws.Config.APIKey, false)
-			req := plan.Request
-			*req.DryRun = true
-
-			resp, err := c.ApplyWorkspacePlan(cmd.Context(), connect.NewRequest(req))
-			if err != nil {
-				if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "plan", cmdutil.WithUnauthorizedHint("server plan failed", err))
-				}
-				return cmdutil.WithUnauthorizedHint("server plan failed", err)
-			}
-
 			out := cmd.OutOrStdout()
 			if planOutput != "" {
 				f, err := os.Create(planOutput)
@@ -75,25 +72,48 @@ func NewPlanCmd(wdir *string) *cobra.Command {
 				out = f
 			}
 
+			wantsJSON := cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String())
+			compactJSON := cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true"
+			if !wantsJSON {
+				apply.RenderTargetInfo(out, runner)
+			}
+
+			resp := &diagv1.ApplyPlanResponse{}
+			if runner.SupportsDryRun() {
+				// Perform dry run on the server to detect conflicts and drift.
+				c := client.New(ws.Config.ServerURL, ws.Config.APIKey, false)
+				req := plan.Request
+				*req.DryRun = true
+
+				remoteResp, err := c.ApplyWorkspacePlan(cmd.Context(), connect.NewRequest(req))
+				if err != nil {
+					if wantsJSON {
+						return cmdutil.WriteCommandError(cmd.OutOrStdout(), compactJSON, "plan", cmdutil.WithUnauthorizedHint("server plan failed", err))
+					}
+					return cmdutil.WithUnauthorizedHint("server plan failed", err)
+				}
+				resp = remoteResp.Msg
+			}
+
 			warnings := planner.AnalyzePlan(ws)
-			if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
-				return cmdutil.WriteJSON(out, cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", cmdutil.BuildPlanJSON(ws, resp.Msg, warnings))
+			if wantsJSON {
+				return cmdutil.WriteJSON(out, compactJSON, cmdutil.BuildPlanJSON(ws, resp, warnings))
 			}
 
 			planner.RenderPlanMarkdown(out, plan, ws, verbose)
 
 			// Show conflicts and drift if any
-			if len(resp.Msg.Conflicts) > 0 {
-				_, _ = fmt.Fprintf(out, "\n  %d conflicts detected:\n", len(resp.Msg.Conflicts))
-				for _, c := range resp.Msg.Conflicts {
+			if len(resp.Conflicts) > 0 {
+				_, _ = fmt.Fprintf(out, "\n  %d conflicts detected:\n", len(resp.Conflicts))
+				for _, c := range resp.Conflicts {
 					_, _ = fmt.Fprintf(out, "  * %s \"%s\" (remote is newer: %s)\n",
 						c.ResourceType, c.Ref, c.RemoteUpdatedAt.AsTime().Format(time.RFC3339))
 				}
 			}
 
-			if len(resp.Msg.Drift) > 0 {
-				_, _ = fmt.Fprintf(out, "\n %d drift items detected:\n", len(resp.Msg.Drift))
-				for _, d := range resp.Msg.Drift {
+			if len(resp.Drift) > 0 {
+				_, _ = fmt.Fprintf(out, "\n %d drift items detected:\n", len(resp.Drift))
+				for _, d := range resp.Drift {
 					_, _ = fmt.Fprintf(out, "  * %s \"%s\": %s\n", d.ResourceType, d.Ref, d.Reason)
 				}
 			}
@@ -127,5 +147,7 @@ func NewPlanCmd(wdir *string) *cobra.Command {
 	c.Flags().BoolVar(&recreateIDs, "recreate-ids", false, "ignore existing resource IDs and let the server generate new ones")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "show detailed resource reporting (elements, diagrams, connectors)")
 	c.Flags().IntVar(&strictness, "strictness", 0, "override validation strictness level [1-3]")
+	c.Flags().StringVar(&target, "target", "", "plan target: auto, local, cloud, or remote")
+	c.Flags().StringVar(&dataDir, "data-dir", "", "data directory for local target state")
 	return c
 }

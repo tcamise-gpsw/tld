@@ -119,9 +119,6 @@ func NewInitCmd() *cobra.Command {
 				term.Infof(cmd.OutOrStdout(), "Global config created at %s", term.Path(cmd.OutOrStdout(), cfgPath))
 			}
 
-			if !wizard {
-				term.Hint(cmd.OutOrStdout(), "Run 'tld login' to authenticate with tldiagram.com")
-			}
 			return nil
 		},
 	}
@@ -205,10 +202,9 @@ func runInitWizard(cmd *cobra.Command, dir string) error {
 
 	term.Separator(cmd.OutOrStdout())
 	term.Info(cmd.OutOrStdout(), "Next steps:")
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    1. tld login          - authenticate with tlDiagram.com")
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    2. tld analyze .      - extract symbols from your repo")
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    3. tld plan           - preview what will be created")
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    4. tld apply          - push to tlDiagram.com")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    1. tld analyze .      - extract symbols from your repo")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    2. tld plan           - preview what will be created")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    3. tld apply          - push to tlDiagram.com")
 	return nil
 }
 

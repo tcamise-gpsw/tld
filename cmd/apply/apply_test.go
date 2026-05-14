@@ -28,6 +28,9 @@ func TestApplyCmd_SuccessAutoApprove(t *testing.T) {
 	if !strings.Contains(stdout, "SUCCESS") || !strings.Contains(stdout, "## Planned vs Created") {
 		t.Fatalf("unexpected output: %q", stdout)
 	}
+	if !strings.Contains(stdout, "Target:") || !strings.Contains(stdout, "cloud") || !strings.Contains(stdout, "https://tldiagram.com/app") {
+		t.Fatalf("missing cloud target output: %q", stdout)
+	}
 }
 
 func TestApplyCmd_BearerTokenSentToServer(t *testing.T) {

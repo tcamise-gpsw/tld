@@ -27,6 +27,9 @@ func TestPlanCmd_OutputsMarkdown(t *testing.T) {
 	if !strings.Contains(stdout, "# Element Plan") {
 		t.Errorf("stdout %q does not contain '# Element Plan'", stdout)
 	}
+	if !strings.Contains(stdout, "Target:") || !strings.Contains(stdout, "cloud") {
+		t.Errorf("stdout %q does not contain cloud target", stdout)
+	}
 }
 
 func TestPlanCmd_VerboseFlag(t *testing.T) {
@@ -106,6 +109,21 @@ func TestPlanCmd_JSONOutput(t *testing.T) {
 	}
 	if payload.Summary["created"] == 0 {
 		t.Fatalf("expected created resources in summary, got %+v", payload.Summary)
+	}
+}
+
+func TestPlanCmd_LocalTargetDoesNotRequireAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	cmd.SeedElementWorkspace(t, dir)
+
+	stdout, _, err := cmd.RunCmd(t, dir, "plan", "--target", "local", "--data-dir", dataDir)
+	if err != nil {
+		t.Fatalf("plan --target local: %v", err)
+	}
+	if !strings.Contains(stdout, "Target:") || !strings.Contains(stdout, "local") {
+		t.Fatalf("stdout %q does not contain local target", stdout)
 	}
 }
 

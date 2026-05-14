@@ -45,7 +45,7 @@ func TestRenderPlanMarkdown_Header(t *testing.T) {
 	var buf strings.Builder
 	planner.RenderPlanMarkdown(&buf, plan, w, false)
 	out := buf.String()
-	if !strings.Contains(out, "Plan: 6 to create (+), 0 to update (~), 0 to delete (-)") {
+	if !strings.Contains(out, "Plan: +6 ~0 -0") {
 		t.Fatalf("missing plan summary: %q", out)
 	}
 	if !strings.Contains(out, "# Element Plan") {
@@ -152,7 +152,7 @@ func TestRenderPlanMarkdown_UsesUpdatePrefixesWhenMetadataExists(t *testing.T) {
 	var buf strings.Builder
 	planner.RenderPlanMarkdown(&buf, plan, w, true)
 	out := buf.String()
-	if !strings.Contains(out, "Plan: 0 to create (+), 6 to update (~), 0 to delete (-)") {
+	if !strings.Contains(out, "Plan: +0 ~6 -0") {
 		t.Fatalf("wrong update summary: %q", out)
 	}
 	if !strings.Contains(out, "~ element api") || !strings.Contains(out, "~ connector platform:api:db:reads") {

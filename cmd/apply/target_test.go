@@ -44,6 +44,15 @@ func TestResolveTarget(t *testing.T) {
 			cfg:     workspace.Config{Apply: workspace.ApplyConfig{Target: "somewhere"}},
 			wantErr: true,
 		},
+		{
+			name: "cloud alias resolves remote",
+			cfg: workspace.Config{
+				APIKey:      "key",
+				WorkspaceID: "workspace",
+			},
+			override: "cloud",
+			want:     apply.TargetRemote,
+		},
 	}
 
 	for _, tt := range tests {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	assets "github.com/mertcikla/tld/v2"
@@ -131,4 +132,42 @@ func TestApplyLocalTargetUsesDataDirFlag(t *testing.T) {
 	}
 	defer func() { _ = sqliteStore.Legacy().Close() }()
 	assertCount(t, sqliteStore.DB(), "elements", 1)
+}
+
+func TestApplyLocalTargetPrintsServeCommandWhenServerIsStopped(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "service")
+
+	stdout, _, err := cmd.RunCmd(t, dir, "apply", "--force", "--target", "local", "--data-dir", dataDir)
+	if err != nil {
+		t.Fatalf("apply local: %v", err)
+	}
+	if !strings.Contains(stdout, "Target:") || !strings.Contains(stdout, "local") {
+		t.Fatalf("stdout %q does not contain local target", stdout)
+	}
+	if !strings.Contains(stdout, "Start app:") || !strings.Contains(stdout, "tld serve --data-dir "+dataDir) {
+		t.Fatalf("stdout %q does not contain serve command", stdout)
+	}
+}
+
+func TestApplyLocalTargetPrintsRunningServerURL(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "service")
+	if err := localserver.SaveProcessRegistry(localserver.ProcessRegistry{Processes: []localserver.ProcessRecord{
+		{Kind: localserver.ProcessKindServer, PID: os.Getpid(), DataDir: dataDir, Addr: "127.0.0.1:9999"},
+	}}); err != nil {
+		t.Fatalf("save process registry: %v", err)
+	}
+
+	stdout, _, err := cmd.RunCmd(t, dir, "apply", "--force", "--target", "local", "--data-dir", dataDir)
+	if err != nil {
+		t.Fatalf("apply local: %v", err)
+	}
+	if !strings.Contains(stdout, "Open app:") || !strings.Contains(stdout, "http://127.0.0.1:9999") {
+		t.Fatalf("stdout %q does not contain running server URL", stdout)
+	}
 }
