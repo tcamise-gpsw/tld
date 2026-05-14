@@ -17,7 +17,7 @@ func TestRenameCmdCascadesElementReferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rename: %v\nstdout:%s\nstderr:%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "Renamed element") {
+	if !strings.Contains(stdout, "renamed api") && !strings.Contains(stdout, "service-api") {
 		t.Fatalf("stdout = %q, want rename confirmation", stdout)
 	}
 

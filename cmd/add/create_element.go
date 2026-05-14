@@ -56,6 +56,7 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 					PositionY: positionY,
 				}},
 			}
+			validateAndWarnTechnology(cmd, technology)
 			if err := workspace.UpsertElement(*wdir, r, spec); err != nil {
 				if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
 					return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "add", err)

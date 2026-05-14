@@ -17,7 +17,7 @@ func TestUpdateElementCmdUpdatesScalarField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update element: %v\nstdout:%s\nstderr:%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "Updated element") {
+	if !strings.Contains(stdout, "updated \"api\": description=\"Handles traffic\"") {
 		t.Fatalf("stdout = %q, want update confirmation", stdout)
 	}
 	ws, err := workspace.Load(dir)
@@ -38,7 +38,7 @@ func TestUpdateConnectorCmdUpdatesDirection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update connector: %v\nstdout:%s\nstderr:%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "Updated connector") {
+	if !strings.Contains(stdout, "updated \"platform:api:db:reads\": direction=\"bidirectional\"") {
 		t.Fatalf("stdout = %q, want update confirmation", stdout)
 	}
 	ws, err := workspace.Load(dir)

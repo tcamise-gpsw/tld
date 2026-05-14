@@ -2,10 +2,12 @@ package add
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
+	"github.com/mertcikla/tld/v2/internal/tech"
 	"github.com/mertcikla/tld/v2/internal/term"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
@@ -64,6 +66,7 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 					PositionY: positionY,
 				}},
 			}
+			validateAndWarnTechnology(cmd, technology)
 			if err := workspace.UpsertElement(*wdir, r, spec); err != nil {
 				if cmdutil.WantsJSON(*format) {
 					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "add", err)
@@ -108,4 +111,33 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 		return completion.ElementKinds(), cobra.ShellCompDirectiveNoFileComp
 	})
 	return c
+}
+
+func validateAndWarnTechnology(cmd *cobra.Command, technology string) {
+	if technology == "" {
+		return
+	}
+	missing := tech.Validate(technology)
+	for _, m := range missing {
+		suggestions := tech.SuggestSimilar(m, 5)
+		if len(suggestions) == 0 {
+			term.Warnf(cmd.OutOrStdout(), "Unknown technology %q", m)
+			continue
+		}
+		term.Warnf(cmd.OutOrStdout(), "Unknown technology %q. similar: %s?", m, joinQuoted(suggestions))
+	}
+}
+
+func joinQuoted(items []string) string {
+	quoted := make([]string, len(items))
+	for i, s := range items {
+		quoted[i] = `"` + s + `"`
+	}
+	if len(quoted) == 0 {
+		return ""
+	}
+	if len(quoted) == 1 {
+		return quoted[0]
+	}
+	return fmt.Sprintf("%s, %s", strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1])
 }

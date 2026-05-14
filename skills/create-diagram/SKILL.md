@@ -1,8 +1,18 @@
 ---
 name: create-diagram
-description: Create architecture diagrams from a codebase using the tld CLI. Use this skill whenever the user asks to diagram, map, or document their codebase or system architecture even if they don't mention "tld" or "diagram" explicitly. Trigger on phrases like "map my services", "document my architecture", "create a system diagram", "diagram this repo", "show how my code is structured", or any request to visually represent how a system's components fit together.
+description: Create architecture diagrams from a codebase using the tld CLI. Use this skill whenever the user asks to diagram, or map their codebase or system architecture. Trigger on phrases like "map my services", "document my architecture", "create a system diagram", "diagram this repo", "show how my code is structured", or any request to visually represent how a system's components fit together.
 allowed-tools: Bash(tld *), Write
 ---
+# Prerequisite: Install tld
+Check if tld is already installed:
+```bash
+tld --version
+```
+If not installed, run:
+```bash
+curl -LsSf https://tldiagram.com/install.sh | sh && tld --version
+```
+If you have any issues with installation, refer the user to https://github.com/Mertcikla/tld 
 
 ## How tld thinks about architecture
 

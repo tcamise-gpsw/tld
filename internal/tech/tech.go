@@ -78,6 +78,121 @@ func initializeCatalog() {
 	catalogSlugCache = slugCache
 }
 
+// scored holds a candidate match with its edit distance.
+type scored struct {
+	name     string
+	distance int
+}
+
+// SuggestSimilar finds the closest catalog matches for an unrecognized
+// technology label using edit distance. Returns up to maxResults suggestions.
+func SuggestSimilar(label string, maxResults int) []string {
+	catalogOnce.Do(initializeCatalog)
+
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	if normalized == "" {
+		return nil
+	}
+
+	var candidates []scored
+	seen := make(map[string]bool)
+
+	for key := range catalogCache {
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		dist := levenshtein(normalized, key, 3)
+		if dist < 0 {
+			continue
+		}
+		candidates = append(candidates, scored{name: key, distance: dist})
+	}
+
+	sortByDistance(candidates)
+
+	limit := len(candidates)
+	if limit > maxResults {
+		limit = maxResults
+	}
+	result := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		result = append(result, candidates[i].name)
+	}
+	return result
+}
+
+func sortByDistance(items []scored) {
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			if items[j].distance < items[i].distance ||
+				(items[j].distance == items[i].distance && len(items[j].name) < len(items[i].name)) {
+				items[i], items[j] = items[j], items[i]
+			}
+		}
+	}
+}
+
+func levenshtein(a, b string, maxDist int) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		if lb <= maxDist {
+			return lb
+		}
+		return -1
+	}
+	if lb == 0 {
+		if la <= maxDist {
+			return la
+		}
+		return -1
+	}
+
+	if la < lb {
+		a, b = b, a
+		la, lb = lb, la
+	}
+
+	prev := make([]int, lb+1)
+	curr := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+
+	for i := 1; i <= la; i++ {
+		curr[0] = i
+		minInRow := i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			subst := prev[j-1] + cost
+			ins := curr[j-1] + 1
+			del := prev[j] + 1
+			curr[j] = ins
+			if del < curr[j] {
+				curr[j] = del
+			}
+			if subst < curr[j] {
+				curr[j] = subst
+			}
+			if curr[j] < minInRow {
+				minInRow = curr[j]
+			}
+		}
+		if minInRow > maxDist {
+			return -1
+		}
+		prev, curr = curr, prev
+	}
+
+	if prev[lb] <= maxDist {
+		return prev[lb]
+	}
+	return -1
+}
+
 // Validate returns true if the technology string or any of its parts (if separated)
 // matches a known technology in the catalog.
 // It follows the separator logic: , / ;

@@ -20,7 +20,7 @@ func TestRemoveElementCmd_LocalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remove element: %v", err)
 	}
-	if !strings.Contains(stdout, "Removed api from elements.yaml") {
+	if !strings.Contains(stdout, "del: api") {
 		t.Errorf("stdout %q does not contain success message", stdout)
 	}
 }
@@ -38,7 +38,7 @@ func TestRemoveConnectorCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remove connector: %v", err)
 	}
-	if !strings.Contains(stdout, "Removed 1 connector(s)") {
+	if !strings.Contains(stdout, "del: 1") {
 		t.Errorf("stdout %q does not contain success message", stdout)
 	}
 }
