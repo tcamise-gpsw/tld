@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/internal/layout"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/mertcikla/tld/v2/pkg/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -475,6 +476,7 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 
 	elementIDs := make(map[string]int32, len(req.GetElements()))
 	viewIDs := map[string]int32{"root": rootViewID}
+	autoLayoutTargets := map[int64]map[int64]struct{}{}
 
 	for _, planned := range req.GetElements() {
 		if planned.GetRef() == "" {
@@ -583,6 +585,12 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 			if err != nil {
 				return nil, err
 			}
+			if placement.PositionX == nil && placement.PositionY == nil {
+				if autoLayoutTargets[int64(viewID)] == nil {
+					autoLayoutTargets[int64(viewID)] = map[int64]struct{}{}
+				}
+				autoLayoutTargets[int64(viewID)][int64(elementID)] = struct{}{}
+			}
 			if placement.VisibilityDelta != nil {
 				if _, err := a.Store.SetVisibilityOverride(ctx, int64(viewID), "element", int64(elementID), int(placement.GetVisibilityDelta())); err != nil {
 					return nil, err
@@ -664,7 +672,87 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 		}
 	}
 
+	layoutPositions, err := a.layoutPlanPlacements(ctx, autoLayoutTargets)
+	if err != nil {
+		return nil, err
+	}
+	for _, placement := range resp.CreatedPlacements {
+		if byElement, ok := layoutPositions[int64(placement.GetViewId())]; ok {
+			if pos, ok := byElement[int64(placement.GetElementId())]; ok {
+				placement.PositionX = pos.X
+				placement.PositionY = pos.Y
+			}
+		}
+	}
+
 	return resp, nil
+}
+
+func (a *APIAdapter) layoutPlanPlacements(ctx context.Context, targets map[int64]map[int64]struct{}) (map[int64]map[int64]layout.Placement, error) {
+	out := map[int64]map[int64]layout.Placement{}
+	for viewID, elementIDs := range targets {
+		if len(elementIDs) == 0 {
+			continue
+		}
+		positions, err := a.layoutPlanView(ctx, viewID, elementIDs)
+		if err != nil {
+			return nil, err
+		}
+		out[viewID] = positions
+	}
+	return out, nil
+}
+
+func (a *APIAdapter) layoutPlanView(ctx context.Context, viewID int64, targets map[int64]struct{}) (map[int64]layout.Placement, error) {
+	placements, err := a.planViewPlacementNodes(ctx, viewID)
+	if err != nil {
+		return nil, err
+	}
+	connectors, err := a.planViewLayoutConnectors(ctx, viewID)
+	if err != nil {
+		return nil, err
+	}
+	next := layout.LayoutPlacements(placements, targets, connectors, false)
+	for elementID, pos := range next {
+		if err := a.Store.legacy.UpdatePlacement(ctx, viewID, elementID, pos.X, pos.Y); err != nil {
+			return nil, err
+		}
+	}
+	return next, nil
+}
+
+func (a *APIAdapter) planViewPlacementNodes(ctx context.Context, viewID int64) ([]layout.Placement, error) {
+	rows, err := a.Store.legacy.DB().QueryContext(ctx, `SELECT element_id, position_x, position_y FROM placements WHERE view_id = ? ORDER BY id`, viewID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []layout.Placement
+	for rows.Next() {
+		var p layout.Placement
+		if err := rows.Scan(&p.ElementID, &p.X, &p.Y); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (a *APIAdapter) planViewLayoutConnectors(ctx context.Context, viewID int64) ([]layout.Connector, error) {
+	rows, err := a.Store.legacy.DB().QueryContext(ctx, `SELECT source_element_id, target_element_id FROM connectors WHERE view_id = ? ORDER BY id`, viewID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []layout.Connector
+	for rows.Next() {
+		var c layout.Connector
+		if err := rows.Scan(&c.Source, &c.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // PruneMissingCLIResources removes resources previously owned by CLI metadata

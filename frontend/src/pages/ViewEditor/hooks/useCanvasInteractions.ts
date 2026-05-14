@@ -1008,6 +1008,43 @@ export function useCanvasInteractions({
     document.addEventListener('pointercancel', up)
   }, [canEdit, clearHandleReconnectListeners, performReconnect, rfNodesRef, _rfEdgesRef, syncHandleReconnectDrag])
 
+  const stableOnReconnectPick = useCallback(async (targetElementId: number) => {
+    const picking = reconnectPickingRef.current
+    if (!canEdit || !picking) return false
+
+    const oldConnector = _rfEdgesRef.current.find((candidate) => candidate.id === String(picking.edgeId))
+    const pickedNode = rfNodesRef.current.find((node) => node.id === String(targetElementId))
+    if (!oldConnector || !pickedNode) return false
+
+    const fixedNodeId = picking.endpoint === 'source' ? oldConnector.target : oldConnector.source
+    if (fixedNodeId === pickedNode.id) return false
+    const fixedNode = rfNodesRef.current.find((node) => node.id === fixedNodeId)
+    if (!fixedNode) return false
+
+    const closest = picking.endpoint === 'source'
+      ? findClosestHandles(pickedNode, fixedNode)
+      : findClosestHandles(fixedNode, pickedNode)
+    const newConnection: Connection = picking.endpoint === 'source'
+      ? {
+        source: pickedNode.id,
+        sourceHandle: ensureVisualHandleId(closest.sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? closest.sourceHandle,
+        target: fixedNode.id,
+        targetHandle: ensureVisualHandleId(closest.targetHandle, DEFAULT_TARGET_HANDLE_SIDE) ?? closest.targetHandle,
+      }
+      : {
+        source: fixedNode.id,
+        sourceHandle: ensureVisualHandleId(closest.sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? closest.sourceHandle,
+        target: pickedNode.id,
+        targetHandle: ensureVisualHandleId(closest.targetHandle, DEFAULT_TARGET_HANDLE_SIDE) ?? closest.targetHandle,
+      }
+
+    reconnectPickingRef.current = null
+    setReconnectPicking(null)
+    setConnectorLongPressMenu(null)
+    await performReconnect(oldConnector, newConnection)
+    return true
+  }, [canEdit, _rfEdgesRef, performReconnect, rfNodesRef])
+
   // ── Click-connect ghost cursor tracking ────────────────────────────────────
   useEffect(() => {
     if (!clickConnectMode) {
@@ -1528,6 +1565,7 @@ export function useCanvasInteractions({
     stableOnConnectTo,
     stableOnInteractionStart,
     stableOnStartHandleReconnect,
+    stableOnReconnectPick,
     showAddingElementAt,
     // RF event handlers
     onNodesChange,

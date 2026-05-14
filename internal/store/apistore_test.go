@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"github.com/google/uuid"
 	assets "github.com/mertcikla/tld/v2"
 	"github.com/mertcikla/tld/v2/internal/app"
@@ -139,6 +140,81 @@ func TestGetViewsFiltersDirectChildrenByParentViewID(t *testing.T) {
 	}
 	if total != 1 || len(children) != 1 || children[0].GetId() != 21 {
 		t.Fatalf("nested children = total:%d views:%v, want only view 21", total, children)
+	}
+}
+
+func TestApplyPlanAutoLayoutsUnpositionedPlacements(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+
+	resp, err := NewAPIAdapter(sqliteStore).ApplyPlan(context.Background(), uuid.Nil, &diagv1.ApplyPlanRequest{
+		Elements: []*diagv1.PlanElement{
+			{Ref: "api", Name: "API", Placements: []*diagv1.PlanViewPlacement{{ParentRef: "root"}}},
+			{Ref: "db", Name: "DB", Placements: []*diagv1.PlanViewPlacement{{ParentRef: "root"}}},
+		},
+		Connectors: []*diagv1.PlanConnector{{
+			Ref:              "api-db",
+			ViewRef:          "root",
+			SourceElementRef: "api",
+			TargetElementRef: "db",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetCreatedPlacements()) != 2 {
+		t.Fatalf("created placements = %d, want 2", len(resp.GetCreatedPlacements()))
+	}
+	first := resp.GetCreatedPlacements()[0]
+	second := resp.GetCreatedPlacements()[1]
+	if first.GetPositionX() == second.GetPositionX() && first.GetPositionY() == second.GetPositionY() {
+		t.Fatalf("placements overlapped at (%v, %v)", first.GetPositionX(), first.GetPositionY())
+	}
+
+	rows, err := sqliteStore.DB().QueryContext(context.Background(), `SELECT position_x, position_y FROM placements ORDER BY element_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var positions [][2]float64
+	for rows.Next() {
+		var x, y float64
+		if err := rows.Scan(&x, &y); err != nil {
+			t.Fatal(err)
+		}
+		positions = append(positions, [2]float64{x, y})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(positions) != 2 || positions[0] == positions[1] {
+		t.Fatalf("stored positions = %v, want distinct layout positions", positions)
+	}
+}
+
+func TestApplyPlanPreservesExplicitPlacementCoordinates(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	x, y := 42.0, 84.0
+
+	resp, err := NewAPIAdapter(sqliteStore).ApplyPlan(context.Background(), uuid.Nil, &diagv1.ApplyPlanRequest{
+		Elements: []*diagv1.PlanElement{{
+			Ref:  "api",
+			Name: "API",
+			Placements: []*diagv1.PlanViewPlacement{{
+				ParentRef: "root",
+				PositionX: &x,
+				PositionY: &y,
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetCreatedPlacements()) != 1 {
+		t.Fatalf("created placements = %d, want 1", len(resp.GetCreatedPlacements()))
+	}
+	placement := resp.GetCreatedPlacements()[0]
+	if placement.GetPositionX() != x || placement.GetPositionY() != y {
+		t.Fatalf("placement = (%v, %v), want (%v, %v)", placement.GetPositionX(), placement.GetPositionY(), x, y)
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1533,23 +1532,13 @@ func (m *materializer) markNewPlacement(viewID, elementID int64) {
 }
 
 const (
-	watchLayoutNodeWidth        = 140.0
-	watchLayoutNodeHeight       = 80.0
-	watchLayoutGapX             = 260.0
-	watchLayoutGapY             = 170.0
-	watchLayoutMaxRowsPerColumn = 6
+	watchLayoutGapX             = layout.PlacementGapX
+	watchLayoutGapY             = layout.PlacementGapY
+	watchLayoutMaxRowsPerColumn = layout.PlacementMaxRowsPerColumn
 )
 
-type watchPlacementNode struct {
-	ElementID int64
-	X         float64
-	Y         float64
-}
-
-type watchLayoutConnector struct {
-	Source int64
-	Target int64
-}
+type watchPlacementNode = layout.Placement
+type watchLayoutConnector = layout.Connector
 
 func (m *materializer) layoutPlacements(ctx context.Context) error {
 	targets := m.newPlacements
@@ -1605,46 +1594,14 @@ func (m *materializer) layoutView(ctx context.Context, viewID int64, targets map
 	if err != nil {
 		return err
 	}
-	if force || hasNoPreservedPlacements(placements, targets) {
-		next := organicWatchLayout(targets, connectors)
-		for _, elementID := range sortedInt64Set(targets) {
-			pos := next[elementID]
-			if _, err := m.store.db.ExecContext(ctx, `UPDATE placements SET position_x = ?, position_y = ?, updated_at = ? WHERE view_id = ? AND element_id = ?`, pos.X, pos.Y, nowString(), viewID, elementID); err != nil {
-				return err
-			}
-		}
-		_ = placements // already committed; kept for potential future collision pass
-		return nil
-	}
-
-	positioned := map[int64]watchPlacementNode{}
-	for _, p := range placements {
-		if _, isNew := targets[p.ElementID]; !isNew {
-			positioned[p.ElementID] = p
-		}
-	}
-	occupied := occupiedWatchCells(placements, targets)
-	for _, elementID := range sortedInt64Set(targets) {
-		x, y := bestIncrementalWatchPosition(elementID, positioned, occupied, connectors)
-		occupied[watchCellKey(x, y)] = struct{}{}
-		positioned[elementID] = watchPlacementNode{ElementID: elementID, X: x, Y: y}
-		if _, err := m.store.db.ExecContext(ctx, `UPDATE placements SET position_x = ?, position_y = ?, updated_at = ? WHERE view_id = ? AND element_id = ?`, x, y, nowString(), viewID, elementID); err != nil {
+	next := layout.LayoutPlacements(placements, targets, connectors, force)
+	for _, elementID := range layout.SortedInt64Set(targets) {
+		pos := next[elementID]
+		if _, err := m.store.db.ExecContext(ctx, `UPDATE placements SET position_x = ?, position_y = ?, updated_at = ? WHERE view_id = ? AND element_id = ?`, pos.X, pos.Y, nowString(), viewID, elementID); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func hasNoPreservedPlacements(placements []watchPlacementNode, targets map[int64]struct{}) bool {
-	if len(targets) == 0 {
-		return false
-	}
-	for _, p := range placements {
-		if _, isTarget := targets[p.ElementID]; !isTarget {
-			return false
-		}
-	}
-	return true
 }
 
 func (m *materializer) viewPlacementNodes(ctx context.Context, viewID int64) ([]watchPlacementNode, error) {
@@ -1679,308 +1636,6 @@ func (m *materializer) viewLayoutConnectors(ctx context.Context, viewID int64) (
 		out = append(out, c)
 	}
 	return out, rows.Err()
-}
-
-// organicWatchLayout runs the force-directed OrganicLayout on the target element
-// set, using only the connectors that exist between those targets.
-// It returns a position map keyed by element ID.
-func organicWatchLayout(targets map[int64]struct{}, connectors []watchLayoutConnector) map[int64]watchPlacementNode {
-	// Build layout nodes.
-	nodeByID := make(map[int64]*layout.Node, len(targets))
-	nodes := make([]*layout.Node, 0, len(targets))
-	for id := range targets {
-		n := &layout.Node{ID: id}
-		nodeByID[id] = n
-		nodes = append(nodes, n)
-	}
-
-	// Build layout edges (only between targets).
-	var edges []*layout.Edge
-	for _, c := range connectors {
-		src, srcOK := nodeByID[c.Source]
-		tgt, tgtOK := nodeByID[c.Target]
-		if srcOK && tgtOK {
-			edges = append(edges, &layout.Edge{Source: src, Target: tgt})
-		}
-	}
-
-	layout.OrganicLayout(nodes, edges)
-	applyDirectedWatchLevels(nodes, connectors, targets)
-
-	out := make(map[int64]watchPlacementNode, len(nodes))
-	for _, n := range nodes {
-		out[n.ID] = watchPlacementNode{ElementID: n.ID, X: n.X, Y: n.Y}
-	}
-	return out
-}
-
-func applyDirectedWatchLevels(nodes []*layout.Node, connectors []watchLayoutConnector, targets map[int64]struct{}) {
-	if len(nodes) == 0 {
-		return
-	}
-	level := directedWatchLevels(targets, connectors)
-	maxLevel := 0
-	for _, value := range level {
-		if value > maxLevel {
-			maxLevel = value
-		}
-	}
-	if maxLevel == 0 {
-		sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
-		for i, n := range nodes {
-			n.X = float64(i/watchLayoutMaxRowsPerColumn) * watchLayoutGapX
-			n.Y = float64(i%watchLayoutMaxRowsPerColumn) * watchLayoutGapY
-		}
-		return
-	}
-	nodesByLevel := map[int][]*layout.Node{}
-	for _, n := range nodes {
-		nodesByLevel[level[n.ID]] = append(nodesByLevel[level[n.ID]], n)
-	}
-	nextCol := 0
-	for _, col := range sortedLayoutNodeLevels(nodesByLevel) {
-		group := nodesByLevel[col]
-		sort.Slice(group, func(i, j int) bool {
-			if group[i].Y == group[j].Y {
-				return group[i].ID < group[j].ID
-			}
-			return group[i].Y < group[j].Y
-		})
-		for row, n := range group {
-			n.X = float64(nextCol+row/watchLayoutMaxRowsPerColumn) * watchLayoutGapX
-			n.Y = float64(row%watchLayoutMaxRowsPerColumn) * watchLayoutGapY
-		}
-		nextCol += max(1, (len(group)+watchLayoutMaxRowsPerColumn-1)/watchLayoutMaxRowsPerColumn)
-	}
-}
-
-func directedWatchLevels(targets map[int64]struct{}, connectors []watchLayoutConnector) map[int64]int {
-	level := map[int64]int{}
-	for id := range targets {
-		level[id] = 0
-	}
-	for i := 0; i < len(targets); i++ {
-		changed := false
-		for _, c := range connectors {
-			if _, ok := targets[c.Source]; !ok {
-				continue
-			}
-			if _, ok := targets[c.Target]; !ok {
-				continue
-			}
-			if level[c.Source] >= len(targets)-1 {
-				continue
-			}
-			next := level[c.Source] + 1
-			if level[c.Target] < next {
-				level[c.Target] = next
-				changed = true
-			}
-		}
-		if !changed {
-			break
-		}
-	}
-	for id, value := range level {
-		if value >= len(targets) {
-			level[id] = 0
-		}
-	}
-	return level
-}
-
-func sortedLayoutNodeLevels(values map[int][]*layout.Node) []int {
-	out := make([]int, 0, len(values))
-	for value := range values {
-		out = append(out, value)
-	}
-	sort.Ints(out)
-	return out
-}
-
-func bestIncrementalWatchPosition(elementID int64, positioned map[int64]watchPlacementNode, occupied map[string]struct{}, connectors []watchLayoutConnector) (float64, float64) {
-	candidates := watchLayoutCandidates(positioned)
-	bestX, bestY := 0.0, 0.0
-	bestScore := math.Inf(1)
-	for _, candidate := range candidates {
-		if _, blocked := occupied[watchCellKey(candidate.X, candidate.Y)]; blocked {
-			continue
-		}
-		score := incrementalWatchScore(elementID, candidate, positioned, connectors)
-		if score < bestScore {
-			bestScore = score
-			bestX, bestY = candidate.X, candidate.Y
-		}
-	}
-	if math.IsInf(bestScore, 1) {
-		return nearestFreeWatchCell(0, 0, occupied)
-	}
-	return bestX, bestY
-}
-
-func incrementalWatchScore(elementID int64, candidate watchPlacementNode, positioned map[int64]watchPlacementNode, connectors []watchLayoutConnector) float64 {
-	score := math.Abs(candidate.X)*0.01 + math.Abs(candidate.Y)*0.01
-	candidateEdges := [][2]watchPlacementNode{}
-	existingEdges := [][2]watchPlacementNode{}
-	for _, c := range connectors {
-		source, sourceOK := positioned[c.Source]
-		target, targetOK := positioned[c.Target]
-		if c.Source == elementID {
-			source, sourceOK = candidate, true
-		}
-		if c.Target == elementID {
-			target, targetOK = candidate, true
-		}
-		if sourceOK && targetOK {
-			edge := [2]watchPlacementNode{source, target}
-			if c.Source == elementID || c.Target == elementID {
-				candidateEdges = append(candidateEdges, edge)
-				score += watchDistance(source, target)
-			} else {
-				existingEdges = append(existingEdges, edge)
-			}
-		}
-	}
-	if len(candidateEdges) == 0 {
-		return score + nearestWatchNeighborDistance(candidate, positioned)
-	}
-	for _, candidateEdge := range candidateEdges {
-		for _, existingEdge := range existingEdges {
-			if candidateEdge[0].ElementID == existingEdge[0].ElementID || candidateEdge[0].ElementID == existingEdge[1].ElementID ||
-				candidateEdge[1].ElementID == existingEdge[0].ElementID || candidateEdge[1].ElementID == existingEdge[1].ElementID {
-				continue
-			}
-			if watchSegmentsIntersect(candidateEdge[0], candidateEdge[1], existingEdge[0], existingEdge[1]) {
-				score += 10000
-			}
-		}
-	}
-	return score
-}
-
-func watchLayoutCandidates(positioned map[int64]watchPlacementNode) []watchPlacementNode {
-	minCol, maxCol, minRow, maxRow := 0, 4, 0, 3
-	if len(positioned) > 0 {
-		minCol, maxCol, minRow, maxRow = math.MaxInt, math.MinInt, math.MaxInt, math.MinInt
-		for _, p := range positioned {
-			col := int(math.Round(p.X / watchLayoutGapX))
-			row := int(math.Round(p.Y / watchLayoutGapY))
-			if col < minCol {
-				minCol = col
-			}
-			if col > maxCol {
-				maxCol = col
-			}
-			if row < minRow {
-				minRow = row
-			}
-			if row > maxRow {
-				maxRow = row
-			}
-		}
-		minCol--
-		maxCol += 2
-		minRow--
-		maxRow += 2
-	}
-	out := make([]watchPlacementNode, 0, (maxCol-minCol+1)*(maxRow-minRow+1))
-	for col := minCol; col <= maxCol; col++ {
-		for row := minRow; row <= maxRow; row++ {
-			out = append(out, watchPlacementNode{X: float64(col) * watchLayoutGapX, Y: float64(row) * watchLayoutGapY})
-		}
-	}
-	return out
-}
-
-func occupiedWatchCells(placements []watchPlacementNode, ignored map[int64]struct{}) map[string]struct{} {
-	occupied := map[string]struct{}{}
-	for _, p := range placements {
-		if _, ok := ignored[p.ElementID]; ok {
-			continue
-		}
-		occupied[watchCellKey(p.X, p.Y)] = struct{}{}
-	}
-	return occupied
-}
-
-func nearestFreeWatchCell(x, y float64, occupied map[string]struct{}) (float64, float64) {
-	baseCol := int(math.Round(x / watchLayoutGapX))
-	baseRow := int(math.Round(y / watchLayoutGapY))
-	for radius := range 200 {
-		for col := baseCol - radius; col <= baseCol+radius; col++ {
-			for row := baseRow - radius; row <= baseRow+radius; row++ {
-				if watchAbsInt(col-baseCol) != radius && watchAbsInt(row-baseRow) != radius {
-					continue
-				}
-				nx, ny := float64(col)*watchLayoutGapX, float64(row)*watchLayoutGapY
-				if _, ok := occupied[watchCellKey(nx, ny)]; !ok {
-					return nx, ny
-				}
-			}
-		}
-	}
-	return x, y
-}
-
-func watchCellKey(x, y float64) string {
-	return fmt.Sprintf("%d:%d", int(math.Round(x/watchLayoutGapX)), int(math.Round(y/watchLayoutGapY)))
-}
-
-func watchDistance(a, b watchPlacementNode) float64 {
-	return math.Hypot(a.X-b.X, a.Y-b.Y)
-}
-
-func nearestWatchNeighborDistance(candidate watchPlacementNode, positioned map[int64]watchPlacementNode) float64 {
-	if len(positioned) == 0 {
-		return 0
-	}
-	best := math.Inf(1)
-	for _, p := range positioned {
-		if d := watchDistance(candidate, p); d < best {
-			best = d
-		}
-	}
-	return best
-}
-
-func watchCenter(p watchPlacementNode) (float64, float64) {
-	return p.X + watchLayoutNodeWidth/2, p.Y + watchLayoutNodeHeight/2
-}
-
-func watchSegmentsIntersect(a, b, c, d watchPlacementNode) bool {
-	ax, ay := watchCenter(a)
-	bx, by := watchCenter(b)
-	cx, cy := watchCenter(c)
-	dx, dy := watchCenter(d)
-	return segmentOrientation(ax, ay, cx, cy, dx, dy) != segmentOrientation(bx, by, cx, cy, dx, dy) &&
-		segmentOrientation(ax, ay, bx, by, cx, cy) != segmentOrientation(ax, ay, bx, by, dx, dy)
-}
-
-func segmentOrientation(ax, ay, bx, by, cx, cy float64) int {
-	value := (by-ay)*(cx-bx) - (bx-ax)*(cy-by)
-	if math.Abs(value) < 0.000001 {
-		return 0
-	}
-	if value > 0 {
-		return 1
-	}
-	return -1
-}
-
-func sortedInt64Set(values map[int64]struct{}) []int64 {
-	out := make([]int64, 0, len(values))
-	for value := range values {
-		out = append(out, value)
-	}
-	slices.Sort(out)
-	return out
-}
-
-func watchAbsInt(value int) int {
-	if value < 0 {
-		return -value
-	}
-	return value
 }
 
 type filePairReference struct {

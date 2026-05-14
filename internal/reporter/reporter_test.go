@@ -66,10 +66,10 @@ func TestRenderExecutionMarkdown_SummaryTable(t *testing.T) {
 	if !strings.Contains(out, "## Planned vs Created") {
 		t.Errorf("missing summary section: %q", out)
 	}
-	if !strings.Contains(out, "| Elements | 3 | 3 |") {
+	if !strings.Contains(out, "| Elements   | 3      | 3      |") {
 		t.Errorf("wrong element count: %q", out)
 	}
-	if !strings.Contains(out, "| Views | 2 | 2 |") {
+	if !strings.Contains(out, "| Views      | 2      | 2      |") {
 		t.Errorf("wrong view count: %q", out)
 	}
 }

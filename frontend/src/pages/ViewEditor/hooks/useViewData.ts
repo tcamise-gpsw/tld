@@ -227,7 +227,13 @@ export function useViewData({
       queryFn: () => api.workspace.views.treeAround(viewId, { ancestorLevels: 2, descendantLevels: 2 }),
       staleTime: 0,
     }).catch(() => null)
-    if (tree) useStore.getState().setTreeData(tree)
+    if (tree) {
+      const links = buildViewContentLinks(tree, viewId, viewElementsRef.current)
+      useStore.getState().setTreeData(tree)
+      useStore.getState().setLinksMap(links.linksMap)
+      useStore.getState().setParentLinksMap(links.parentLinksMap)
+      useStore.getState().setIncomingLinks(links.incomingLinks)
+    }
   }, [queryClient, viewId])
 
   // ── Fetch view content ──────────────────────────────────────────────────
@@ -281,8 +287,12 @@ export function useViewData({
     if (fresh) {
       setViewElements(fresh.placements)
       setConnectors(fresh.connectors)
+      const links = buildViewContentLinks(treeDataRef.current, viewId, fresh.placements)
+      setLinksMap(links.linksMap)
+      setParentLinksMap(links.parentLinksMap)
+      useStore.getState().setIncomingLinks(links.incomingLinks)
     }
-  }, [queryClient, setConnectors, setViewElements, viewId])
+  }, [queryClient, setConnectors, setLinksMap, setParentLinksMap, setViewElements, viewId])
 
   // ── Element mutation helpers ───────────────────────────────────────────────
   const handleElementDeleted = useCallback((deletedId: number) => {

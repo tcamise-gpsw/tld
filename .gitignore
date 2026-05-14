@@ -7,3 +7,5 @@ frontend/*.tgz
 .claude/skills/impeccable
 skills-lock.json
 .DS_Store
+.tld/
+diagram.sh

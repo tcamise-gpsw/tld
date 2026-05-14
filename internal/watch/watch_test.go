@@ -20,6 +20,7 @@ import (
 
 	"github.com/mertcikla/tld/v2/internal/analyzer"
 	tldgit "github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/layout"
 	"github.com/mertcikla/tld/v2/internal/watch/enrich"
 	"github.com/mertcikla/tld/v2/internal/watch/enrich/defaults"
 	sqlitevec "github.com/viant/sqlite-vec/vec"
@@ -2864,7 +2865,7 @@ func TestOrganicWatchLayoutCapsRowsPerColumnWithinDirectedLevels(t *testing.T) {
 	for id := int64(1); id <= int64(watchLayoutMaxRowsPerColumn+5); id++ {
 		targets[id] = struct{}{}
 	}
-	positions := organicWatchLayout(targets, []watchLayoutConnector{{Source: 1, Target: int64(watchLayoutMaxRowsPerColumn + 5)}})
+	positions := layout.OrganicPlacementLayout(targets, []layout.Connector{{Source: 1, Target: int64(watchLayoutMaxRowsPerColumn + 5)}})
 
 	rowsByColumn := map[int]int{}
 	for _, position := range positions {

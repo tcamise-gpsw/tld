@@ -485,6 +485,7 @@ function ViewEditorInner({
   const stableOnConnectToRef = useRef<(targetElementId: number) => Promise<void>>(async () => { })
   const stableOnInteractionStartRef = useRef<(elementId: number, options?: { sourceHandle?: string; clientX?: number; clientY?: number }) => void>(() => { })
   const stableOnStartHandleReconnectRef = useRef<(args: { edgeId: string; endpoint: 'source' | 'target'; handleId: string; clientX: number; clientY: number }) => void>(() => { })
+  const stableOnReconnectPickRef = useRef<(targetElementId: number) => Promise<boolean>>(async () => false)
 
   // ── Drawing engine ────────────────────────────────────────────────────────
   const drawing = useDrawingEngine(viewId)
@@ -518,18 +519,21 @@ function ViewEditorInner({
     stableOnZoomOut: useCallback(async (id: number) => { await stableOnZoomOutRef.current(id) }, []),
     stableOnNavigateToView: useCallback((id: number) => { stableOnNavigateToViewRef.current(id) }, []),
     stableOnSelect: useCallback((obj: PlacedElement) => {
-      setSelectedEdge(null)
-      setSelectedProxyConnectorDetails(null)
-      closeProxyConnectorPanelRef.current()
-      closeConnectorPanelRef.current()
-      setSelectedElement({
-        id: obj.element_id, name: obj.name, description: obj.description, kind: obj.kind,
-        technology: obj.technology, url: obj.url, logo_url: obj.logo_url,
-        technology_connectors: obj.technology_connectors, tags: obj.tags, repo: obj.repo,
-        branch: obj.branch, file_path: obj.file_path, language: obj.language,
-        created_at: '', updated_at: '', has_view: false, view_label: null,
+      void stableOnReconnectPickRef.current(obj.element_id).then((handled) => {
+        if (handled) return
+        setSelectedEdge(null)
+        setSelectedProxyConnectorDetails(null)
+        closeProxyConnectorPanelRef.current()
+        closeConnectorPanelRef.current()
+        setSelectedElement({
+          id: obj.element_id, name: obj.name, description: obj.description, kind: obj.kind,
+          technology: obj.technology, url: obj.url, logo_url: obj.logo_url,
+          technology_connectors: obj.technology_connectors, tags: obj.tags, repo: obj.repo,
+          branch: obj.branch, file_path: obj.file_path, language: obj.language,
+          created_at: '', updated_at: '', has_view: false, view_label: null,
+        })
+        openElementPanelRef.current()
       })
-      openElementPanelRef.current()
     }, []),
     stableOnOpenCodePreview: useCallback((elementId: number) => {
       const obj = previewViewElementsRef.current.find((o) => o.element_id === elementId)
@@ -1052,7 +1056,8 @@ function ViewEditorInner({
     stableOnConnectToRef.current = canvas.stableOnConnectTo
     stableOnInteractionStartRef.current = canvas.stableOnInteractionStart
     stableOnStartHandleReconnectRef.current = canvas.stableOnStartHandleReconnect
-  }, [canvas.stableOnZoomIn, canvas.stableOnZoomOut, canvas.stableOnNavigateToView, canvas.stableOnRemoveElement, canvas.stableOnConnectTo, canvas.stableOnInteractionStart, canvas.stableOnStartHandleReconnect])
+    stableOnReconnectPickRef.current = canvas.stableOnReconnectPick
+  }, [canvas.stableOnZoomIn, canvas.stableOnZoomOut, canvas.stableOnNavigateToView, canvas.stableOnRemoveElement, canvas.stableOnConnectTo, canvas.stableOnInteractionStart, canvas.stableOnStartHandleReconnect, canvas.stableOnReconnectPick])
   const viewName = view?.name ?? null
 
   const [expandedAncestorGroups, setExpandedAncestorGroups] = useState<Set<string>>(new Set())
@@ -1780,7 +1785,7 @@ function ViewEditorInner({
               menu={connectorLongPressMenu}
               onEdit={(edgeId) => { const connector = connectors.find((e) => e.id === edgeId); if (connector) { setSelectedEdge(connector); connectorPanel.onOpen() }; setConnectorLongPressMenu(null) }}
               onMoveSource={(edgeId) => { const picking = { edgeId, endpoint: 'source' as const }; reconnectPickingRef.current = picking; setReconnectPicking(picking); setConnectorLongPressMenu(null) }}
-              onMoveTarget={(edgeId) => { const picking = { edgeId, endpoint: 'target' as const }; reconnectPickingRef.current = picking; setConnectorLongPressMenu(null) }}
+              onMoveTarget={(edgeId) => { const picking = { edgeId, endpoint: 'target' as const }; reconnectPickingRef.current = picking; setReconnectPicking(picking); setConnectorLongPressMenu(null) }}
               onDelete={async (edgeId) => {
                 setConnectorLongPressMenu(null)
                 if (!viewId) return
