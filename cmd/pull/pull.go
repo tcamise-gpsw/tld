@@ -80,7 +80,7 @@ you before overwriting them. Use --force to skip the prompt.`,
 
 			if dryRun {
 				term.Infof(cmd.OutOrStdout(), "Would pull: %d elements, %d diagrams, %d connectors",
-					len(newWS.Elements), cmdutil.CountElementDiagrams(newWS), len(newWS.Connectors))
+					len(newWS.Elements), cmdutil.CountViews(newWS), len(newWS.Connectors))
 				return nil
 			}
 
@@ -114,18 +114,18 @@ you before overwriting them. Use --force to skip the prompt.`,
 			versionID := fmt.Sprintf("pull-%s", time.Now().UTC().Format(time.RFC3339))
 			workspace.UpdateLockFile(lockFile, versionID, "pull", &workspace.ResourceCounts{
 				Elements:   len(newWS.Elements),
-				Views:      cmdutil.CountElementDiagrams(newWS),
+				Views:      cmdutil.CountViews(newWS),
 				Connectors: len(newWS.Connectors),
 			}, hash, nil, newWS.Meta)
 			lockFile.Resources.Elements = len(newWS.Elements)
-			lockFile.Resources.Views = cmdutil.CountElementDiagrams(newWS)
+			lockFile.Resources.Views = cmdutil.CountViews(newWS)
 			lockFile.Resources.Connectors = len(newWS.Connectors)
 			if err := workspace.WriteLockFile(*wdir, lockFile); err != nil {
 				return fmt.Errorf("write lock file: %w", err)
 			}
 
 			term.Successf(cmd.OutOrStdout(), "Pulled %d elements, %d diagrams, %d connectors",
-				len(newWS.Elements), cmdutil.CountElementDiagrams(newWS), len(newWS.Connectors))
+				len(newWS.Elements), cmdutil.CountViews(newWS), len(newWS.Connectors))
 
 			return nil
 		},

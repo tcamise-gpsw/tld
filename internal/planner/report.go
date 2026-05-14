@@ -17,7 +17,7 @@ func RenderPlanMarkdown(w io.Writer, plan *Plan, ws *workspace.Workspace, verbos
 
 func renderElementPlanMarkdown(w io.Writer, plan *Plan, ws *workspace.Workspace, verbose bool) {
 	summary := summarizePlanActions(ws)
-	_, _ = fmt.Fprintf(w, "Plan: %d to create (+), %d to update (~), %d to delete (-)\n\n", summary.created, summary.updated, summary.deleted)
+	_, _ = fmt.Fprintf(w, "Plan: +%d ~%d -%d\n\n", summary.created, summary.updated, summary.deleted)
 	_, _ = fmt.Fprintln(w, "# Element Plan")
 	_, _ = fmt.Fprintln(w)
 
@@ -36,7 +36,6 @@ func renderElementPlanMarkdown(w io.Writer, plan *Plan, ws *workspace.Workspace,
 	}
 
 	if !verbose {
-		_, _ = fmt.Fprintln(w, "Use '-v' or '--verbose' for detailed element placement and connector reporting.")
 		_, _ = fmt.Fprintln(w)
 	}
 

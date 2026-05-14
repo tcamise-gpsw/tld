@@ -62,13 +62,14 @@ in full detail with individual element and connector information.`,
 				}
 				return fmt.Errorf("%d symbol verification error(s)", len(broken))
 			}
-			term.Success(cmd.OutOrStdout(), "Symbol verification passed")
 
 			if len(ws.Elements) > 0 || len(ws.Connectors) > 0 {
-				diagramCount := cmdutil.CountElementDiagrams(ws)
-				term.Successf(cmd.OutOrStdout(), "Workspace valid: %d elements, %d diagrams, %d connectors",
-					len(ws.Elements), diagramCount, len(ws.Connectors))
+				viewCount := cmdutil.CountViews(ws)
+				term.Successf(cmd.OutOrStdout(), "Workspace valid: %d elements, %d views, %d connectors",
+					len(ws.Elements), viewCount, len(ws.Connectors))
 				term.Hint(cmd.OutOrStdout(), "Run 'tld plan' to see what would be applied.")
+			} else {
+				term.Warnf(cmd.OutOrStdout(), "nothing to validate")
 			}
 
 			warnings := planner.AnalyzePlan(ws)
@@ -97,7 +98,7 @@ func printWarningSummary(cmd *cobra.Command, ws *workspace.Workspace, warnings [
 	}
 	levelNames := map[int]string{1: "Minimal", 2: "Standard", 3: "Strict"}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n## Architectural Warnings (Level %d: %s)\n\n", level, levelNames[level])
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "The following architectural warnings were detected based on the current workspace configuration. These warnings indicate potential design issues or anti-patterns that may affect the maintainability, scalability, or performance of your system. Please review each warning and consider applying the suggested mediations to improve your architecture.\n\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Issues found in workspace that may affect the visibility and usability of your diagrams. Consider applying the suggested mediations to improve your diagrams.\n\n")
 	for _, wg := range warnings {
 		if verbose {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n%s\n", wg.RuleCode, wg.RuleName, wg.Mediation)

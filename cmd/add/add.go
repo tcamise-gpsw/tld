@@ -76,7 +76,6 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "add", "add", r)
 			}
 			term.Successf(cmd.OutOrStdout(), "add: %s", r)
-			term.Hint(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}

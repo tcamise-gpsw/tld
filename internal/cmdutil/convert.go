@@ -140,7 +140,7 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 	return newWS
 }
 
-func CountElementDiagrams(ws *workspace.Workspace) int {
+func CountViews(ws *workspace.Workspace) int {
 	count := 0
 	for _, element := range ws.Elements {
 		if element.HasView {

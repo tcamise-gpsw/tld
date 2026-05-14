@@ -67,7 +67,6 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "add", "add", r)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated elements.yaml (upserted %s)\n", r)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to push to cloud.")
 			return nil
 		},
 	}

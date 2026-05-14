@@ -49,7 +49,6 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "remove element", "remove", ref)
 			}
 			term.Successf(cmd.OutOrStdout(), "del: %s", ref)
-			term.Hint(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}
@@ -81,7 +80,6 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 				term.Info(cmd.OutOrStdout(), "No matching connectors found — nothing removed.")
 			} else {
 				term.Successf(cmd.OutOrStdout(), "del: %d", n)
-				term.Hint(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to apply it to the database.")
 			}
 			return nil
 		},

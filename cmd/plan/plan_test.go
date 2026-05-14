@@ -45,9 +45,6 @@ func TestPlanCmd_VerboseFlag(t *testing.T) {
 	if strings.Contains(stdout, "## Elements") {
 		t.Errorf("stdout contains verbose section when it shouldn't: %q", stdout)
 	}
-	if !strings.Contains(stdout, "Use '-v' or '--verbose' for detailed element placement and connector reporting") {
-		t.Errorf("stdout missing verbose hint: %q", stdout)
-	}
 
 	// With verbose
 	stdout, _, err = cmd.RunCmd(t, dir, "plan", "-v")

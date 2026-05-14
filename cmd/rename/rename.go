@@ -32,7 +32,6 @@ func NewRenameCmd(wdir *string) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "rename", "rename", fmt.Sprintf("%s -> %s", from, to))
 			}
 			term.Successf(cmd.OutOrStdout(), "renamed %s → %s", from, to)
-			term.Hint(cmd.OutOrStdout(), "Change recorded locally in YAML. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}

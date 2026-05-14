@@ -61,7 +61,6 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "connect", "connect", fmt.Sprintf("%s:%s", from, to))
 			}
 			term.Successf(cmd.OutOrStdout(), "ok")
-			term.Hint(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}

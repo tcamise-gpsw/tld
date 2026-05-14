@@ -59,7 +59,6 @@ func NewConnectElementsCmd(wdir *string) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "connect", "connect", fmt.Sprintf("%s:%s", from, to))
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Appended connector %s -> %s in view %s to connectors.yaml\n", from, to, view)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to push to cloud.")
 			return nil
 		},
 	}

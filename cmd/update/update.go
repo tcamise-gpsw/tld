@@ -101,7 +101,6 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update element", "update", ref)
 			}
 			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
-			term.Hint(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}
@@ -139,7 +138,6 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update connector", "update", ref)
 			}
 			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
-			term.Hint(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}
