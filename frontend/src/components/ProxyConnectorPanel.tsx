@@ -6,6 +6,7 @@ import PanelHeader from './PanelHeader'
 import { ChevronRightIcon, NavigationIcon, TrashIcon, EditIcon } from './Icons'
 import { useViewEditorContext } from '../pages/ViewEditor/context'
 import type { Connector } from '../types'
+import { truncate } from '../utils/string'
 
 interface Props {
   isOpen: boolean
@@ -83,11 +84,11 @@ export default function ProxyConnectorPanel({
                           <VStack align="start" spacing={1} flex={1}>
                             <HStack spacing={2}>
                               <Text color="white" fontSize="sm" fontWeight="semibold" isTruncated>
-                                {leaf.source.actualElementName}
+                                {truncate(leaf.source.actualElementName)}
                               </Text>
                               <Icon as={ChevronRightIcon} color="whiteAlpha.400" />
                               <Text color="white" fontSize="sm" fontWeight="semibold" isTruncated>
-                                {leaf.target.actualElementName}
+                                {truncate(leaf.target.actualElementName)}
                               </Text>
                             </HStack>
 
