@@ -13,54 +13,34 @@ const (
 	StyleUnderlineGreenURL = ColorGreen + ColorUnderline
 )
 
-// Styled icon prefixes.
-const (
-	iconSuccess = "✓"
-	iconInfo    = "→"
-	iconWarn    = "!"
-	iconFail    = "✗"
-)
-
-// Success prints a green "✓ <msg>" line.
 func Success(w io.Writer, msg string) {
-	prefix := Colorize(w, ColorGreen, iconSuccess)
-	_, _ = fmt.Fprintf(w, "%s %s\n", prefix, msg)
+	_, _ = fmt.Fprintf(w, "%s\n", msg)
 }
 
-// Successf prints a green "✓ <formatted msg>" line.
 func Successf(w io.Writer, format string, args ...any) {
 	Success(w, fmt.Sprintf(format, args...))
 }
 
-// Info prints a cyan "→ <msg>" line.
 func Info(w io.Writer, msg string) {
-	prefix := Colorize(w, ColorCyan, iconInfo)
-	_, _ = fmt.Fprintf(w, "%s %s\n", prefix, msg)
+	_, _ = fmt.Fprintf(w, "%s\n", msg)
 }
 
-// Infof prints a cyan "→ <formatted msg>" line.
 func Infof(w io.Writer, format string, args ...any) {
 	Info(w, fmt.Sprintf(format, args...))
 }
 
-// Warn prints a yellow "! <msg>" line.
 func Warn(w io.Writer, msg string) {
-	prefix := Colorize(w, ColorYellow, iconWarn)
-	_, _ = fmt.Fprintf(w, "%s %s\n", prefix, msg)
+	_, _ = fmt.Fprintf(w, "%s \n", msg)
 }
 
-// Warnf prints a yellow "! <formatted msg>" line.
 func Warnf(w io.Writer, format string, args ...any) {
 	Warn(w, fmt.Sprintf(format, args...))
 }
 
-// Fail prints a red "✗ <msg>" line.
 func Fail(w io.Writer, msg string) {
-	prefix := Colorize(w, ColorRed, iconFail)
-	_, _ = fmt.Fprintf(w, "%s %s\n", prefix, msg)
+	_, _ = fmt.Fprintf(w, "%s \n", msg)
 }
 
-// Failf prints a red "✗ <formatted msg>" line.
 func Failf(w io.Writer, format string, args ...any) {
 	Fail(w, fmt.Sprintf(format, args...))
 }

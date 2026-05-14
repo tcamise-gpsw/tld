@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/planner"
@@ -10,14 +11,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var allWarningCodes = map[string]bool{
+	"ARC001": true, "ARC002": true, "ARC003": true, "ARC004": true,
+	"ARC005": true, "ARC006": true, "ARC007": true,
+	"ARC101": true, "ARC102": true, "ARC103": true,
+	"ARC201": true, "ARC202": true, "ARC203": true,
+}
+
 func NewValidateCmd(wdir *string) *cobra.Command {
 	var strictness int
 	var verbose bool
 
 	c := &cobra.Command{
-		Use:   "validate",
+		Use:   "validate [rule-code]",
 		Short: "Validate the workspace YAML files",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Long: `Validate the workspace YAML files for structural errors and architectural warnings.
+
+When called without arguments, validates the entire workspace and shows a summary
+of architectural warnings grouped by rule code.
+
+When called with a rule code (e.g. ARC002), shows only that rule's violations
+in full detail with individual element and connector information.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ws, err := workspace.Load(*wdir)
 			if err != nil {
 				return fmt.Errorf("load workspace: %w", err)
@@ -25,7 +41,6 @@ func NewValidateCmd(wdir *string) *cobra.Command {
 			repoCtx := cmdutil.DetectRepoScope(cmdutil.GetWorkingDir(), *wdir)
 			rules := ws.IgnoreRulesForRepository(repoCtx.Name)
 
-			// Override strictness if flag is set
 			if strictness > 0 {
 				ws.Config.Validation.Level = strictness
 			}
@@ -56,27 +71,14 @@ func NewValidateCmd(wdir *string) *cobra.Command {
 				term.Hint(cmd.OutOrStdout(), "Run 'tld plan' to see what would be applied.")
 			}
 
-			// Evaluate Architectural warnings
 			warnings := planner.AnalyzePlan(ws)
+
+			if len(args) == 1 {
+				return printRuleViolations(cmd, args[0], warnings)
+			}
+
 			if len(warnings) > 0 {
-				level := ws.Config.Validation.Level
-				if level == 0 {
-					level = workspace.DefaultValidationLevel
-				}
-				levelNames := map[int]string{1: "Minimal", 2: "Standard", 3: "Strict"}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n## Architectural Warnings (Level %d: %s)\n\n", level, levelNames[level])
-				for _, wg := range warnings {
-					if verbose {
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n%s\n", wg.RuleCode, wg.RuleName, wg.Mediation)
-						for _, v := range wg.Violations {
-							_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  * %s\n", v)
-						}
-					} else {
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s (%d violations)\n", wg.RuleCode, wg.RuleName, len(wg.Violations))
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", wg.Mediation)
-					}
-					_, _ = fmt.Fprintln(cmd.OutOrStdout())
-				}
+				printWarningSummary(cmd, ws, warnings, verbose)
 			}
 
 			return nil
@@ -86,4 +88,58 @@ func NewValidateCmd(wdir *string) *cobra.Command {
 	c.Flags().IntVar(&strictness, "strictness", 0, "override validation strictness level [1-3]")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "show full architectural warnings output")
 	return c
+}
+
+func printWarningSummary(cmd *cobra.Command, ws *workspace.Workspace, warnings []planner.WarningGroup, verbose bool) {
+	level := ws.Config.Validation.Level
+	if level == 0 {
+		level = workspace.DefaultValidationLevel
+	}
+	levelNames := map[int]string{1: "Minimal", 2: "Standard", 3: "Strict"}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n## Architectural Warnings (Level %d: %s)\n\n", level, levelNames[level])
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "The following architectural warnings were detected based on the current workspace configuration. These warnings indicate potential design issues or anti-patterns that may affect the maintainability, scalability, or performance of your system. Please review each warning and consider applying the suggested mediations to improve your architecture.\n\n")
+	for _, wg := range warnings {
+		if verbose {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n%s\n", wg.RuleCode, wg.RuleName, wg.Mediation)
+			for _, v := range wg.Violations {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  * %s\n", v)
+			}
+		} else {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s (%d violations)\n", wg.RuleCode, wg.RuleName, len(wg.Violations))
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", wg.Mediation)
+		}
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
+	}
+}
+
+func printRuleViolations(cmd *cobra.Command, code string, warnings []planner.WarningGroup) error {
+	code = strings.ToUpper(strings.TrimSpace(code))
+
+	if !allWarningCodes[code] {
+		var known []string
+		for k := range allWarningCodes {
+			known = append(known, k)
+		}
+		return fmt.Errorf("unknown rule code %q; known codes: %s", code, strings.Join(known, ", "))
+	}
+
+	for _, wg := range warnings {
+		if wg.RuleCode == code {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", wg.RuleCode, wg.RuleName)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Description: %s\n", wg.Description)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Violations: %d\n\n", len(wg.Violations))
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "How to fix:\n")
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", wg.Mediation)
+			if len(wg.Violations) > 0 {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nViolating elements:\n")
+				for _, v := range wg.Violations {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  * %s\n", v)
+				}
+			}
+			return nil
+		}
+	}
+
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "No violations found for %s.\n", code)
+	return nil
 }

@@ -67,8 +67,7 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "connect", "connect", fmt.Sprintf("%s:%s", from, to))
 			}
-			term.Successf(cmd.OutOrStdout(), "Connector %s → %s added in view %s", from, to, view)
-			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
+			term.Successf(cmd.OutOrStdout(), "ok")
 			return nil
 		},
 	}

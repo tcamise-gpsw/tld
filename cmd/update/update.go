@@ -107,8 +107,7 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update element", "update", ref)
 			}
-			term.Successf(cmd.OutOrStdout(), "Updated element %q: %s=%q", ref, field, value)
-			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
+			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
 			return nil
 		},
 	}
@@ -151,8 +150,7 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update connector", "update", ref)
 			}
-			term.Successf(cmd.OutOrStdout(), "Updated connector %q: %s=%q", ref, field, value)
-			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
+			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
 			return nil
 		},
 	}

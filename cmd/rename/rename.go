@@ -38,9 +38,7 @@ func NewRenameCmd(wdir *string) *cobra.Command {
 			if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "rename", "rename", fmt.Sprintf("%s -> %s", from, to))
 			}
-			term.Successf(cmd.OutOrStdout(), "Renamed element %s → %s", from, to)
-			term.Hint(cmd.OutOrStdout(), "References in connectors.yaml were updated automatically.")
-			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
+			term.Successf(cmd.OutOrStdout(), "renamed %s → %s", from, to)
 			return nil
 		},
 	}

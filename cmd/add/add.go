@@ -79,8 +79,7 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "add", "add", r)
 			}
-			term.Successf(cmd.OutOrStdout(), "Added element %s to elements.yaml", r)
-			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
+			term.Successf(cmd.OutOrStdout(), "add: %s ", r)
 			return nil
 		},
 	}

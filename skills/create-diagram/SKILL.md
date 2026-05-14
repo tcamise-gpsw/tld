@@ -4,8 +4,6 @@ description: Create architecture diagrams from a codebase using the tld CLI. Use
 allowed-tools: Bash(tld *), Write
 ---
 
-> **Reference:** When you need exact command syntax, flags, or a full walkthrough example, read `references/tld-docs.md`.
-
 ## How tld thinks about architecture
 
 In tld, everything is an **element** a service, a database, a person, a class, a method, a module. Any element can have a **view**: a navigable canvas that holds child elements. Navigation works by drilling into any element whose view contains something interesting. There are no standalone "diagrams" to create separately views emerge from the element hierarchy.
@@ -14,7 +12,9 @@ In tld, everything is an **element** a service, a database, a person, a class, a
 
 **Roles** (service, database, external system, person, etc.) are expressed as tags not as distinct types. All elements share a single kind.
 
-This is not traditional architecture diagramming. It is a **navigatable atlas of the entire system** like a hyperlinked wiki where you can zoom into anything. At the top you see services talking to each other. Drill into a service and you see its modules. Drill into a module and you see its classes. Drill into a class and you see its methods, parameters, what each method calls, its parent classes, its subclasses.
+The aim is a **navigatable atlas of the entire system** like a hyperlinked wiki where you can zoom into anything. At the top you see services talking to each other. Drill into a service and you see its modules. Drill into a module and you see its classes. Drill into a class and you see its methods, parameters, what each method calls, its parent classes, its subclasses.
+
+Endpoint have connectors wired up to external APIs they call, to databases they read/write, to other services they talk to. 
 
 **The goal at full detail: a reader can start at the root view and follow drill-downs until they understand any piece of the system without ever opening a file.**
 
@@ -30,7 +30,8 @@ A view is only useful if it tells you something you couldn't immediately see fro
 
 ## Working surface: diagram.sh
 
-All tld commands go into a single bash script, `diagram.sh`, in the workspace directory. The script is your notes and your execution log comments explain what you found, commands record what you built.
+All tld commands go into multiple bash scripts, inside the workspace directory ./.tld/ . The script is your notes and your execution log comments explain what you found, commands record what you built. Organize the script into batches of related commands and abstraction levels, with comments describing the purpose of each batch. Run each batch immediately after writing it, then do a checkpoint before moving to the next batch. 
+
 
 **Create the script once at the beginning of Step 3:**
 
@@ -103,7 +104,7 @@ Copy this checklist and check off items as you complete them:
 Before exploring, ask the user two questions:
 
 > 1. **How many views do you expect?** (rough target is fine e.g. "around 20", "as many as needed", "keep it under 10")
-> 2. **How deeply nested do you want the drill-downs?** (e.g. "just top-level", "2–3 levels", "go as deep as possible")
+> 2. **How deeply nested do you want the drill-downs?** (e.g. "high-level overview", "2–3 levels", "go as deep as possible")
 
 Use their answers to calibrate the rest of the work. If they don't know, suggest options based on the codebase size once you've done a quick directory scan.
 
@@ -221,11 +222,16 @@ No connectors on a shared element = missing information. Append any missing plac
 Example depth for a typical backend service at full detail:
 ```
 Root (L1)
+  |── Database (L2)
   └── Backend Service (L2)
         └── Auth Module (L3)
               └── AuthService class (L4)
                     └── AuthService: __init__ params, methods, base classes, subclasses (L5)
                           └── validate_token() : params, JWT lib call, DB call, return type (L6)
+Connectors:
+
+validate_token<---calls---> JWT Library
+validate_token<---calls---> Database
 ```
 
 ### What to capture in a code-level view
@@ -286,7 +292,7 @@ tld validate
 ```
 Carefully observe its output and its instructions to improve the quality of the diagrams. Don't use scripting to automate this and just to bypass the validation. It needs careful attention and deliberation to improve the diagrams. Work on each issue one by one.
 
-Fix any broken refs or missing fields, append the fixes to `diagram.sh`, and re-run.
+Use `tld validate ARCXXX` to see the violations for a specific rule. For each violation, follow the directions from the output and go back to `diagram.sh` to fix them, then re-run the validation until all violations are resolved. 
 
 ---
 
@@ -298,4 +304,4 @@ Ask the user to run:
 tld plan
 ```
 
-Walk them through the output. If they want changes more elements, deeper drill-downs, better connector labels append the changes to `diagram.sh`, run the new block, and iterate.
+Walk them through the output. If they want changes more elements, deeper drill-downs, append the changes to `diagram.sh`, run the new block, and iterate.

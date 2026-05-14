@@ -55,8 +55,7 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "remove element", "remove", ref)
 			}
-			term.Successf(cmd.OutOrStdout(), "Removed %s from elements.yaml", ref)
-			term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
+			term.Successf(cmd.OutOrStdout(), "del: %s", ref)
 			return nil
 		},
 	}
@@ -95,8 +94,7 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if n == 0 {
 				term.Info(cmd.OutOrStdout(), "No matching connectors found — nothing removed.")
 			} else {
-				term.Successf(cmd.OutOrStdout(), "Removed %d connector(s) from connectors.yaml", n)
-				term.Hint(cmd.OutOrStdout(), "Workspace synced to configured apply target.")
+				term.Successf(cmd.OutOrStdout(), "del: %d", n)
 			}
 			return nil
 		},
