@@ -6,7 +6,6 @@ import {
   Box,
   Button,
   CloseButton,
-  Divider,
   FormControl,
   FormLabel,
   HStack,
@@ -1034,49 +1033,87 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
 
             {elementPanelAfterContentSlot}
 
-            {element && (onPromoteVisibility || onDemoteVisibility || onResetVisibility) && (
-              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={2}>
-                <HStack justify="space-between" mb={2}>
-                  <FormLabel fontSize="xs" fontWeight="bold" color="gray.400" mb={0}>DENSITY</FormLabel>
-                  {visibilityOverrideDelta !== 0 && (
-                    <Badge colorScheme={visibilityOverrideDelta > 0 ? 'teal' : 'orange'} variant="subtle">
-                      {visibilityOverrideDelta > 0 ? `+${visibilityOverrideDelta}` : visibilityOverrideDelta}
-                    </Badge>
-                  )}
-                </HStack>
-                <HStack spacing={2}>
-                  <Button variant="subtle" size="sm" color="teal.200" _hover={{ bg: 'teal.900', color: 'teal.100' }} onClick={() => onPromoteVisibility?.(element.id)} flex={1} isDisabled={isReadOnly}>
-                    Promote
+            {(element && (onPromoteVisibility || onDemoteVisibility || onResetVisibility)) || (isEdit && canEdit && onMerge) ? (
+              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1}>
+                {element && (onPromoteVisibility || onDemoteVisibility || onResetVisibility) && (
+                  <>
+                    <HStack justify="space-between" mb={2}>
+                      <FormLabel fontSize="xs" fontWeight="semibold" letterSpacing="wider" color="gray.500" mb={0} textTransform="uppercase">Density</FormLabel>
+                      {visibilityOverrideDelta !== 0 && (
+                        <Badge colorScheme={visibilityOverrideDelta > 0 ? 'teal' : 'orange'} variant="subtle" fontSize="xs">
+                          {visibilityOverrideDelta > 0 ? `+${visibilityOverrideDelta}` : visibilityOverrideDelta}
+                        </Badge>
+                      )}
+                    </HStack>
+                    <HStack spacing={2} mb={isEdit && canEdit && onMerge ? 2 : 0}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        borderColor="teal.700"
+                        color="teal.300"
+                        _hover={{ bg: 'teal.900', borderColor: 'teal.500', color: 'teal.100' }}
+                        onClick={() => onPromoteVisibility?.(element.id)}
+                        flex={1}
+                        isDisabled={isReadOnly}
+                      >
+                        Promote
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        borderColor="orange.700"
+                        color="orange.300"
+                        _hover={{ bg: 'orange.900', borderColor: 'orange.500', color: 'orange.100' }}
+                        onClick={() => onDemoteVisibility?.(element.id)}
+                        flex={1}
+                        isDisabled={isReadOnly}
+                      >
+                        Demote
+                      </Button>
+                      {visibilityOverrideDelta !== 0 && (
+                        <Button variant="ghost" size="sm" color="gray.400" _hover={{ bg: 'whiteAlpha.100', color: 'white' }} onClick={() => onResetVisibility?.(element.id)} isDisabled={isReadOnly}>
+                          Reset
+                        </Button>
+                      )}
+                    </HStack>
+                  </>
+                )}
+                {isEdit && canEdit && onMerge && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    borderColor="teal.700"
+                    color="teal.300"
+                    _hover={{ bg: 'teal.900', borderColor: 'teal.500', color: 'teal.100' }}
+                    onClick={() => onMerge(element.id)}
+                    w="full"
+                  >
+                    Merge
                   </Button>
-                  <Button variant="subtle" size="sm" color="orange.200" _hover={{ bg: 'orange.900', color: 'orange.100' }} onClick={() => onDemoteVisibility?.(element.id)} flex={1} isDisabled={isReadOnly}>
-                    Demote
-                  </Button>
-                  {visibilityOverrideDelta !== 0 && (
-                    <Button variant="ghost" size="sm" onClick={() => onResetVisibility?.(element.id)} isDisabled={isReadOnly}>
-                      Reset
-                    </Button>
-                  )}
-                </HStack>
+                )}
               </Box>
-            )}
-
-
-
-            {isEdit && canEdit && onMerge && (
-              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={2}>
-                <Button variant="subtle" size="sm" color="teal.200" _hover={{ bg: 'teal.900', color: 'teal.100' }}
-                  onClick={() => onMerge(element.id)} w="full">
-                  Merge
-                </Button>
-              </Box>
-            )}
+            ) : null}
 
             {isEdit && canEdit && (
-              <HStack borderTop="1px solid" borderColor="whiteAlpha.100" pt={2} spacing={2}>
-                <Button variant="subtle" size="sm" color="white" _hover={{ bg: 'whiteAlpha.100' }} onClick={handleDelete} flex={1}>
+              <HStack borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1} spacing={2}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  color="gray.400"
+                  _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                  onClick={handleDelete}
+                  flex={1}
+                >
                   Remove
                 </Button>
-                <Button variant="subtle" size="sm" color="red.300" _hover={{ bg: 'red.900', color: 'red.100' }} onClick={confirmPermanentDelete.onOpen} flex={1}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  color="red.400"
+                  _hover={{ bg: 'red.900', color: 'red.200' }}
+                  onClick={confirmPermanentDelete.onOpen}
+                  flex={1}
+                >
                   Delete Element
                 </Button>
               </HStack>
@@ -1084,24 +1121,19 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
           </VStack>
         </ScrollIndicatorWrapper>
 
-        <Divider borderColor="whiteAlpha.100" />
-
         {/* Footer */}
-        <HStack px={4} py={3} justify="space-between" flexShrink={0}>
-
-          {!autoSaveEdit && (
-            <HStack ml="auto">
-              <Button variant="ghost" size="sm" onClick={handleClose}>
-                Cancel
+        {!autoSaveEdit && (
+          <HStack px={4} py={3} justify="flex-end" flexShrink={0}>
+            <Button variant="ghost" size="sm" onClick={handleClose}>
+              Cancel
+            </Button>
+            {canEdit && (
+              <Button size="sm" px={5} colorScheme="blue" onClick={handleSave} isLoading={loading}>
+                Save
               </Button>
-              {canEdit && (
-                <Button size="sm" px={5} colorScheme="blue" onClick={handleSave} isLoading={loading}>
-                  Save
-                </Button>
-              )}
-            </HStack>
-          )}
-        </HStack>
+            )}
+          </HStack>
+        )}
       </SlidingPanel>
 
       <ConfirmDialog
