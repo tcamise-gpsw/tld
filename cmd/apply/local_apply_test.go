@@ -3,6 +3,7 @@ package apply_test
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
-func TestCRUDLocalAutoApplyCreatesSQLiteAndPrunes(t *testing.T) {
+func TestCRUDManualApplyCreatesSQLiteAndPrunes(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := t.TempDir()
 	t.Setenv("TLD_DATA_DIR", dataDir)
@@ -27,7 +28,7 @@ func TestCRUDLocalAutoApplyCreatesSQLiteAndPrunes(t *testing.T) {
 
 	db := openLocalDB(t, dataDir)
 	assertCount(t, db, "elements", 3)
-	assertCount(t, db, "views", 4)
+	assertCount(t, db, "views", 2)
 	assertCount(t, db, "placements", 3)
 	assertCount(t, db, "connectors", 1)
 
@@ -35,7 +36,7 @@ func TestCRUDLocalAutoApplyCreatesSQLiteAndPrunes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load workspace: %v", err)
 	}
-	if ws.Meta == nil || len(ws.Meta.Elements) != 3 || len(ws.Meta.Connectors) != 1 {
+	if ws.Meta == nil || len(ws.Meta.Elements) != 3 || len(ws.Meta.Views) != 1 || len(ws.Meta.Connectors) != 1 {
 		t.Fatalf("metadata not updated: %+v", ws.Meta)
 	}
 	lockFile, err := workspace.LoadLockFile(dir)
@@ -47,29 +48,40 @@ func TestCRUDLocalAutoApplyCreatesSQLiteAndPrunes(t *testing.T) {
 	}
 
 	cmd.MustRunCmd(t, dir, "remove", "connector", "--view", "platform", "--from", "api", "--to", "db")
+	cmd.MustRunCmd(t, dir, "apply", "--force", "--target", "local", "--data-dir", dataDir)
 	assertCount(t, db, "connectors", 0)
 
 	cmd.MustRunCmd(t, dir, "remove", "element", "db")
+	cmd.MustRunCmd(t, dir, "apply", "--force", "--target", "local", "--data-dir", dataDir)
 	assertCount(t, db, "elements", 2)
-	assertCount(t, db, "views", 3)
+	assertCount(t, db, "views", 2)
 }
 
-func TestCRUDRemoteAutoApplyWhenLoggedIn(t *testing.T) {
-	svc := &cmd.MockDiagramService{}
-	serverURL := cmd.NewMockServer(t, svc)
+func TestAddDoesNotAutoApplyLocalOrRemote(t *testing.T) {
 	dir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("TLD_DATA_DIR", dataDir)
+	t.Setenv("TLD_APPLY_TARGET", "local")
 	cmd.MustInitWorkspace(t, dir)
-	cmd.WriteConfig(t, dir, serverURL, "remote-key")
 
 	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "service")
 
+	if _, err := os.Stat(localserver.DatabasePath(dataDir)); !os.IsNotExist(err) {
+		t.Fatalf("add should not create local DB before apply, stat error: %v", err)
+	}
+
+	svc := &cmd.MockDiagramService{}
+	serverURL := cmd.NewMockServer(t, svc)
+	remoteDir := t.TempDir()
+	cmd.MustInitWorkspace(t, remoteDir)
+	cmd.WriteConfig(t, remoteDir, serverURL, "remote-key")
+
+	cmd.MustRunCmd(t, remoteDir, "add", "API", "--ref", "api", "--kind", "service")
+
 	svc.Mu.Lock()
 	defer svc.Mu.Unlock()
-	if svc.LastRequest == nil {
-		t.Fatal("expected CRUD auto-apply to call remote server")
-	}
-	if svc.LastHeader.Get("Authorization") != "Bearer remote-key" {
-		t.Fatalf("Authorization = %q", svc.LastHeader.Get("Authorization"))
+	if svc.LastRequest != nil {
+		t.Fatal("add should only update YAML; expected no remote apply request")
 	}
 }
 

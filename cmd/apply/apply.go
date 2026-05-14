@@ -444,10 +444,7 @@ func updatePlanMetadataFromResponse(_ string, meta *workspace.Meta, ws *workspac
 			meta.Elements[ref] = metadata
 		}
 	}
-	for ref, element := range ws.Elements {
-		if !element.HasView {
-			continue
-		}
+	for ref := range ws.Elements {
 		if metadata, ok := resourceMetadataFromMap(viewMetadata, ref); ok {
 			meta.Views[ref] = metadata
 		}

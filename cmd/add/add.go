@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/tech"
@@ -73,16 +72,11 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("upsert element: %w", err)
 			}
-			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
-				if cmdutil.WantsJSON(*format) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "add", err)
-				}
-				return err
-			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "add", "add", r)
 			}
-			term.Successf(cmd.OutOrStdout(), "add: %s ", r)
+			term.Successf(cmd.OutOrStdout(), "add: %s", r)
+			term.Hint(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}

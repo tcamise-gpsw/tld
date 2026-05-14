@@ -3,7 +3,6 @@ package remove
 import (
 	"fmt"
 
-	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -46,16 +45,11 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("remove element: %w", err)
 			}
-			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
-				if cmdutil.WantsJSON(*format) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "remove element", err)
-				}
-				return err
-			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "remove element", "remove", ref)
 			}
 			term.Successf(cmd.OutOrStdout(), "del: %s", ref)
+			term.Hint(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}
@@ -80,14 +74,6 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("remove connector: %w", err)
 			}
-			if n > 0 {
-				if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
-					if cmdutil.WantsJSON(*format) {
-						return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "remove connector", err)
-					}
-					return err
-				}
-			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "remove connector", "remove", fmt.Sprintf("%s:%s:%s", view, from, to))
 			}
@@ -95,6 +81,7 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 				term.Info(cmd.OutOrStdout(), "No matching connectors found — nothing removed.")
 			} else {
 				term.Successf(cmd.OutOrStdout(), "del: %d", n)
+				term.Hint(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to apply it to the database.")
 			}
 			return nil
 		},

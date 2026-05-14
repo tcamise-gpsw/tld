@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/cmd/version"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
@@ -98,16 +97,11 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("update element: %w", err)
 			}
-			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
-				if cmdutil.WantsJSON(*format) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "update element", err)
-				}
-				return err
-			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update element", "update", ref)
 			}
 			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
+			term.Hint(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}
@@ -141,16 +135,11 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("update connector: %w", err)
 			}
-			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
-				if cmdutil.WantsJSON(*format) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "update connector", err)
-				}
-				return err
-			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update connector", "update", ref)
 			}
 			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
+			term.Hint(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}

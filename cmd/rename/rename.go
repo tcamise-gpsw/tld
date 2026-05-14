@@ -3,7 +3,6 @@ package rename
 import (
 	"fmt"
 
-	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -29,16 +28,11 @@ func NewRenameCmd(wdir *string) *cobra.Command {
 				}
 				return fmt.Errorf("rename element: %w", err)
 			}
-			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
-				if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "rename", err)
-				}
-				return err
-			}
 			if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "rename", "rename", fmt.Sprintf("%s -> %s", from, to))
 			}
 			term.Successf(cmd.OutOrStdout(), "renamed %s → %s", from, to)
+			term.Hint(cmd.OutOrStdout(), "Change recorded locally in YAML. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/mertcikla/tld/v2/cmd/crudsync"
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -58,16 +57,11 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				return fmt.Errorf("append connector: %w", err)
 			}
-			if err := crudsync.ApplyAfterMutation(cmd, *wdir, ""); err != nil {
-				if cmdutil.WantsJSON(*format) {
-					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "connect", err)
-				}
-				return err
-			}
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "connect", "connect", fmt.Sprintf("%s:%s", from, to))
 			}
 			term.Successf(cmd.OutOrStdout(), "ok")
+			term.Hint(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to apply it to the database.")
 			return nil
 		},
 	}
