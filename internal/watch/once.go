@@ -11,6 +11,7 @@ import (
 
 type OneShotOptions struct {
 	Path      string
+	Files     []string
 	Rescan    bool
 	Embedding EmbeddingConfig
 	Settings  Settings
@@ -69,10 +70,32 @@ func (r *Runner) RunOnce(ctx context.Context, opts OneShotOptions) (OneShotResul
 
 	scanStarted := time.Now()
 	logInfo(ctx, opts.Logger, "watch.scan.started", "repo_root", repoRoot, "rescan", opts.Rescan)
-	scan, err := r.Scanner.ScanWithOptions(ctx, repoRoot, ScanOptions{Force: opts.Rescan, DataDir: opts.DataDir})
-	if err != nil {
-		logError(ctx, opts.Logger, "watch.scan.failed", err, "elapsed", logElapsed(scanStarted), "repo_root", repoRoot)
-		return OneShotResult{}, err
+
+	var scan ScanResult
+	if len(opts.Files) > 0 {
+		repoInput := RepositoryInput{
+			RemoteURL:    detectString(func() (string, error) { return tldgit.DetectRemoteURL(repoRoot) }),
+			RepoRoot:     repoRoot,
+			DisplayName:  filepath.Base(repoRoot),
+			Branch:       detectString(func() (string, error) { return tldgit.DetectBranch(repoRoot) }),
+			HeadCommit:   detectString(func() (string, error) { return tldgit.DetectHeadCommit(repoRoot) }),
+			SettingsHash: stableHash(settings),
+		}
+		repo, err := r.Store.EnsureRepository(ctx, repoInput)
+		if err != nil {
+			return OneShotResult{}, err
+		}
+		scan, err = r.Scanner.ScanFilesWithOptions(ctx, repo, opts.Files, ScanOptions{Force: opts.Rescan, DataDir: opts.DataDir})
+		if err != nil {
+			logError(ctx, opts.Logger, "watch.scan.failed", err, "elapsed", logElapsed(scanStarted), "repo_root", repoRoot)
+			return OneShotResult{}, err
+		}
+	} else {
+		scan, err = r.Scanner.ScanWithOptions(ctx, repoRoot, ScanOptions{Force: opts.Rescan, DataDir: opts.DataDir})
+		if err != nil {
+			logError(ctx, opts.Logger, "watch.scan.failed", err, "elapsed", logElapsed(scanStarted), "repo_root", repoRoot)
+			return OneShotResult{}, err
+		}
 	}
 	logInfo(ctx, opts.Logger, "watch.scan.completed", "elapsed", logElapsed(scanStarted), "repository_id", scan.RepositoryID, "scan_run_id", scan.ScanRunID, "files_seen", scan.FilesSeen, "files_parsed", scan.FilesParsed, "files_skipped", scan.FilesSkipped, "symbols_seen", scan.SymbolsSeen, "references_seen", scan.ReferencesSeen, "warnings", len(scan.Warnings), "mode", scan.Mode, "strategy", scan.Strategy)
 	repo, err := r.Store.Repository(ctx, scan.RepositoryID)

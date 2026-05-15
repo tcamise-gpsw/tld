@@ -30,7 +30,7 @@ type RunnerOptions struct {
 	DataDir           string
 	Progress          ProgressSink
 	Logger            EventLogger
-	Events            chan<- Event
+	Events            *EventQueue
 	Ready             chan<- RunnerResult
 }
 
@@ -126,6 +126,9 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 	emit(opts.Events, Event{Type: "watch.started", RepositoryID: repo.ID, At: nowString(), Data: repo.JSON(), Phase: "watch", WatcherMode: watcherMode, Languages: settings.Languages, Warnings: warnings})
 	emit(opts.Events, Event{Type: "lock.enabled", RepositoryID: repo.ID, At: nowString()})
 	defer func() {
+		if sourceWatcher.Close != nil {
+			_ = sourceWatcher.Close()
+		}
 		_ = r.Scanner.Close()
 		_ = r.Store.ReleaseLock(context.WithoutCancel(ctx), repo.ID, token)
 		logInfo(context.WithoutCancel(ctx), opts.Logger, "watch.lock.disabled", "repository_id", repo.ID)
@@ -172,7 +175,33 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 	totalChangesProcessed := 0
 	intervalChangesProcessed := 0
 
+	debounceTimer := time.NewTimer(0)
+	if !debounceTimer.Stop() {
+		select {
+		case <-debounceTimer.C:
+		default:
+		}
+	}
+	defer debounceTimer.Stop()
+	debouncing := false
+	var pendingPaths map[string]struct{}
+	sourceEvents := sourceWatcher.Events.Out()
+	resetDebounceTimer := func() {
+		if !debounceTimer.Stop() {
+			select {
+			case <-debounceTimer.C:
+			default:
+			}
+		}
+		debounceTimer.Reset(opts.Debounce)
+	}
+
 	for {
+		process := false
+		var targetedFiles []string
+		var deletedFiles []string
+		pollCheck := false
+
 		select {
 		case <-ctx.Done():
 			logInfo(ctx, opts.Logger, "watch.runner.context_done", "repository_id", repo.ID, "error", ctx.Err())
@@ -199,13 +228,31 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			if heartbeat.stop {
 				return result, heartbeat.err
 			}
-		case _, ok := <-sourceWatcher.Events:
-			if ok {
-				logInfo(ctx, opts.Logger, "watch.source_event.received", "repository_id", repo.ID)
-				poll.Reset(time.Millisecond)
+		case ev, ok := <-sourceEvents:
+			if !ok {
+				sourceEvents = nil
+				continue
 			}
+			if ev.Message != "" {
+				logInfo(ctx, opts.Logger, "watch.source_event.received", "repository_id", repo.ID, "path", ev.Message)
+				if pendingPaths == nil {
+					pendingPaths = make(map[string]struct{})
+				}
+				pendingPaths[ev.Message] = struct{}{}
+				debouncing = true
+				resetDebounceTimer()
+			}
+		case <-debounceTimer.C:
+			debouncing = false
+			process = true
 		case <-poll.C:
-			poll.Reset(opts.PollInterval)
+			pollCheck = true
+		}
+
+		if pollCheck {
+			if debouncing {
+				continue
+			}
 			status, err := r.Store.LockStatus(ctx, repo.ID, token)
 			if errors.Is(err, sql.ErrNoRows) {
 				logInfo(ctx, opts.Logger, "watch.poll.lock_missing", "repository_id", repo.ID)
@@ -223,6 +270,10 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				logInfo(ctx, opts.Logger, "watch.poll.stopping", "repository_id", repo.ID)
 				return result, nil
 			}
+			process = true
+		}
+
+		if process {
 			nextGit, err := gitStatusSnapshot(repoRoot)
 			if err != nil {
 				logError(ctx, opts.Logger, "watch.git_status_snapshot_failed", err, "repository_id", repo.ID)
@@ -230,46 +281,94 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			}
 			nextGitFingerprint := gitStatusFingerprint(nextGit)
 			nextFingerprint := ""
-			if !limitedMode {
-				nextSourceSnapshot := sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
-				nextFingerprint = sourceFileFingerprint(nextSourceSnapshot)
-				if nextFingerprint == lastFingerprint && nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
+			sourceChanged := false
+			var sourceChanges []SourceFileChange
+			stableSourceSnapshot := map[string]string{}
+
+			if watcherMode == WatcherFSNotify && !limitedMode {
+				for path := range pendingPaths {
+					rel, err := filepath.Rel(repoRoot, path)
+					if err != nil || strings.HasPrefix(rel, "..") {
+						continue
+					}
+					rel = filepathToSlash(rel)
+					if rel == "." {
+						continue
+					}
+					if _, err := os.Stat(path); os.IsNotExist(err) {
+						deletedFiles = append(deletedFiles, rel)
+					} else {
+						targetedFiles = append(targetedFiles, rel)
+					}
+				}
+				pendingPaths = nil
+				sort.Strings(targetedFiles)
+				sort.Strings(deletedFiles)
+
+				if len(targetedFiles) == 0 && len(deletedFiles) == 0 && nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
 					continue
 				}
-			} else if nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
-				continue
-			}
-			logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "source_fingerprint_changed", nextFingerprint != lastFingerprint, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
-			if err := waitDebounce(ctx, opts.Debounce); err != nil {
-				logInfo(ctx, opts.Logger, "watch.runner.context_done", "repository_id", repo.ID, "error", err)
-				return result, nil
-			}
-			stableSourceSnapshot := map[string]string{}
-			sourceChanged := false
-			if !limitedMode {
-				stableSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
-				sourceChanged = sourceFileFingerprint(stableSourceSnapshot) != lastFingerprint
-			}
-			nextGit, err = gitStatusSnapshot(repoRoot)
-			if err != nil {
-				logError(ctx, opts.Logger, "watch.git_status_snapshot_failed", err, "repository_id", repo.ID)
-				continue
-			}
-			nextGitFingerprint = gitStatusFingerprint(nextGit)
-			var sourceChanges []SourceFileChange
-			if limitedMode {
-				sourceChanges = mergeSourceFileChanges(
-					sourceChangesFromGit(repoRoot, opts.Logger),
-					sourceChangesSinceLatestWatchVersion(ctx, r.Store, repo.ID, repoRoot, opts.Logger),
-				)
-				sourceChanged = len(sourceChanges) > 0
+				logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
+
+				if len(deletedFiles) > 0 {
+					if err := r.Store.DeleteFilesByPath(ctx, repo.ID, deletedFiles); err != nil {
+						logError(ctx, opts.Logger, "watch.files.delete_failed", err, "repository_id", repo.ID, "deleted_files", len(deletedFiles))
+						emit(opts.Events, Event{Type: "watch.error", RepositoryID: repo.ID, At: nowString(), Message: err.Error()})
+						continue
+					}
+				}
+				if len(targetedFiles) > 0 || len(deletedFiles) > 0 {
+					sourceChanged = true
+					for _, file := range targetedFiles {
+						sourceChanges = append(sourceChanges, SourceFileChange{Path: file, ChangeType: "modified", Language: sourceFileChangeLanguage(file)})
+					}
+					for _, file := range deletedFiles {
+						sourceChanges = append(sourceChanges, SourceFileChange{Path: file, ChangeType: "deleted", Language: sourceFileChangeLanguage(file)})
+					}
+				}
 			} else {
-				sourceChanges = diffSourceFileSnapshots(lastSourceSnapshot, stableSourceSnapshot)
+				if !limitedMode {
+					nextSourceSnapshot := sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
+					nextFingerprint = sourceFileFingerprint(nextSourceSnapshot)
+					if nextFingerprint == lastFingerprint && nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
+						continue
+					}
+				} else if nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
+					continue
+				}
+				logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "source_fingerprint_changed", nextFingerprint != lastFingerprint, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
+				if !pollCheck {
+					if err := waitDebounce(ctx, opts.Debounce); err != nil {
+						logInfo(ctx, opts.Logger, "watch.runner.context_done", "repository_id", repo.ID, "error", err)
+						return result, nil
+					}
+				}
+				if !limitedMode {
+					stableSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
+					sourceChanged = sourceFileFingerprint(stableSourceSnapshot) != lastFingerprint
+				}
+				nextGit, err = gitStatusSnapshot(repoRoot)
+				if err != nil {
+					logError(ctx, opts.Logger, "watch.git_status_snapshot_failed", err, "repository_id", repo.ID)
+					continue
+				}
+				nextGitFingerprint = gitStatusFingerprint(nextGit)
+				if limitedMode {
+					sourceChanges = mergeSourceFileChanges(
+						sourceChangesFromGit(repoRoot, opts.Logger),
+						sourceChangesSinceLatestWatchVersion(ctx, r.Store, repo.ID, repoRoot, opts.Logger),
+					)
+					sourceChanged = len(sourceChanges) > 0
+				} else {
+					sourceChanges = diffSourceFileSnapshots(lastSourceSnapshot, stableSourceSnapshot)
+				}
 			}
+
 			pipelineStarted := time.Now()
 			logInfo(ctx, opts.Logger, "watch.change.pipeline.started", "repository_id", repo.ID, "source_changed", sourceChanged, "changed_files", len(sourceChanges), "head", nextGit.HeadCommit)
 			emit(opts.Events, Event{Type: "scan.started", RepositoryID: repo.ID, At: nowString(), Phase: "scan", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(sourceChanges), Warnings: warnings})
-			once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger})
+
+			once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Files: targetedFiles, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger})
 			if err != nil {
 				logError(ctx, opts.Logger, "watch.change.pipeline.failed", err, "elapsed", logElapsed(pipelineStarted), "repository_id", repo.ID)
 				emit(opts.Events, Event{Type: "watch.error", RepositoryID: repo.ID, At: nowString(), Message: err.Error()})
@@ -327,7 +426,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				lastHead = nextGit.HeadCommit
 			}
 			limitedMode = once.Scan.Mode == "limited"
-			if !limitedMode {
+			if !limitedMode && watcherMode != WatcherFSNotify {
 				lastSourceSnapshot = stableSourceSnapshot
 				lastFingerprint = sourceFileFingerprint(stableSourceSnapshot)
 			}
@@ -747,6 +846,14 @@ func sourceSnapshotLanguage(value string) string {
 	return ""
 }
 
+func sourceFileChangeLanguage(path string) string {
+	language, _, ok := watchedFileLanguage(path)
+	if !ok {
+		return ""
+	}
+	return language
+}
+
 func randomToken() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -755,14 +862,11 @@ func randomToken() string {
 	return hex.EncodeToString(buf[:])
 }
 
-func emit(ch chan<- Event, event Event) {
-	if ch == nil {
+func emit(eq *EventQueue, event Event) {
+	if eq == nil {
 		return
 	}
-	select {
-	case ch <- event:
-	default:
-	}
+	eq.Push(event)
 }
 
 func shortHash(hash string) string {

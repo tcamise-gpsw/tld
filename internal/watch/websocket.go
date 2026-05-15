@@ -24,9 +24,9 @@ var watchWebSocketClients atomic.Int64
 var watchEvents = struct {
 	sync.Mutex
 	nextID      int64
-	subscribers map[int64]chan Event
+	subscribers map[int64]*EventQueue
 }{
-	subscribers: map[int64]chan Event{},
+	subscribers: map[int64]*EventQueue{},
 }
 
 func WatchWebSocketClientCount() int {
@@ -36,26 +36,23 @@ func WatchWebSocketClientCount() int {
 func BroadcastWatchEvent(event Event) {
 	watchEvents.Lock()
 	defer watchEvents.Unlock()
-	for _, ch := range watchEvents.subscribers {
-		select {
-		case ch <- event:
-		default:
-		}
+	for _, eq := range watchEvents.subscribers {
+		eq.Push(event)
 	}
 }
 
 func SubscribeWatchEvents() (<-chan Event, func()) {
-	ch := make(chan Event, 32)
+	eq := NewEventQueue()
 	watchEvents.Lock()
 	watchEvents.nextID++
 	id := watchEvents.nextID
-	watchEvents.subscribers[id] = ch
+	watchEvents.subscribers[id] = eq
 	watchEvents.Unlock()
-	return ch, func() {
+	return eq.Out(), func() {
 		watchEvents.Lock()
 		delete(watchEvents.subscribers, id)
-		close(ch)
 		watchEvents.Unlock()
+		eq.Close()
 	}
 }
 
@@ -74,10 +71,12 @@ func (h *Handler) watchWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	controlEvents := make(chan Event, 4)
-	go h.watchWebSocketReads(ctx, rw, controlEvents, cancel)
+	controlEvents := NewEventQueue()
+	defer controlEvents.Close()
+	go h.watchWebSocketReads(ctx, conn, rw, controlEvents, cancel)
 	runtimeEvents, unsubscribe := SubscribeWatchEvents()
 	defer unsubscribe()
+	controlEventCh := controlEvents.Out()
 
 	if err := writeWebSocketJSON(rw, Event{Type: "watch.connected", At: nowString(), Data: map[string]int64{"clients": clients}}); err != nil {
 		return
@@ -85,6 +84,8 @@ func (h *Handler) watchWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	pingTicker := time.NewTicker(20 * time.Second)
+	defer pingTicker.Stop()
 	var lastRepresentationHash string
 	var lastVersionID int64
 	for {
@@ -132,7 +133,11 @@ func (h *Handler) watchWebSocket(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case event := <-controlEvents:
+		case event, ok := <-controlEventCh:
+			if !ok {
+				controlEventCh = nil
+				goto next
+			}
 			for {
 				if err := writeWebSocketJSON(rw, event); err != nil {
 					return
@@ -143,12 +148,20 @@ func (h *Handler) watchWebSocket(w http.ResponseWriter, r *http.Request) {
 				select {
 				case <-ctx.Done():
 					return
-				case event = <-controlEvents:
+				case event, ok = <-controlEventCh:
+					if !ok {
+						controlEventCh = nil
+						goto next
+					}
 				default:
 					goto next
 				}
 			}
-		case event := <-runtimeEvents:
+		case event, ok := <-runtimeEvents:
+			if !ok {
+				runtimeEvents = nil
+				goto next
+			}
 			for {
 				if err := writeWebSocketJSON(rw, event); err != nil {
 					return
@@ -159,10 +172,18 @@ func (h *Handler) watchWebSocket(w http.ResponseWriter, r *http.Request) {
 				select {
 				case <-ctx.Done():
 					return
-				case event = <-runtimeEvents:
+				case event, ok = <-runtimeEvents:
+					if !ok {
+						runtimeEvents = nil
+						goto next
+					}
 				default:
 					goto next
 				}
+			}
+		case <-pingTicker.C:
+			if err := writeWebSocketPing(rw); err != nil {
+				return
 			}
 		case <-ticker.C:
 		}
@@ -170,9 +191,10 @@ func (h *Handler) watchWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) watchWebSocketReads(ctx context.Context, reader io.Reader, controlEvents chan<- Event, cancel context.CancelFunc) {
+func (h *Handler) watchWebSocketReads(ctx context.Context, conn net.Conn, reader io.Reader, controlEvents *EventQueue, cancel context.CancelFunc) {
 	defer cancel()
 	for {
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		msg, err := readWebSocketMessage(reader)
 		if err != nil {
 			return
@@ -189,38 +211,38 @@ func (h *Handler) watchWebSocketReads(ctx context.Context, reader io.Reader, con
 		case "watch.pause":
 			if body.RepositoryID > 0 {
 				_ = h.Store.RequestPause(ctx, body.RepositoryID)
-				emitControlEvent(controlEvents, Event{Type: "watch.paused", RepositoryID: body.RepositoryID, At: nowString()})
+				controlEvents.Push(Event{Type: "watch.paused", RepositoryID: body.RepositoryID, At: nowString()})
 			} else {
 				lock, live, _ := h.Store.ActiveLiveLock(ctx, LockHeartbeatTimeout)
 				_ = h.Store.RequestPauseActive(ctx)
 				if live {
-					emitControlEvent(controlEvents, Event{Type: "watch.paused", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
+					controlEvents.Push(Event{Type: "watch.paused", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
 				}
 			}
 		case "watch.resume":
 			if body.RepositoryID > 0 {
 				_ = h.Store.RequestResume(ctx, body.RepositoryID)
-				emitControlEvent(controlEvents, Event{Type: "watch.heartbeat", RepositoryID: body.RepositoryID, At: nowString()})
+				controlEvents.Push(Event{Type: "watch.heartbeat", RepositoryID: body.RepositoryID, At: nowString()})
 			} else {
 				lock, live, _ := h.Store.ActiveLiveLock(ctx, LockHeartbeatTimeout)
 				_ = h.Store.RequestResumeActive(ctx)
 				if live {
-					emitControlEvent(controlEvents, Event{Type: "watch.heartbeat", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
+					controlEvents.Push(Event{Type: "watch.heartbeat", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
 				}
 			}
 		case "watch.stop":
 			if body.RepositoryID > 0 {
 				_ = h.Store.RequestStop(ctx, body.RepositoryID)
-				emitControlEvent(controlEvents, Event{Type: "lock.disabled", RepositoryID: body.RepositoryID, At: nowString()})
-				emitControlEvent(controlEvents, Event{Type: "watch.stopped", RepositoryID: body.RepositoryID, At: nowString()})
+				controlEvents.Push(Event{Type: "lock.disabled", RepositoryID: body.RepositoryID, At: nowString()})
+				controlEvents.Push(Event{Type: "watch.stopped", RepositoryID: body.RepositoryID, At: nowString()})
 			} else {
 				lock, live, _ := h.Store.ActiveLiveLock(ctx, LockHeartbeatTimeout)
 				_ = h.Store.RequestStopActive(ctx)
 				if live {
-					emitControlEvent(controlEvents, Event{Type: "lock.disabled", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
-					emitControlEvent(controlEvents, Event{Type: "watch.stopped", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
+					controlEvents.Push(Event{Type: "lock.disabled", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
+					controlEvents.Push(Event{Type: "watch.stopped", RepositoryID: lock.RepositoryID, At: nowString(), Data: lock})
 				} else {
-					emitControlEvent(controlEvents, Event{Type: "watch.stopped", At: nowString()})
+					controlEvents.Push(Event{Type: "watch.stopped", At: nowString()})
 				}
 			}
 		case "watch.reassociateRepo":
@@ -229,13 +251,6 @@ func (h *Handler) watchWebSocketReads(ctx context.Context, reader io.Reader, con
 			}
 		case "watch.status":
 		}
-	}
-}
-
-func emitControlEvent(ch chan<- Event, event Event) {
-	select {
-	case ch <- event:
-	default:
 	}
 }
 
@@ -281,6 +296,14 @@ func writeWebSocketJSON(rw *bufio.ReadWriter, value any) error {
 		return err
 	}
 	if err := writeWebSocketFrame(rw, data); err != nil {
+		return err
+	}
+	return rw.Flush()
+}
+
+func writeWebSocketPing(rw *bufio.ReadWriter) error {
+	header := []byte{0x89, 0x00}
+	if _, err := rw.Write(header); err != nil {
 		return err
 	}
 	return rw.Flush()

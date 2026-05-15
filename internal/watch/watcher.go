@@ -14,7 +14,7 @@ import (
 
 type sourceWatcher struct {
 	Mode     string
-	Events   <-chan struct{}
+	Events   *EventQueue
 	Warnings []string
 	Close    func() error
 }
@@ -22,16 +22,16 @@ type sourceWatcher struct {
 func newSourceWatcher(ctx context.Context, root string, settings Settings, rules *ignore.Rules, logger EventLogger) sourceWatcher {
 	settings = NormalizeSettings(settings)
 	if settings.Watcher == WatcherPoll {
-		return sourceWatcher{Mode: WatcherPoll}
+		return sourceWatcher{Mode: WatcherPoll, Events: nil}
 	}
+	eq := NewEventQueue()
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		if settings.Watcher == WatcherFSNotify {
-			return sourceWatcher{Mode: WatcherPoll, Warnings: []string{"fsnotify unavailable: " + err.Error()}}
+			return sourceWatcher{Mode: WatcherPoll, Events: nil, Warnings: []string{"fsnotify unavailable: " + err.Error()}}
 		}
-		return sourceWatcher{Mode: WatcherPoll, Warnings: []string{"fsnotify unavailable; using poll fallback"}}
+		return sourceWatcher{Mode: WatcherPoll, Events: nil, Warnings: []string{"fsnotify unavailable; using poll fallback"}}
 	}
-	ch := make(chan struct{}, 1)
 	allowed := map[string]struct{}{}
 	for _, lang := range settings.Languages {
 		allowed[lang] = struct{}{}
@@ -62,7 +62,7 @@ func newSourceWatcher(ctx context.Context, root string, settings Settings, rules
 		warnings = append(warnings, "fsnotify setup warning: "+walkErr.Error())
 	}
 	go func() {
-		defer close(ch)
+		defer eq.Close()
 		defer func() { _ = watcher.Close() }()
 		for {
 			select {
@@ -74,24 +74,17 @@ func newSourceWatcher(ctx context.Context, root string, settings Settings, rules
 				}
 				if event.Has(fsnotify.Create) {
 					if info, err := filepathAbsStat(event.Name); err == nil && info.IsDir() {
-						addCreatedWatchTree(ctx, watcher, root, event.Name, rules, logger)
+						go addCreatedWatchTree(ctx, watcher, root, event.Name, rules, logger)
 					}
 				}
 				if sourceEventRelevant(root, event.Name, allowed, rules) {
-					select {
-					case ch <- struct{}{}:
-					default:
-					}
+					eq.Push(Event{Type: "fsnotify", Message: event.Name})
 				}
 			case <-watcher.Errors:
-				select {
-				case ch <- struct{}{}:
-				default:
-				}
 			}
 		}
 	}()
-	return sourceWatcher{Mode: WatcherFSNotify, Events: ch, Warnings: warnings, Close: watcher.Close}
+	return sourceWatcher{Mode: WatcherFSNotify, Events: eq, Warnings: warnings, Close: watcher.Close}
 }
 
 func addCreatedWatchTree(ctx context.Context, watcher *fsnotify.Watcher, root, dir string, rules *ignore.Rules, logger EventLogger) {

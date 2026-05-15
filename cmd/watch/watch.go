@@ -193,7 +193,7 @@ func NewWatchCmd() *cobra.Command {
 			watchStore := watch.NewStore(sqliteStore.DB())
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-			events := make(chan watch.Event, 16)
+			events := watch.NewEventQueue()
 			ready := make(chan watch.RunnerResult, 1)
 			watchProgress := newWatchActivityProgress(cmd.ErrOrStderr(), watchClientCounter(url))
 			defer func() {
@@ -202,7 +202,7 @@ func NewWatchCmd() *cobra.Command {
 				}
 			}()
 			go func() {
-				for event := range events {
+				for event := range events.Out() {
 					logWatchRuntimeEvent(cmd.Context(), logger, event)
 					watch.BroadcastWatchEvent(event)
 					if logWatchEvent(cmd, event, watchProgress) {
@@ -221,7 +221,7 @@ func NewWatchCmd() *cobra.Command {
 			go func() {
 				_, runErr := watch.NewRunner(watchStore).Run(ctx, watch.RunnerOptions{Path: path, Rescan: rescan, Verbose: verbose, Embedding: embeddingCfg, Settings: watchSettings, DataDir: dataDir, Progress: progress, Logger: logger, Events: events, Ready: ready})
 				errCh <- runErr
-				close(events)
+				events.Close()
 			}()
 			var result watch.RunnerResult
 			select {

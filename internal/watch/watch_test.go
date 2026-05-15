@@ -4307,7 +4307,7 @@ func TestRunnerStopsCleanlyWhenOwnLockIsReleased(t *testing.T) {
 	writeFile(t, repo, "main.go", "package main\nfunc main() {}\n")
 
 	ctx := t.Context()
-	events := make(chan Event, 32)
+	events := NewEventQueue()
 	ready := make(chan RunnerResult, 1)
 	done := make(chan error, 1)
 	store := NewStore(db)
@@ -4322,7 +4322,7 @@ func TestRunnerStopsCleanlyWhenOwnLockIsReleased(t *testing.T) {
 			Ready:             ready,
 		})
 		done <- err
-		close(events)
+		events.Close()
 	}()
 
 	result := waitForRunnerReady(t, ready, done, "released-lock runner")
@@ -4340,7 +4340,7 @@ func TestRunnerEmitsChangeCounter(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	events := make(chan Event, 32)
+	events := NewEventQueue()
 	ready := make(chan RunnerResult, 1)
 	done := make(chan error, 1)
 	go func() {
@@ -4354,12 +4354,12 @@ func TestRunnerEmitsChangeCounter(t *testing.T) {
 			Ready:             ready,
 		})
 		done <- err
-		close(events)
+		events.Close()
 	}()
 
 	waitForRunnerReady(t, ready, done, "change counter runner")
 
-	event := waitForRunnerEvent(t, events, done, "watch.changeCounter", func(event Event) bool {
+	event := waitForRunnerEvent(t, events.Out(), done, "watch.changeCounter", func(event Event) bool {
 		return event.Type == "watch.changeCounter"
 	})
 	counter, ok := event.Data.(ChangeCounter)
@@ -4384,7 +4384,7 @@ func Main() {}
 	subdir := filepath.Join(repo, "cmd", "app")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	events := make(chan Event, 32)
+	events := NewEventQueue()
 	ready := make(chan RunnerResult, 1)
 	done := make(chan error, 1)
 	go func() {
@@ -4398,7 +4398,7 @@ func Main() {}
 			Ready:             ready,
 		})
 		done <- err
-		close(events)
+		events.Close()
 	}()
 
 	result := waitForRunnerReady(t, ready, done, "subdirectory runner")
