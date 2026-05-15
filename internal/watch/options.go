@@ -69,6 +69,11 @@ func ResolveSettings(cfg *workspace.Config, languages []string, watcherMode, pol
 			MaxTrackedFiles: cfg.Watch.Scale.MaxTrackedFiles,
 			MaxLimitedFiles: cfg.Watch.Scale.MaxLimitedFiles,
 		}
+		settings.LSP = LSPConfig{
+			Enabled:          cfg.Watch.LSP.Enabled,
+			HealthInterval:   parseDurationOrZero(cfg.Watch.LSP.HealthInterval),
+			MemoryLimitBytes: cfg.Watch.LSP.MemoryLimitBytes,
+		}
 	}
 	if len(languages) > 0 {
 		settings.Languages = languages
