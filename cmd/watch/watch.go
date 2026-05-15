@@ -337,35 +337,13 @@ func logWatchEvent(cmd *cobra.Command, event watch.Event, activity *watchActivit
 		_, _ = fmt.Fprintf(out, "watch stopped\n")
 		return true
 	case "scan.started":
-		_, _ = fmt.Fprintf(out, "\r\033[Kscanning source graph")
 		return true
 	case "scan.completed":
-		if scan, ok := event.Data.(watch.ScanResult); ok {
-			_, _ = fmt.Fprintf(out, "\r\033[Kscan complete: %d files, %d parsed, %d skipped", scan.FilesSeen, scan.FilesParsed, scan.FilesSkipped)
-			return true
-		}
-		return false
+		return true
 	case "representation.started":
-		_, _ = fmt.Fprintf(out, "\r\033[Kmaterializing representation")
 		return true
 	case "representation.updated":
-		if rep, ok := event.Data.(watch.RepresentResult); ok {
-			line := "Representation updated\n"
-			line += "  Elements:"
-			line += fmt.Sprintf(" %s", term.Colorize(out, term.ColorGreen, fmt.Sprintf("+%d \r\033[K", rep.ElementsCreated)))
-			line += fmt.Sprintf(" %s", term.Colorize(out, term.ColorYellow, fmt.Sprintf("~%d \r\033[K", rep.ElementsUpdated)))
-
-			line += "  Connectors:"
-			line += fmt.Sprintf(" %s", term.Colorize(out, term.ColorGreen, fmt.Sprintf("+%d \r\033[K", rep.ConnectorsCreated)))
-			line += fmt.Sprintf(" %s", term.Colorize(out, term.ColorYellow, fmt.Sprintf("~%d \r\033[K", rep.ConnectorsUpdated)))
-
-			line += "  Embeddings:"
-			line += fmt.Sprintf(" %s", term.Colorize(out, term.ColorGreen, fmt.Sprintf("+%d \r\033[K", rep.EmbeddingsCreated)))
-
-			_, _ = fmt.Fprintf(out, "\r\033[K%s\n", line)
-			return true
-		}
-		return false
+		return true
 	case "source.changed":
 		result, ok := event.Data.(watch.SourceFileChangeResult)
 		if !ok {

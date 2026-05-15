@@ -107,6 +107,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 		logError(ctx, opts.Logger, "watch.runner.initial_pipeline.failed", err, "repo_root", repoRoot)
 		return RunnerResult{}, err
 	}
+	progressStart(opts.Progress, "Starting file watcher", 4)
 	logInfo(ctx, opts.Logger, "watch.runner.initial_pipeline.completed", "repository_id", once.Repository.ID, "scan_run_id", once.Scan.ScanRunID, "representation_run_id", once.Representation.RepresentationRun)
 	scan := once.Scan
 	logInfo(ctx, opts.Logger, "watch.lsp.status", "repository_id", scan.RepositoryID, "requested", scan.LSP.Summary.Requested, "available", scan.LSP.Summary.Available, "active", scan.LSP.Summary.Active, "failed", scan.LSP.Summary.Failed, "unavailable", scan.LSP.Summary.Unavailable, "restarted", scan.LSP.Summary.Restarted, "memory_limited", scan.LSP.Summary.MemoryLimited)
@@ -121,10 +122,12 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 		return RunnerResult{}, err
 	}
 	_ = lock
+	progressAdvance(opts.Progress, "Watch lock acquired")
 	logInfo(ctx, opts.Logger, "watch.lock.enabled", "repository_id", repo.ID, "pid", os.Getpid())
 	sourceWatcher := newSourceWatcher(ctx, repoRoot, settings, r.Scanner.EffectiveRules, opts.Logger)
 	watcherMode := sourceWatcher.Mode
 	warnings := append([]string{}, sourceWatcher.Warnings...)
+	progressAdvance(opts.Progress, "File watcher initialized")
 	logInfo(ctx, opts.Logger, "watch.source_watcher.started", "repository_id", repo.ID, "mode", watcherMode, "warnings", len(warnings))
 	emit(opts.Events, Event{Type: "watch.started", RepositoryID: repo.ID, At: nowString(), Data: repo.JSON(), Phase: "watch", WatcherMode: watcherMode, Languages: settings.Languages, Warnings: warnings})
 	emit(opts.Events, Event{Type: "lock.enabled", RepositoryID: repo.ID, At: nowString()})
@@ -149,7 +152,10 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			emit(opts.Events, Event{Type: "watch.error", RepositoryID: repo.ID, At: nowString(), Message: err.Error()})
 		}
 	}
+	progressAdvance(opts.Progress, "Version recorded")
 
+	progressAdvance(opts.Progress, "Watch loop started")
+	progressFinish(opts.Progress)
 	result := RunnerResult{Repository: repo, InitialScan: scan, InitialRep: rep, GitStatus: gitStatus, Token: token}
 	if opts.Ready != nil {
 		select {
