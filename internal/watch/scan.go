@@ -1244,10 +1244,31 @@ func resolveTargetSymbol(ctx context.Context, resolver definitionResolver, repoR
 		}
 	}
 	targets := byName[ref.Name]
-	if len(targets) != 1 {
+	if ref.FilePath == "" || len(targets) != 1 {
 		return Symbol{}, false
 	}
-	return targets[0], true
+	refRel := filepath.ToSlash(filepath.Clean(ref.FilePath))
+	if filepath.IsAbs(ref.FilePath) {
+		var err error
+		refRel, err = filepath.Rel(repoRoot, ref.FilePath)
+		if err != nil {
+			return Symbol{}, false
+		}
+		refRel = filepath.ToSlash(refRel)
+	}
+	var sameFileTargets []Symbol
+	for _, target := range targets {
+		if target.FilePath == refRel {
+			sameFileTargets = append(sameFileTargets, target)
+		}
+	}
+	if len(sameFileTargets) == 1 {
+		return sameFileTargets[0], true
+	}
+	if strings.EqualFold(filepath.Ext(refRel), ".go") {
+		return targets[0], true
+	}
+	return Symbol{}, false
 }
 
 func symbolAtLocation(repoRoot string, symbols []Symbol, location analyzerlsp.DefinitionLocation) (Symbol, bool) {

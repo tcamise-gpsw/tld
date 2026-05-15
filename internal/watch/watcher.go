@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ type sourceWatcher struct {
 	Close    func() error
 }
 
-func newSourceWatcher(ctx context.Context, root string, settings Settings, rules *ignore.Rules) sourceWatcher {
+func newSourceWatcher(ctx context.Context, root string, settings Settings, rules *ignore.Rules, logger EventLogger) sourceWatcher {
 	settings = NormalizeSettings(settings)
 	if settings.Watcher == WatcherPoll {
 		return sourceWatcher{Mode: WatcherPoll}
@@ -38,6 +39,7 @@ func newSourceWatcher(ctx context.Context, root string, settings Settings, rules
 	if rules == nil {
 		rules = &ignore.Rules{}
 	}
+	warnings := []string{}
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -50,10 +52,12 @@ func newSourceWatcher(ctx context.Context, root string, settings Settings, rules
 		if rel != "." && (rules.ShouldIgnorePath(rel) || isHiddenBuildOutput(d.Name())) {
 			return filepath.SkipDir
 		}
-		_ = watcher.Add(path)
+		if err := watcher.Add(path); err != nil {
+			warnings = append(warnings, fsnotifyAddWarning(path, err))
+			logError(ctx, logger, "watch.fsnotify.add_failed", err, "path", path)
+		}
 		return nil
 	})
-	warnings := []string{}
 	if walkErr != nil {
 		warnings = append(warnings, "fsnotify setup warning: "+walkErr.Error())
 	}
@@ -70,7 +74,7 @@ func newSourceWatcher(ctx context.Context, root string, settings Settings, rules
 				}
 				if event.Has(fsnotify.Create) {
 					if info, err := filepathAbsStat(event.Name); err == nil && info.IsDir() {
-						_ = watcher.Add(event.Name)
+						addCreatedWatchTree(ctx, watcher, root, event.Name, rules, logger)
 					}
 				}
 				if sourceEventRelevant(root, event.Name, allowed, rules) {
@@ -88,6 +92,40 @@ func newSourceWatcher(ctx context.Context, root string, settings Settings, rules
 		}
 	}()
 	return sourceWatcher{Mode: WatcherFSNotify, Events: ch, Warnings: warnings, Close: watcher.Close}
+}
+
+func addCreatedWatchTree(ctx context.Context, watcher *fsnotify.Watcher, root, dir string, rules *ignore.Rules, logger EventLogger) {
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if !sourceWatchDirAllowed(root, path, d.Name(), rules) {
+			return filepath.SkipDir
+		}
+		if err := watcher.Add(path); err != nil {
+			logError(ctx, logger, "watch.fsnotify.add_failed", err, "path", path, "warning", fsnotifyAddWarning(path, err))
+		}
+		return nil
+	})
+}
+
+func sourceWatchDirAllowed(root, path, name string, rules *ignore.Rules) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel != "." && (rules.ShouldIgnorePath(rel) || isHiddenBuildOutput(name)) {
+		return false
+	}
+	return true
+}
+
+func fsnotifyAddWarning(path string, err error) string {
+	return fmt.Sprintf("fsnotify could not watch %s: %v; increase the open file limit or use a scalable native watcher such as fsevents on macOS", path, err)
 }
 
 func sourceEventRelevant(root, eventPath string, allowed map[string]struct{}, rules *ignore.Rules) bool {

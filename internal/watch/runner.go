@@ -72,6 +72,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 		opts.Path = "."
 	}
 	settings := NormalizeSettings(opts.Settings)
+	opts.Settings = settings
 	if opts.PollInterval <= 0 {
 		opts.PollInterval = settings.PollInterval
 	}
@@ -118,7 +119,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 	}
 	_ = lock
 	logInfo(ctx, opts.Logger, "watch.lock.enabled", "repository_id", repo.ID, "pid", os.Getpid())
-	sourceWatcher := newSourceWatcher(ctx, repoRoot, settings, r.Scanner.EffectiveRules)
+	sourceWatcher := newSourceWatcher(ctx, repoRoot, settings, r.Scanner.EffectiveRules, opts.Logger)
 	watcherMode := sourceWatcher.Mode
 	warnings := append([]string{}, sourceWatcher.Warnings...)
 	logInfo(ctx, opts.Logger, "watch.source_watcher.started", "repository_id", repo.ID, "mode", watcherMode, "warnings", len(warnings))
@@ -156,15 +157,16 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 	lastSourceSnapshot := map[string]string{}
 	lastFingerprint := ""
 	if !limitedMode {
-		lastSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules)
+		lastSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, nil)
 		lastFingerprint = sourceFileFingerprint(lastSourceSnapshot)
 	}
 	lastHead := gitStatus.HeadCommit
 	lastGitFingerprint := gitStatusFingerprint(gitStatus)
-	heartbeat := time.NewTicker(opts.HeartbeatInterval)
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	heartbeatResults := r.startLockHeartbeat(heartbeatCtx, repo.ID, token, opts, watcherMode, warnings)
 	poll := time.NewTicker(opts.PollInterval)
 	summary := time.NewTicker(opts.SummaryInterval)
-	defer heartbeat.Stop()
 	defer poll.Stop()
 	defer summary.Stop()
 	totalChangesProcessed := 0
@@ -189,33 +191,14 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				},
 			})
 			intervalChangesProcessed = 0
-		case <-heartbeat.C:
-			if _, err := r.Store.HeartbeatLock(ctx, repo.ID, token); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					logInfo(ctx, opts.Logger, "watch.heartbeat.lock_missing", "repository_id", repo.ID)
-					return result, nil
-				}
-				logError(ctx, opts.Logger, "watch.heartbeat.failed", err, "repository_id", repo.ID)
-				return result, err
+		case heartbeat, ok := <-heartbeatResults:
+			if !ok {
+				heartbeatResults = nil
+				continue
 			}
-			status, err := r.Store.LockStatus(ctx, repo.ID, token)
-			if errors.Is(err, sql.ErrNoRows) {
-				logInfo(ctx, opts.Logger, "watch.status.lock_missing", "repository_id", repo.ID)
-				return result, nil
+			if heartbeat.stop {
+				return result, heartbeat.err
 			}
-			if err != nil {
-				logError(ctx, opts.Logger, "watch.status.lock_status_failed", err, "repository_id", repo.ID)
-				return result, err
-			}
-			if status == "stopping" {
-				logInfo(ctx, opts.Logger, "watch.status.stopping", "repository_id", repo.ID)
-				return result, nil
-			}
-			if status == "paused" {
-				logInfo(ctx, opts.Logger, "watch.status.paused", "repository_id", repo.ID)
-				emit(opts.Events, Event{Type: "watch.paused", RepositoryID: repo.ID, At: nowString()})
-			}
-			emit(opts.Events, Event{Type: "watch.heartbeat", RepositoryID: repo.ID, At: nowString(), Phase: "watch", WatcherMode: watcherMode, Languages: settings.Languages, Warnings: warnings})
 		case _, ok := <-sourceWatcher.Events:
 			if ok {
 				logInfo(ctx, opts.Logger, "watch.source_event.received", "repository_id", repo.ID)
@@ -248,7 +231,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			nextGitFingerprint := gitStatusFingerprint(nextGit)
 			nextFingerprint := ""
 			if !limitedMode {
-				nextSourceSnapshot := sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules)
+				nextSourceSnapshot := sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
 				nextFingerprint = sourceFileFingerprint(nextSourceSnapshot)
 				if nextFingerprint == lastFingerprint && nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
 					continue
@@ -257,11 +240,14 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				continue
 			}
 			logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "source_fingerprint_changed", nextFingerprint != lastFingerprint, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
-			time.Sleep(opts.Debounce)
+			if err := waitDebounce(ctx, opts.Debounce); err != nil {
+				logInfo(ctx, opts.Logger, "watch.runner.context_done", "repository_id", repo.ID, "error", err)
+				return result, nil
+			}
 			stableSourceSnapshot := map[string]string{}
 			sourceChanged := false
 			if !limitedMode {
-				stableSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules)
+				stableSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
 				sourceChanged = sourceFileFingerprint(stableSourceSnapshot) != lastFingerprint
 			}
 			nextGit, err = gitStatusSnapshot(repoRoot)
@@ -347,6 +333,77 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			}
 			lastGitFingerprint = nextGitFingerprint
 		}
+	}
+}
+
+type heartbeatResult struct {
+	stop bool
+	err  error
+}
+
+func (r *Runner) startLockHeartbeat(ctx context.Context, repositoryID int64, token string, opts RunnerOptions, watcherMode string, warnings []string) <-chan heartbeatResult {
+	results := make(chan heartbeatResult, 1)
+	ticker := time.NewTicker(opts.HeartbeatInterval)
+	go func() {
+		defer ticker.Stop()
+		defer close(results)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := r.Store.HeartbeatLock(ctx, repositoryID, token); err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						logInfo(ctx, opts.Logger, "watch.heartbeat.lock_missing", "repository_id", repositoryID)
+						sendHeartbeatResult(results, heartbeatResult{stop: true})
+						return
+					}
+					logError(ctx, opts.Logger, "watch.heartbeat.failed", err, "repository_id", repositoryID)
+					sendHeartbeatResult(results, heartbeatResult{stop: true, err: err})
+					return
+				}
+				status, err := r.Store.LockStatus(ctx, repositoryID, token)
+				if errors.Is(err, sql.ErrNoRows) {
+					logInfo(ctx, opts.Logger, "watch.status.lock_missing", "repository_id", repositoryID)
+					sendHeartbeatResult(results, heartbeatResult{stop: true})
+					return
+				}
+				if err != nil {
+					logError(ctx, opts.Logger, "watch.status.lock_status_failed", err, "repository_id", repositoryID)
+					sendHeartbeatResult(results, heartbeatResult{stop: true, err: err})
+					return
+				}
+				if status == "stopping" {
+					logInfo(ctx, opts.Logger, "watch.status.stopping", "repository_id", repositoryID)
+					sendHeartbeatResult(results, heartbeatResult{stop: true})
+					return
+				}
+				if status == "paused" {
+					logInfo(ctx, opts.Logger, "watch.status.paused", "repository_id", repositoryID)
+					emit(opts.Events, Event{Type: "watch.paused", RepositoryID: repositoryID, At: nowString()})
+				}
+				emit(opts.Events, Event{Type: "watch.heartbeat", RepositoryID: repositoryID, At: nowString(), Phase: "watch", WatcherMode: watcherMode, Languages: opts.Settings.Languages, Warnings: warnings})
+			}
+		}
+	}()
+	return results
+}
+
+func sendHeartbeatResult(results chan<- heartbeatResult, result heartbeatResult) {
+	select {
+	case results <- result:
+	default:
+	}
+}
+
+func waitDebounce(ctx context.Context, debounce time.Duration) error {
+	timer := time.NewTimer(debounce)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -488,7 +545,7 @@ func gitStatusFingerprint(status GitStatus) string {
 	return hashString(strings.Join(parts, "\n"))
 }
 
-func sourceFileSnapshot(repoRoot string, settings Settings, rules *ignore.Rules) map[string]string {
+func sourceFileSnapshot(repoRoot string, settings Settings, rules *ignore.Rules, previous map[string]string) map[string]string {
 	files := map[string]string{}
 	settings = NormalizeSettings(settings)
 	allowed := map[string]struct{}{}
@@ -518,7 +575,12 @@ func sourceFileSnapshot(repoRoot string, settings Settings, rules *ignore.Rules)
 		if err != nil {
 			return nil
 		}
-		files[rel] = language + ":" + info.ModTime().UTC().Format(time.RFC3339Nano) + ":" + fmt.Sprint(info.Size()) + ":" + sourceSnapshotFileHash(path, info.Size())
+		meta := language + ":" + info.ModTime().UTC().Format(time.RFC3339Nano) + ":" + fmt.Sprint(info.Size())
+		if previousValue, ok := previous[rel]; ok && strings.HasPrefix(previousValue, meta+":") {
+			files[rel] = previousValue
+			return nil
+		}
+		files[rel] = meta + ":" + sourceSnapshotFileHash(path, info.Size())
 		return nil
 	})
 	return files

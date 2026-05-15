@@ -21,6 +21,7 @@ import (
 	"github.com/mertcikla/tld/v2/internal/analyzer"
 	analyzerlsp "github.com/mertcikla/tld/v2/internal/analyzer/lsp"
 	tldgit "github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 	"github.com/mertcikla/tld/v2/internal/layout"
 	"github.com/mertcikla/tld/v2/internal/watch/enrich"
 	"github.com/mertcikla/tld/v2/internal/watch/enrich/defaults"
@@ -1575,7 +1576,7 @@ func TestSourceSnapshotsRespectLanguagesAndReportChangeLanguage(t *testing.T) {
 	writeFile(t, repo, "README.md", "# ignored\n")
 
 	settings := Settings{Languages: []string{"typescript"}}
-	snapshot := sourceFileSnapshot(repo, settings, nil)
+	snapshot := sourceFileSnapshot(repo, settings, nil, nil)
 	if len(snapshot) != 1 || snapshot["web/app.ts"] == "" {
 		t.Fatalf("expected only TypeScript source file, got %#v", snapshot)
 	}
@@ -1586,6 +1587,33 @@ func TestSourceSnapshotsRespectLanguagesAndReportChangeLanguage(t *testing.T) {
 	)
 	if got := changeSummary(changes); got != "changed.go:modified:go,new.cpp:added:cpp,old.py:deleted:python" {
 		t.Fatalf("unexpected source changes: %s (%+v)", got, changes)
+	}
+}
+
+func TestSourceSnapshotReusesHashWhenMetadataUnchanged(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", "package main\nfunc Main() {}\n")
+
+	first := sourceFileSnapshot(repo, Settings{Languages: []string{"go"}}, nil, nil)
+	hashSep := strings.LastIndex(first["main.go"], ":")
+	if hashSep < 0 {
+		t.Fatalf("unexpected snapshot entry %q", first["main.go"])
+	}
+	previous := map[string]string{"main.go": first["main.go"][:hashSep] + ":sentinel"}
+	next := sourceFileSnapshot(repo, Settings{Languages: []string{"go"}}, nil, previous)
+	if next["main.go"] != previous["main.go"] {
+		t.Fatalf("expected unchanged metadata to reuse prior hash, got %q", next["main.go"])
+	}
+
+	time.Sleep(time.Millisecond)
+	writeFile(t, repo, "main.go", "package main\nfunc Other() {}\n")
+	future := time.Now().Add(time.Second)
+	if err := os.Chtimes(filepath.Join(repo, "main.go"), future, future); err != nil {
+		t.Fatal(err)
+	}
+	changed := sourceFileSnapshot(repo, Settings{Languages: []string{"go"}}, nil, previous)
+	if changed["main.go"] == previous["main.go"] {
+		t.Fatalf("expected changed metadata to refresh snapshot hash, got %q", changed["main.go"])
 	}
 }
 
@@ -1607,9 +1635,24 @@ func TestSourceWatcherFiltersRelevantEvents(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	watcher := newSourceWatcher(ctx, repo, Settings{Watcher: WatcherPoll}, nil)
+	watcher := newSourceWatcher(ctx, repo, Settings{Watcher: WatcherPoll}, nil, nil)
 	if watcher.Mode != WatcherPoll || watcher.Events != nil {
 		t.Fatalf("poll watcher should not create fs event channel, got %+v", watcher)
+	}
+}
+
+func TestSourceWatchDirAllowedRespectsIgnores(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	rules := &ignore.Rules{Exclude: []string{"node_modules/", ".git/"}}
+
+	if !sourceWatchDirAllowed(repo, repo, ".", rules) {
+		t.Fatal("repository root should be watchable")
+	}
+	if sourceWatchDirAllowed(repo, filepath.Join(repo, "node_modules"), "node_modules", rules) {
+		t.Fatal("ignored node_modules directory should not be watched")
+	}
+	if sourceWatchDirAllowed(repo, filepath.Join(repo, ".git", "objects"), "objects", rules) {
+		t.Fatal("ignored .git descendant should not be watched")
 	}
 }
 
@@ -2292,6 +2335,24 @@ export function caller(): string {
 	connectorKey := fmt.Sprintf("symbol:%s:%s:call", symbolOwnerKey(caller, nil), symbolOwnerKey(target, nil))
 	if connector := materializedResourceID(t, db, scan.RepositoryID, "reference", connectorKey, "connector"); connector == 0 {
 		t.Fatal("expected resolved reference connector to be materialized")
+	}
+}
+
+func TestResolveTargetSymbolDoesNotUseGlobalNameOnlyFallback(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	symbols := []Symbol{
+		{ID: 1, Name: "uniqueCoincidence", FilePath: "pkg/target.ts", StartLine: 1},
+		{ID: 2, Name: "caller", FilePath: "cmd/main.ts", StartLine: 1},
+	}
+	byName := map[string][]Symbol{
+		"uniqueCoincidence": {symbols[0]},
+		"caller":            {symbols[1]},
+	}
+	if _, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "uniqueCoincidence", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); ok {
+		t.Fatal("global unique name-only fallback should not create a cross-file reference")
+	}
+	if target, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "caller", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); !ok || target.ID != 2 {
+		t.Fatalf("same-file fallback should still resolve local references, target=%+v ok=%v", target, ok)
 	}
 }
 
