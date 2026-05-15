@@ -10,14 +10,15 @@ import (
 )
 
 type OneShotOptions struct {
-	Path      string
-	Files     []string
-	Rescan    bool
-	Embedding EmbeddingConfig
-	Settings  Settings
-	Progress  ProgressSink
-	DataDir   string
-	Logger    EventLogger
+	Path             string
+	Files            []string
+	Rescan           bool
+	Embedding        EmbeddingConfig
+	Settings         Settings
+	Progress         ProgressSink
+	DataDir          string
+	Logger           EventLogger
+	ConfirmAfterScan func(context.Context, ScanResult) error
 }
 
 type OneShotResult struct {
@@ -98,6 +99,12 @@ func (r *Runner) RunOnce(ctx context.Context, opts OneShotOptions) (OneShotResul
 		}
 	}
 	logInfo(ctx, opts.Logger, "watch.scan.completed", "elapsed", logElapsed(scanStarted), "repository_id", scan.RepositoryID, "scan_run_id", scan.ScanRunID, "files_seen", scan.FilesSeen, "files_parsed", scan.FilesParsed, "files_skipped", scan.FilesSkipped, "symbols_seen", scan.SymbolsSeen, "references_seen", scan.ReferencesSeen, "warnings", len(scan.Warnings), "mode", scan.Mode, "strategy", scan.Strategy)
+	if opts.ConfirmAfterScan != nil {
+		if err := opts.ConfirmAfterScan(ctx, scan); err != nil {
+			logError(ctx, opts.Logger, "watch.scan.confirmation_failed", err, "repository_id", scan.RepositoryID)
+			return OneShotResult{}, err
+		}
+	}
 	repo, err := r.Store.Repository(ctx, scan.RepositoryID)
 	if err != nil {
 		logError(ctx, opts.Logger, "watch.repository.load.failed", err, "repository_id", scan.RepositoryID)

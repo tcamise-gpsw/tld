@@ -180,6 +180,7 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 	}{
 		{"watch.poll_interval", cfg.Watch.PollInterval},
 		{"watch.debounce", cfg.Watch.Debounce},
+		{"watch.lsp.health_interval", cfg.Watch.LSP.HealthInterval},
 	} {
 		d, err := time.ParseDuration(strings.TrimSpace(item.value))
 		if err != nil || d <= 0 {
@@ -214,6 +215,9 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 		if item.value <= 0 {
 			add(item.key, "must be positive")
 		}
+	}
+	if cfg.Watch.LSP.MemoryLimitBytes <= 0 {
+		add("watch.lsp.memory_limit_bytes", "must be positive")
 	}
 	for _, item := range []struct {
 		key   string
@@ -332,6 +336,9 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "watch.scale.strategy", Env: []string{"TLD_WATCH_SCALE_STRATEGY"}, Description: "Huge-repo scan strategy: auto, full, limited, or abort."},
 	{Key: "watch.scale.max_tracked_files", Env: []string{"TLD_WATCH_SCALE_MAX_TRACKED_FILES"}, Description: "Tracked-file threshold before auto limited view."},
 	{Key: "watch.scale.max_limited_files", Env: []string{"TLD_WATCH_SCALE_MAX_LIMITED_FILES"}, Description: "Maximum high-signal files selected in limited view."},
+	{Key: "watch.lsp.enabled", Env: []string{"TLD_WATCH_LSP_ENABLED"}, Description: "Enable language-server definition resolution during watch/analyze scans."},
+	{Key: "watch.lsp.health_interval", Env: []string{"TLD_WATCH_LSP_HEALTH_INTERVAL"}, Description: "Minimum interval between language-server health checks."},
+	{Key: "watch.lsp.memory_limit_bytes", Env: []string{"TLD_WATCH_LSP_MEMORY_LIMIT_BYTES"}, Description: "Per-language-server RSS limit before the server is restarted."},
 	{Key: "watch.visibility.core_threshold_enabled", Description: "Enable score thresholding for watch visibility decisions."},
 	{Key: "watch.visibility.core_threshold", Description: "Minimum score for core watch visibility."},
 	{Key: "watch.visibility.tier_multiplier", Description: "Density multiplier added by each Show Context tier."},
@@ -454,6 +461,9 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"watch.scale.strategy", "TLD_WATCH_SCALE_STRATEGY"},
 		{"watch.scale.max_tracked_files", "TLD_WATCH_SCALE_MAX_TRACKED_FILES"},
 		{"watch.scale.max_limited_files", "TLD_WATCH_SCALE_MAX_LIMITED_FILES"},
+		{"watch.lsp.enabled", "TLD_WATCH_LSP_ENABLED"},
+		{"watch.lsp.health_interval", "TLD_WATCH_LSP_HEALTH_INTERVAL"},
+		{"watch.lsp.memory_limit_bytes", "TLD_WATCH_LSP_MEMORY_LIMIT_BYTES"},
 		{"watch.embedding.provider", "TLD_EMBEDDING_PROVIDER"},
 		{"watch.embedding.endpoint", "TLD_EMBEDDING_ENDPOINT"},
 		{"watch.embedding.model", "TLD_EMBEDDING_MODEL"},
@@ -589,6 +599,20 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.Watch.Scale.MaxLimitedFiles = v
+	case "watch.lsp.enabled":
+		v, err := parseBool(value)
+		if err != nil {
+			return err
+		}
+		cfg.Watch.LSP.Enabled = v
+	case "watch.lsp.health_interval":
+		cfg.Watch.LSP.HealthInterval = strings.TrimSpace(value)
+	case "watch.lsp.memory_limit_bytes":
+		v, err := parseInt64(value)
+		if err != nil {
+			return err
+		}
+		cfg.Watch.LSP.MemoryLimitBytes = v
 	case "watch.thresholds.max_elements_per_view":
 		v, err := parseInt(value)
 		if err != nil {
@@ -807,6 +831,12 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.Watch.Scale.MaxTrackedFiles
 	case "watch.scale.max_limited_files":
 		return cfg.Watch.Scale.MaxLimitedFiles
+	case "watch.lsp.enabled":
+		return cfg.Watch.LSP.Enabled
+	case "watch.lsp.health_interval":
+		return cfg.Watch.LSP.HealthInterval
+	case "watch.lsp.memory_limit_bytes":
+		return cfg.Watch.LSP.MemoryLimitBytes
 	case "watch.visibility.core_threshold_enabled":
 		return cfg.Watch.Visibility.CoreThresholdEnabled
 	case "watch.visibility.core_threshold":
@@ -917,6 +947,13 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	appendUnknownEntries(scale, mappingValueNode(mappingValueNode(existing, "watch"), "scale"), setOf("strategy", "max_tracked_files", "max_limited_files"))
 	addMap(watchNode, "scale", scale, "Huge-repo detection and limited-view settings.")
 
+	lsp := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	addScalar(lsp, "enabled", cfg.Watch.LSP.Enabled, desc("watch.lsp.enabled"))
+	addScalar(lsp, "health_interval", cfg.Watch.LSP.HealthInterval, desc("watch.lsp.health_interval"))
+	addScalar(lsp, "memory_limit_bytes", cfg.Watch.LSP.MemoryLimitBytes, desc("watch.lsp.memory_limit_bytes"))
+	appendUnknownEntries(lsp, mappingValueNode(mappingValueNode(existing, "watch"), "lsp"), setOf("enabled", "health_interval", "memory_limit_bytes"))
+	addMap(watchNode, "lsp", lsp, "Language-server integration settings.")
+
 	visibility := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	addScalar(visibility, "core_threshold_enabled", cfg.Watch.Visibility.CoreThresholdEnabled, desc("watch.visibility.core_threshold_enabled"))
 	addScalar(visibility, "core_threshold", cfg.Watch.Visibility.CoreThreshold, desc("watch.visibility.core_threshold"))
@@ -954,7 +991,7 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	appendUnknownEntries(layout, mappingValueNode(mappingValueNode(existing, "watch"), "layout"), setOf("link_distance", "charge_strength", "collide_radius", "gravity_strength"))
 	addMap(watchNode, "layout", layout, "Organic layout tuning for generated watch views.")
 
-	appendUnknownEntries(watchNode, mappingValueNode(existing, "watch"), setOf("languages", "watcher", "poll_interval", "debounce", "thresholds", "scale", "visibility", "embedding", "layout"))
+	appendUnknownEntries(watchNode, mappingValueNode(existing, "watch"), setOf("languages", "watcher", "poll_interval", "debounce", "thresholds", "scale", "lsp", "visibility", "embedding", "layout"))
 	addMap(mapping, "watch", watchNode, "Source watch/analyze pipeline settings.")
 
 	completion := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -994,6 +1031,8 @@ func scalarNode(value any) *yaml.Node {
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(v)}
 	case int:
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(v)}
+	case int64:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.FormatInt(v, 10)}
 	case float64:
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: strconv.FormatFloat(v, 'f', -1, 64)}
 	default:
@@ -1082,6 +1121,14 @@ func parseBool(value string) (bool, error) {
 
 func parseInt(value string) (int, error) {
 	v, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0, fmt.Errorf("must be an integer")
+	}
+	return v, nil
+}
+
+func parseInt64(value string) (int64, error) {
+	v, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("must be an integer")
 	}

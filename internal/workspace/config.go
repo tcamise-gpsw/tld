@@ -135,6 +135,12 @@ type WatchScaleConfig struct {
 	MaxLimitedFiles int    `yaml:"max_limited_files"`
 }
 
+type WatchLSPConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	HealthInterval   string `yaml:"health_interval"`
+	MemoryLimitBytes int64  `yaml:"memory_limit_bytes"`
+}
+
 type WatchConfig struct {
 	Languages    []string              `yaml:"languages"`
 	Watcher      string                `yaml:"watcher"`
@@ -145,6 +151,7 @@ type WatchConfig struct {
 	Embedding    WatchEmbeddingConfig  `yaml:"embedding"`
 	Layout       WatchLayoutConfig     `yaml:"layout"`
 	Scale        WatchScaleConfig      `yaml:"scale"`
+	LSP          WatchLSPConfig        `yaml:"lsp"`
 }
 
 type CompletionConfig struct {
@@ -217,6 +224,11 @@ func DefaultConfig() *Config {
 				Strategy:        "auto",
 				MaxTrackedFiles: 15000,
 				MaxLimitedFiles: 2000,
+			},
+			LSP: WatchLSPConfig{
+				Enabled:          true,
+				HealthInterval:   "1m",
+				MemoryLimitBytes: 1073741824,
 			},
 		},
 		Updates: UpdatesConfig{

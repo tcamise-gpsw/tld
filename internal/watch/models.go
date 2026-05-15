@@ -120,22 +120,57 @@ type Summary struct {
 }
 
 type ScanResult struct {
-	RepositoryID        int64    `json:"repository_id"`
-	ScanRunID           int64    `json:"scan_run_id"`
-	FilesSeen           int      `json:"files_seen"`
-	FilesParsed         int      `json:"files_parsed"`
-	FilesSkipped        int      `json:"files_skipped"`
-	SymbolsSeen         int      `json:"symbols_seen"`
-	ReferencesSeen      int      `json:"references_seen"`
-	Mode                string   `json:"mode,omitempty"`
-	Strategy            string   `json:"strategy,omitempty"`
-	StrategyReason      string   `json:"strategy_reason,omitempty"`
-	TrackedFiles        int      `json:"tracked_files,omitempty"`
-	SelectedFiles       int      `json:"selected_files,omitempty"`
-	SkippedTrackedFiles int      `json:"skipped_tracked_files,omitempty"`
-	BaselineWorktree    string   `json:"baseline_worktree,omitempty"`
-	Warning             string   `json:"warning,omitempty"`
-	Warnings            []string `json:"warnings,omitempty"`
+	RepositoryID        int64     `json:"repository_id"`
+	ScanRunID           int64     `json:"scan_run_id"`
+	FilesSeen           int       `json:"files_seen"`
+	FilesParsed         int       `json:"files_parsed"`
+	FilesSkipped        int       `json:"files_skipped"`
+	SymbolsSeen         int       `json:"symbols_seen"`
+	ReferencesSeen      int       `json:"references_seen"`
+	LSP                 LSPStatus `json:"lsp"`
+	Mode                string    `json:"mode,omitempty"`
+	Strategy            string    `json:"strategy,omitempty"`
+	StrategyReason      string    `json:"strategy_reason,omitempty"`
+	TrackedFiles        int       `json:"tracked_files,omitempty"`
+	SelectedFiles       int       `json:"selected_files,omitempty"`
+	SkippedTrackedFiles int       `json:"skipped_tracked_files,omitempty"`
+	BaselineWorktree    string    `json:"baseline_worktree,omitempty"`
+	Warning             string    `json:"warning,omitempty"`
+	Warnings            []string  `json:"warnings,omitempty"`
+}
+
+type LSPStatus struct {
+	Enabled               bool              `json:"enabled"`
+	HealthIntervalSeconds int               `json:"health_interval_seconds,omitempty"`
+	MemoryLimitBytes      int64             `json:"memory_limit_bytes,omitempty"`
+	MemoryMonitoring      string            `json:"memory_monitoring,omitempty"`
+	Servers               []LSPServerStatus `json:"servers,omitempty"`
+	Summary               LSPStatusSummary  `json:"summary"`
+}
+
+type LSPServerStatus struct {
+	Language        string `json:"language"`
+	Command         string `json:"command,omitempty"`
+	Path            string `json:"path,omitempty"`
+	State           string `json:"state"`
+	PID             int    `json:"pid,omitempty"`
+	ServerName      string `json:"server_name,omitempty"`
+	ServerVersion   string `json:"server_version,omitempty"`
+	Definition      bool   `json:"definition"`
+	MemoryBytes     int64  `json:"memory_bytes,omitempty"`
+	RestartCount    int    `json:"restart_count,omitempty"`
+	LastHealthcheck string `json:"last_healthcheck,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
+}
+
+type LSPStatusSummary struct {
+	Requested     int `json:"requested"`
+	Available     int `json:"available"`
+	Active        int `json:"active"`
+	Unavailable   int `json:"unavailable"`
+	Failed        int `json:"failed"`
+	Restarted     int `json:"restarted"`
+	MemoryLimited int `json:"memory_limited"`
 }
 
 type EmbeddingConfig struct {
@@ -185,12 +220,19 @@ type Settings struct {
 	Thresholds   Thresholds       `json:"thresholds"`
 	Visibility   VisibilityConfig `json:"visibility"`
 	Scale        ScaleConfig      `json:"scale"`
+	LSP          LSPConfig        `json:"lsp"`
 }
 
 type ScaleConfig struct {
 	Strategy        string `json:"strategy" yaml:"strategy"`
 	MaxTrackedFiles int    `json:"max_tracked_files" yaml:"max_tracked_files"`
 	MaxLimitedFiles int    `json:"max_limited_files" yaml:"max_limited_files"`
+}
+
+type LSPConfig struct {
+	Enabled          bool          `json:"enabled" yaml:"enabled"`
+	HealthInterval   time.Duration `json:"health_interval" yaml:"health_interval"`
+	MemoryLimitBytes int64         `json:"memory_limit_bytes" yaml:"memory_limit_bytes"`
 }
 
 type RepresentRequest struct {

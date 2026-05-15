@@ -156,7 +156,7 @@ func (s *Scanner) ScanFilesWithOptions(ctx context.Context, repo Repository, rel
 	}
 	sort.Strings(files)
 	repoSignals := enrich.DiscoverRepositorySignalsFromFiles(repoRoot, files)
-	result := ScanResult{RepositoryID: repo.ID, FilesSeen: len(files)}
+	result := ScanResult{RepositoryID: repo.ID, FilesSeen: len(files), LSP: InitialLSPStatus(settings)}
 	logInfo(ctx, s.Logger, "watch.scan.source_discovery.completed", "repository_id", repo.ID, "files", len(files), "mode", "focused")
 	mode := "focused"
 	if opts.Force {
@@ -212,14 +212,16 @@ func (s *Scanner) ScanFilesWithOptions(ctx context.Context, repo Repository, rel
 	resolveStarted := time.Now()
 	logInfo(ctx, s.Logger, "watch.scan.references.started", "repository_id", repo.ID, "files", len(parsedFiles))
 	progressStart(progress, "Resolving code references", len(parsedFiles))
-	refs, warning, err := s.resolveReferences(ctx, repoRoot, repo.ID, parsedFiles, progress)
+	refs, warning, err := s.resolveReferences(ctx, repoRoot, repo.ID, parsedFiles, settings, progress)
 	progressFinish(progress)
 	if err != nil {
 		scanErr = err
 		logError(ctx, s.Logger, "watch.scan.references.failed", err, "elapsed", logElapsed(resolveStarted), "repository_id", repo.ID)
 		return result, err
 	}
-	logInfo(ctx, s.Logger, "watch.scan.references.completed", "elapsed", logElapsed(resolveStarted), "repository_id", repo.ID, "references", len(refs), "warning", warning)
+	result.LSP = s.currentLSPStatus(settings)
+	result.Warnings = append(result.Warnings, lspWarnings(result.LSP)...)
+	logInfo(ctx, s.Logger, "watch.scan.references.completed", "elapsed", logElapsed(resolveStarted), "repository_id", repo.ID, "references", len(refs), "warning", warning, "lsp_active", result.LSP.Summary.Active, "lsp_failed", result.LSP.Summary.Failed, "lsp_unavailable", result.LSP.Summary.Unavailable)
 	result.Warning = warning
 	if warning != "" {
 		result.Warnings = append(result.Warnings, warning)
@@ -274,7 +276,7 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	if err != nil {
 		return ScanResult{}, err
 	}
-	result := ScanResult{RepositoryID: repo.ID}
+	result := ScanResult{RepositoryID: repo.ID, LSP: InitialLSPStatus(settings)}
 	plan, err := planScan(repoRoot, settings, effectiveRules)
 	if err != nil {
 		return ScanResult{}, err
@@ -411,14 +413,16 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	resolveStarted := time.Now()
 	logInfo(ctx, s.Logger, "watch.scan.references.started", "repository_id", repo.ID, "files", len(parsedFiles))
 	progressStart(progress, "Resolving code references", len(parsedFiles))
-	refs, warning, err := s.resolveReferences(ctx, repoRoot, repo.ID, parsedFiles, progress)
+	refs, warning, err := s.resolveReferences(ctx, repoRoot, repo.ID, parsedFiles, settings, progress)
 	progressFinish(progress)
 	if err != nil {
 		scanErr = err
 		logError(ctx, s.Logger, "watch.scan.references.failed", err, "elapsed", logElapsed(resolveStarted), "repository_id", repo.ID)
 		return result, err
 	}
-	logInfo(ctx, s.Logger, "watch.scan.references.completed", "elapsed", logElapsed(resolveStarted), "repository_id", repo.ID, "references", len(refs), "warning", warning)
+	result.LSP = s.currentLSPStatus(settings)
+	result.Warnings = append(result.Warnings, lspWarnings(result.LSP)...)
+	logInfo(ctx, s.Logger, "watch.scan.references.completed", "elapsed", logElapsed(resolveStarted), "repository_id", repo.ID, "references", len(refs), "warning", warning, "lsp_active", result.LSP.Summary.Active, "lsp_failed", result.LSP.Summary.Failed, "lsp_unavailable", result.LSP.Summary.Unavailable)
 	result.Warning = warning
 	if warning != "" {
 		result.Warnings = append(result.Warnings, warning)
@@ -1157,7 +1161,7 @@ func (s *Scanner) Close() error {
 	return nil
 }
 
-func (s *Scanner) getOrCreateResolver(repoRoot string) definitionResolver {
+func (s *Scanner) getOrCreateResolver(repoRoot string, settings Settings) definitionResolver {
 	s.resolverMu.Lock()
 	defer s.resolverMu.Unlock()
 	if s.resolver != nil && s.resolverRepoRoot != repoRoot {
@@ -1168,7 +1172,12 @@ func (s *Scanner) getOrCreateResolver(repoRoot string) definitionResolver {
 		factory := s.resolverFactory
 		if factory == nil {
 			factory = func(rootDir string) definitionResolver {
-				return analyzerlsp.NewMultiLanguageResolver(rootDir)
+				return analyzerlsp.NewMultiLanguageResolverWithConfig(rootDir, analyzerlsp.ResolverConfig{
+					Enabled:          settings.LSP.Enabled,
+					HealthInterval:   settings.LSP.HealthInterval,
+					MemoryLimitBytes: settings.LSP.MemoryLimitBytes,
+					Logger:           s.Logger,
+				})
 			}
 		}
 		s.resolver = factory(repoRoot)
@@ -1177,7 +1186,7 @@ func (s *Scanner) getOrCreateResolver(repoRoot string) definitionResolver {
 	return s.resolver
 }
 
-func (s *Scanner) resolveReferences(ctx context.Context, repoRoot string, repositoryID int64, files []parsedFile, progress ProgressSink) ([]Reference, string, error) {
+func (s *Scanner) resolveReferences(ctx context.Context, repoRoot string, repositoryID int64, files []parsedFile, settings Settings, progress ProgressSink) ([]Reference, string, error) {
 	symbols, err := s.Store.SymbolsForRepository(ctx, repositoryID)
 	if err != nil {
 		return nil, "", err
@@ -1194,7 +1203,7 @@ func (s *Scanner) resolveReferences(ctx context.Context, repoRoot string, reposi
 		})
 	}
 
-	resolver := s.getOrCreateResolver(repoRoot)
+	resolver := s.getOrCreateResolver(repoRoot, settings)
 
 	var refs []Reference
 	for _, file := range files {
@@ -1295,6 +1304,129 @@ func symbolAtLocation(repoRoot string, symbols []Symbol, location analyzerlsp.De
 		}
 	}
 	return best, found
+}
+
+type lspStatusProvider interface {
+	Snapshot() analyzerlsp.StatusSnapshot
+}
+
+func InitialLSPStatus(settings Settings) LSPStatus {
+	settings = NormalizeSettings(settings)
+	languages := configuredLSPLanguages(settings.Languages)
+	snapshot := analyzerlsp.SnapshotLanguages(languages, analyzerlsp.ResolverConfig{
+		Enabled:          settings.LSP.Enabled,
+		HealthInterval:   settings.LSP.HealthInterval,
+		MemoryLimitBytes: settings.LSP.MemoryLimitBytes,
+	})
+	return convertLSPStatus(snapshot)
+}
+
+func (s *Scanner) currentLSPStatus(settings Settings) LSPStatus {
+	if s == nil {
+		return InitialLSPStatus(settings)
+	}
+	s.resolverMu.Lock()
+	resolver := s.resolver
+	s.resolverMu.Unlock()
+	if provider, ok := resolver.(lspStatusProvider); ok {
+		return convertLSPStatus(provider.Snapshot())
+	}
+	return InitialLSPStatus(settings)
+}
+
+func configuredLSPLanguages(values []string) []analyzer.Language {
+	languages := make([]analyzer.Language, 0, len(values))
+	for _, value := range values {
+		language := analyzer.Language(strings.ToLower(strings.TrimSpace(value)))
+		if len(analyzerlsp.DefaultCommands(language)) == 0 {
+			continue
+		}
+		languages = append(languages, language)
+	}
+	return languages
+}
+
+func convertLSPStatus(snapshot analyzerlsp.StatusSnapshot) LSPStatus {
+	status := LSPStatus{
+		Enabled:               snapshot.Enabled,
+		HealthIntervalSeconds: snapshot.HealthIntervalSeconds,
+		MemoryLimitBytes:      snapshot.MemoryLimitBytes,
+		MemoryMonitoring:      snapshot.MemoryMonitoring,
+		Servers:               make([]LSPServerStatus, 0, len(snapshot.Servers)),
+	}
+	for _, server := range snapshot.Servers {
+		converted := LSPServerStatus{
+			Language:        server.Language,
+			Command:         server.Command,
+			Path:            server.Path,
+			State:           server.State,
+			PID:             server.PID,
+			ServerName:      server.ServerName,
+			ServerVersion:   server.ServerVersion,
+			Definition:      server.Definition,
+			MemoryBytes:     server.MemoryBytes,
+			RestartCount:    server.RestartCount,
+			LastHealthcheck: server.LastHealthcheck,
+			LastError:       server.LastError,
+		}
+		status.Servers = append(status.Servers, converted)
+		status.Summary.Requested++
+		if converted.Path != "" {
+			status.Summary.Available++
+		}
+		switch converted.State {
+		case analyzerlsp.StateActive:
+			status.Summary.Active++
+		case analyzerlsp.StateUnavailable:
+			status.Summary.Unavailable++
+		case analyzerlsp.StateFailed:
+			status.Summary.Failed++
+		}
+		if converted.State == analyzerlsp.StateMemoryLimited || strings.Contains(strings.ToLower(converted.LastError), "exceeded limit") {
+			status.Summary.MemoryLimited++
+			if converted.State != analyzerlsp.StateActive {
+				status.Summary.Failed++
+			}
+		}
+		if converted.RestartCount > 0 {
+			status.Summary.Restarted++
+		}
+	}
+	return status
+}
+
+func lspWarnings(status LSPStatus) []string {
+	if !status.Enabled || status.Summary.Requested == 0 {
+		return nil
+	}
+	var warnings []string
+	if status.Summary.Unavailable > 0 {
+		warnings = append(warnings, fmt.Sprintf("LSP unavailable for %d requested language(s); falling back to conservative name matching", status.Summary.Unavailable))
+	}
+	if status.Summary.Failed > 0 {
+		warnings = append(warnings, fmt.Sprintf("LSP failed for %d requested language(s); see log file for details", status.Summary.Failed))
+	}
+	if status.Summary.MemoryLimited > 0 {
+		warnings = append(warnings, fmt.Sprintf("LSP memory limit exceeded for %d language server(s); restarted on demand", status.Summary.MemoryLimited))
+	}
+	return warnings
+}
+
+func LSPNeedsConfirmation(status LSPStatus) bool {
+	if !status.Enabled || status.Summary.Requested == 0 {
+		return false
+	}
+	return status.Summary.Unavailable+status.Summary.Failed+status.Summary.MemoryLimited > 0
+}
+
+func LSPDegradedServers(status LSPStatus) []LSPServerStatus {
+	var servers []LSPServerStatus
+	for _, server := range status.Servers {
+		if server.State == analyzerlsp.StateUnavailable || server.State == analyzerlsp.StateFailed || server.State == analyzerlsp.StateMemoryLimited {
+			servers = append(servers, server)
+		}
+	}
+	return servers
 }
 
 func enclosingSymbol(symbols []Symbol, line int) (Symbol, bool) {

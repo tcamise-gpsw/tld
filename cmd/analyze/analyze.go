@@ -1,7 +1,10 @@
 package analyze
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -102,6 +105,9 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 				"embedding_dimension", embeddingCfg.Dimension,
 				"watcher", settings.Watcher,
 				"languages", strings.Join(settings.Languages, ","),
+				"lsp_enabled", settings.LSP.Enabled,
+				"lsp_health_interval", settings.LSP.HealthInterval.String(),
+				"lsp_memory_limit_bytes", settings.LSP.MemoryLimitBytes,
 				"max_elements_per_view", settings.Thresholds.MaxElementsPerView,
 				"max_connectors_per_view", settings.Thresholds.MaxConnectorsPerView,
 			)
@@ -129,6 +135,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 				term.PrintLogo(cmd.OutOrStdout(), version.Version)
 				term.Label(cmd.OutOrStdout(), 20, "Path", scanPath)
 				term.Label(cmd.OutOrStdout(), 20, "Data directory", dataDir)
+				term.Label(cmd.OutOrStdout(), 20, "LSP", formatLSPStatus(watchpkg.InitialLSPStatus(settings)))
 				if embeddingCfg.Provider != "none" {
 					term.Label(cmd.OutOrStdout(), 20, "Embedding provider", embeddingCfg.Provider)
 					term.Label(cmd.OutOrStdout(), 20, "Embedding model", embeddingCfg.Model)
@@ -137,7 +144,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 					term.Label(cmd.OutOrStdout(), 20, "Mode", "dry-run")
 				}
 			}
-			once, err := watchpkg.NewRunner(watchStore).RunOnce(cmd.Context(), watchpkg.OneShotOptions{Path: absPath, Rescan: rescan, Embedding: embeddingCfg, Settings: settings, DataDir: dataDir, Progress: progress, Logger: logger})
+			once, err := watchpkg.NewRunner(watchStore).RunOnce(cmd.Context(), watchpkg.OneShotOptions{Path: absPath, Rescan: rescan, Embedding: embeddingCfg, Settings: settings, DataDir: dataDir, Progress: progress, Logger: logger, ConfirmAfterScan: confirmAnalyzeLSPProceed(cmd)})
 			if err != nil {
 				return fail("analyze.watch_pipeline.failed", err)
 			}
@@ -150,7 +157,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 			logger.InfoContext(cmd.Context(), "analyze.export.completed", "elapsed", time.Since(exportStarted).Round(time.Millisecond).String(), "repository_id", once.Scan.RepositoryID, "elements_written", exportResult.ElementsWritten, "connectors_written", exportResult.ConnectorsWritten, "views_written", exportResult.ViewsWritten)
 			changed := hasAnalyzeDrift(once.Diffs)
 			if formatFlag(cmd) == "json" {
-				payload := map[string]any{"changed": changed, "scan": once.Scan, "representation": once.Representation, "export": exportResult, "diffs": once.Diffs}
+				payload := map[string]any{"changed": changed, "scan": once.Scan, "lsp": once.Scan.LSP, "representation": once.Representation, "export": exportResult, "diffs": once.Diffs}
 				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(payload); err != nil {
 					return fail("analyze.output.failed", err)
 				}
@@ -272,6 +279,11 @@ func resolveAnalyzeWatchSettings(cfg *workspace.Config, languages []string, maxE
 			MaxTrackedFiles: cfg.Watch.Scale.MaxTrackedFiles,
 			MaxLimitedFiles: cfg.Watch.Scale.MaxLimitedFiles,
 		}
+		settings.LSP = watchpkg.LSPConfig{
+			Enabled:          cfg.Watch.LSP.Enabled,
+			HealthInterval:   parseAnalyzeDurationOrZero(cfg.Watch.LSP.HealthInterval),
+			MemoryLimitBytes: cfg.Watch.LSP.MemoryLimitBytes,
+		}
 	}
 	if len(languages) > 0 {
 		settings.Languages = languages
@@ -317,6 +329,70 @@ func hasAnalyzeDrift(diffs []watchpkg.RepresentationDiff) bool {
 		}
 	}
 	return false
+}
+
+func formatLSPStatus(status watchpkg.LSPStatus) string {
+	if !status.Enabled {
+		return "disabled"
+	}
+	return fmt.Sprintf("requested=%d available=%d active=%d degraded=%d",
+		status.Summary.Requested,
+		status.Summary.Available,
+		status.Summary.Active,
+		status.Summary.Unavailable+status.Summary.Failed,
+	)
+}
+
+func confirmAnalyzeLSPProceed(cmd *cobra.Command) func(context.Context, watchpkg.ScanResult) error {
+	if formatFlag(cmd) == "json" {
+		return nil
+	}
+	return func(_ context.Context, scan watchpkg.ScanResult) error {
+		return confirmLSPProceed(cmd, scan.LSP)
+	}
+}
+
+func confirmLSPProceed(cmd *cobra.Command, status watchpkg.LSPStatus) error {
+	if !watchpkg.LSPNeedsConfirmation(status) {
+		return nil
+	}
+	term.Warn(cmd.OutOrStdout(), "Some requested language servers are unavailable or unhealthy. Reference resolution quality will be lower.")
+	term.Hint(cmd.OutOrStdout(), "tld will fall back to conservative name matching, which may drop ambiguous connectors.")
+	for _, server := range watchpkg.LSPDegradedServers(status) {
+		detail := server.Command
+		if detail == "" {
+			detail = server.Language
+		}
+		if server.LastError != "" {
+			detail += ": " + server.LastError
+		}
+		term.Hint(cmd.OutOrStdout(), detail)
+	}
+	term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server, ensure it is on PATH, or disable LSP with `tld config set watch.lsp.enabled false`.")
+	term.Hint(cmd.OutOrStdout(), "Examples: gopls, pyright-langserver, rust-analyzer, jdtls, typescript-language-server, clangd.")
+	if !isInteractiveInput(cmd.InOrStdin()) {
+		term.Hint(cmd.OutOrStdout(), "Non-interactive input detected; continuing without confirmation.")
+		return nil
+	}
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), "  Continue with lower-quality reference resolution? [yes/no]: ")
+	scanner := bufio.NewScanner(cmd.InOrStdin())
+	if !scanner.Scan() {
+		return errors.New("aborted")
+	}
+	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	if answer != "yes" && answer != "y" {
+		return errors.New("aborted: LSP confirmation declined")
+	}
+	return nil
+}
+
+func isInteractiveInput(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
 type analyzeWatchProgress struct {

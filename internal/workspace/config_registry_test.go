@@ -129,3 +129,51 @@ func TestResolveWatchLayoutConfigUsesEnvOverride(t *testing.T) {
 		t.Fatalf("LinkDistance = %v, want env override 222", got.LinkDistance)
 	}
 }
+
+func TestGlobalConfigLSPDefaultsAndEnvOverrides(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	t.Setenv("TLD_WATCH_LSP_ENABLED", "false")
+	t.Setenv("TLD_WATCH_LSP_HEALTH_INTERVAL", "2m")
+	t.Setenv("TLD_WATCH_LSP_MEMORY_LIMIT_BYTES", "2048")
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Watch.LSP.Enabled {
+		t.Fatal("Watch.LSP.Enabled = true, want env override false")
+	}
+	if cfg.Watch.LSP.HealthInterval != "2m" {
+		t.Fatalf("Watch.LSP.HealthInterval = %q, want 2m", cfg.Watch.LSP.HealthInterval)
+	}
+	if cfg.Watch.LSP.MemoryLimitBytes != 2048 {
+		t.Fatalf("Watch.LSP.MemoryLimitBytes = %d, want 2048", cfg.Watch.LSP.MemoryLimitBytes)
+	}
+}
+
+func TestSetGlobalConfigLSPValue(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+
+	if err := workspace.SetGlobalConfigValue("watch.lsp.memory_limit_bytes", "4096"); err != nil {
+		t.Fatalf("SetGlobalConfigValue memory: %v", err)
+	}
+	if err := workspace.SetGlobalConfigValue("watch.lsp.health_interval", "30s"); err != nil {
+		t.Fatalf("SetGlobalConfigValue interval: %v", err)
+	}
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Watch.LSP.MemoryLimitBytes != 4096 {
+		t.Fatalf("Watch.LSP.MemoryLimitBytes = %d, want 4096", cfg.Watch.LSP.MemoryLimitBytes)
+	}
+	if cfg.Watch.LSP.HealthInterval != "30s" {
+		t.Fatalf("Watch.LSP.HealthInterval = %q, want 30s", cfg.Watch.LSP.HealthInterval)
+	}
+
+	if err := workspace.SetGlobalConfigValue("watch.lsp.memory_limit_bytes", "0"); err == nil {
+		t.Fatal("expected invalid memory limit to fail")
+	}
+}

@@ -20,6 +20,7 @@ const (
 
 	defaultMaxTrackedFiles = 20000
 	defaultMaxLimitedFiles = 2000
+	defaultLSPMemoryLimit  = 1073741824
 )
 
 func DefaultSettings() Settings {
@@ -39,6 +40,11 @@ func DefaultSettings() Settings {
 			Strategy:        ScanStrategyAuto,
 			MaxTrackedFiles: defaultMaxTrackedFiles,
 			MaxLimitedFiles: defaultMaxLimitedFiles,
+		},
+		LSP: LSPConfig{
+			Enabled:          true,
+			HealthInterval:   time.Minute,
+			MemoryLimitBytes: defaultLSPMemoryLimit,
 		},
 	}
 }
@@ -67,7 +73,18 @@ func NormalizeSettings(settings Settings) Settings {
 	settings.Thresholds = defaultThresholds(settings.Thresholds)
 	settings.Visibility = defaultVisibilityConfig(settings.Visibility)
 	settings.Scale = defaultScaleConfig(settings.Scale)
+	settings.LSP = defaultLSPConfig(settings.LSP)
 	return settings
+}
+
+func defaultLSPConfig(cfg LSPConfig) LSPConfig {
+	if cfg.HealthInterval <= 0 {
+		cfg.HealthInterval = time.Minute
+	}
+	if cfg.MemoryLimitBytes <= 0 {
+		cfg.MemoryLimitBytes = defaultLSPMemoryLimit
+	}
+	return cfg
 }
 
 func defaultScaleConfig(cfg ScaleConfig) ScaleConfig {

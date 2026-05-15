@@ -150,6 +150,20 @@ func (s *Session) ServerInfo() *protocol.ServerInfo {
 	return s.serverInfo
 }
 
+func (s *Session) PID() int {
+	if s == nil || s.process == nil || s.process.Process == nil {
+		return 0
+	}
+	return s.process.Process.Pid
+}
+
+func (s *Session) Command() ResolvedCommand {
+	if s == nil {
+		return ResolvedCommand{}
+	}
+	return ResolvedCommand{Path: s.command.Path, Args: append([]string{}, s.command.Args...)}
+}
+
 func (s *Session) SupportsDefinition() bool {
 	return capabilityEnabled(s.capabilities.DefinitionProvider)
 }

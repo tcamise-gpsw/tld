@@ -6,33 +6,113 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/mertcikla/tld/v2/internal/analyzer"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
+const (
+	StateRequested     = "requested"
+	StateAvailable     = "available"
+	StateActive        = "active"
+	StateUnavailable   = "unavailable"
+	StateFailed        = "failed"
+	StateDisabled      = "disabled"
+	StateMemoryLimited = "memory_limited"
+)
+
+type EventLogger interface {
+	InfoContext(ctx context.Context, msg string, args ...any)
+	ErrorContext(ctx context.Context, msg string, args ...any)
+}
+
+type ResolverConfig struct {
+	Enabled          bool
+	HealthInterval   time.Duration
+	MemoryLimitBytes int64
+	Logger           EventLogger
+}
+
 type DefinitionLocation struct {
 	FilePath string
 	Line     int
 }
 
+type StatusSnapshot struct {
+	Enabled               bool           `json:"enabled"`
+	HealthIntervalSeconds int            `json:"health_interval_seconds,omitempty"`
+	MemoryLimitBytes      int64          `json:"memory_limit_bytes,omitempty"`
+	MemoryMonitoring      string         `json:"memory_monitoring,omitempty"`
+	Servers               []ServerStatus `json:"servers,omitempty"`
+}
+
+type ServerStatus struct {
+	Language        string `json:"language"`
+	Command         string `json:"command,omitempty"`
+	Path            string `json:"path,omitempty"`
+	State           string `json:"state"`
+	PID             int    `json:"pid,omitempty"`
+	ServerName      string `json:"server_name,omitempty"`
+	ServerVersion   string `json:"server_version,omitempty"`
+	Definition      bool   `json:"definition"`
+	MemoryBytes     int64  `json:"memory_bytes,omitempty"`
+	RestartCount    int    `json:"restart_count,omitempty"`
+	LastHealthcheck string `json:"last_healthcheck,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
+}
+
 type MultiLanguageResolver struct {
-	RootDir  string
+	RootDir string
+
+	mu       sync.Mutex
+	cfg      ResolverConfig
 	sessions map[analyzer.Language]*Session
-	disabled map[analyzer.Language]struct{}
+	statuses map[analyzer.Language]*ServerStatus
 	opened   map[string]struct{}
 	contents map[string]string
 }
 
 func NewMultiLanguageResolver(rootDir string) *MultiLanguageResolver {
+	return NewMultiLanguageResolverWithConfig(rootDir, ResolverConfig{
+		Enabled:          true,
+		HealthInterval:   time.Minute,
+		MemoryLimitBytes: 1073741824,
+	})
+}
+
+func NewMultiLanguageResolverWithConfig(rootDir string, cfg ResolverConfig) *MultiLanguageResolver {
+	if cfg.HealthInterval <= 0 {
+		cfg.HealthInterval = time.Minute
+	}
+	if cfg.MemoryLimitBytes <= 0 {
+		cfg.MemoryLimitBytes = 1073741824
+	}
 	return &MultiLanguageResolver{
 		RootDir:  rootDir,
+		cfg:      cfg,
 		sessions: make(map[analyzer.Language]*Session),
-		disabled: make(map[analyzer.Language]struct{}),
+		statuses: make(map[analyzer.Language]*ServerStatus),
 		opened:   make(map[string]struct{}),
 		contents: make(map[string]string),
 	}
+}
+
+func SnapshotLanguages(languages []analyzer.Language, cfg ResolverConfig) StatusSnapshot {
+	resolver := NewMultiLanguageResolverWithConfig("", cfg)
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	for _, language := range languages {
+		status := resolver.ensureRequestedLocked(language)
+		if !cfg.Enabled {
+			status.State = StateDisabled
+		}
+	}
+	return resolver.snapshotLocked()
 }
 
 func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref analyzer.Ref) ([]DefinitionLocation, error) {
@@ -48,6 +128,7 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 		return nil, err
 	}
 	if err := r.openDocument(ctx, session, ref.FilePath); err != nil {
+		r.markFailed(ctx, language, "open_document", err)
 		return nil, err
 	}
 	column := 0
@@ -64,6 +145,7 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 		},
 	})
 	if err != nil {
+		r.restartAfterFailure(ctx, language, "definition", err)
 		return nil, err
 	}
 	resolved := make([]DefinitionLocation, 0, len(locations))
@@ -80,66 +162,286 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 	return resolved, nil
 }
 
+func (r *MultiLanguageResolver) Snapshot() StatusSnapshot {
+	if r == nil {
+		return StatusSnapshot{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.snapshotLocked()
+}
+
 func (r *MultiLanguageResolver) Close() error {
 	if r == nil {
 		return nil
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var errs []error
-	for _, session := range r.sessions {
+	for language, session := range r.sessions {
 		if session == nil {
 			continue
 		}
 		if err := session.Close(); err != nil {
 			errs = append(errs, err)
 		}
+		delete(r.sessions, language)
 	}
 	return errors.Join(errs...)
 }
 
 func (r *MultiLanguageResolver) sessionForLanguage(ctx context.Context, language analyzer.Language) (*Session, bool, error) {
-	if r == nil {
+	r.mu.Lock()
+	if !r.cfg.Enabled {
+		status := r.ensureRequestedLocked(language)
+		status.State = StateDisabled
+		r.mu.Unlock()
+		return nil, false, nil
+	}
+	status := r.ensureRequestedLocked(language)
+	if status.State == StateUnavailable || status.State == StateDisabled {
+		r.mu.Unlock()
 		return nil, false, nil
 	}
 	if session, ok := r.sessions[language]; ok {
-		return session, true, nil
+		if r.healthcheckLocked(ctx, language, session) {
+			r.mu.Unlock()
+			return session, true, nil
+		}
 	}
-	if _, disabled := r.disabled[language]; disabled {
+	command, err := ResolveServerCommand(language)
+	if err != nil {
+		status.State = StateUnavailable
+		status.LastError = err.Error()
+		r.logError(ctx, "watch.lsp.command_unavailable", err, language, status)
+		r.mu.Unlock()
 		return nil, false, nil
 	}
+	status.Path = command.Path
+	status.Command = commandDisplay(command)
+	status.State = StateAvailable
+	r.logInfo(ctx, "watch.lsp.command_resolved", language, status, "path", command.Path)
+	r.mu.Unlock()
+
 	session, err := StartSession(ctx, SessionConfig{
 		Language: language,
 		RootDir:  r.RootDir,
+		Command:  command,
 	})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status = r.ensureRequestedLocked(language)
 	if err != nil {
-		r.disabled[language] = struct{}{}
+		status.State = StateFailed
+		status.LastError = err.Error()
+		r.logError(ctx, "watch.lsp.start_failed", err, language, status)
 		return nil, false, nil
 	}
 	if !session.SupportsDefinition() {
-		r.disabled[language] = struct{}{}
+		status.State = StateFailed
+		status.PID = session.PID()
+		status.Definition = false
+		status.LastError = "language server does not support definition lookup"
 		_ = session.Close()
+		r.logError(ctx, "watch.lsp.unsupported_definition", errors.New(status.LastError), language, status)
 		return nil, false, nil
 	}
 	r.sessions[language] = session
+	r.fillActiveStatusLocked(ctx, language, status, session)
+	r.logInfo(ctx, "watch.lsp.started", language, status)
 	return session, true, nil
+}
+
+func (r *MultiLanguageResolver) healthcheckLocked(ctx context.Context, language analyzer.Language, session *Session) bool {
+	status := r.ensureRequestedLocked(language)
+	if r.cfg.HealthInterval > 0 && status.LastHealthcheck != "" {
+		checkedAt, err := time.Parse(time.RFC3339, status.LastHealthcheck)
+		if err == nil && time.Since(checkedAt) < r.cfg.HealthInterval {
+			return true
+		}
+	}
+	status.LastHealthcheck = time.Now().UTC().Format(time.RFC3339)
+	if session == nil || session.PID() <= 0 || !processAlive(session.PID()) {
+		err := fmt.Errorf("language server process is not running")
+		r.restartLocked(ctx, language, "healthcheck_failed", err)
+		return false
+	}
+	if r.cfg.MemoryLimitBytes > 0 {
+		if memoryBytes, ok, err := processMemoryBytes(session.PID()); err != nil {
+			status.LastError = "memory check failed: " + err.Error()
+			r.logError(ctx, "watch.lsp.memory_check_failed", err, language, status)
+		} else if ok {
+			status.MemoryBytes = memoryBytes
+			if memoryBytes > r.cfg.MemoryLimitBytes {
+				r.restartLocked(ctx, language, "memory_limit_exceeded", fmt.Errorf("language server memory %d exceeded limit %d", memoryBytes, r.cfg.MemoryLimitBytes))
+				return false
+			}
+		}
+	}
+	status.State = StateActive
+	status.Definition = session.SupportsDefinition()
+	return true
 }
 
 func (r *MultiLanguageResolver) openDocument(ctx context.Context, session *Session, filePath string) error {
 	cleanPath := filepath.Clean(filePath)
+	r.mu.Lock()
 	if _, ok := r.opened[cleanPath]; ok {
+		r.mu.Unlock()
 		return nil
 	}
 	content, ok := r.contents[cleanPath]
+	r.mu.Unlock()
 	if !ok {
 		data, err := os.ReadFile(cleanPath)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", cleanPath, err)
 		}
 		content = string(data)
+		r.mu.Lock()
 		r.contents[cleanPath] = content
+		r.mu.Unlock()
 	}
 	if err := session.OpenDocument(ctx, cleanPath, content); err != nil {
 		return fmt.Errorf("open %s in language server: %w", cleanPath, err)
 	}
+	r.mu.Lock()
 	r.opened[cleanPath] = struct{}{}
+	r.mu.Unlock()
 	return nil
+}
+
+func (r *MultiLanguageResolver) restartAfterFailure(ctx context.Context, language analyzer.Language, reason string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.restartLocked(ctx, language, reason, err)
+}
+
+func (r *MultiLanguageResolver) markFailed(ctx context.Context, language analyzer.Language, reason string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status := r.ensureRequestedLocked(language)
+	status.State = StateFailed
+	status.LastError = err.Error()
+	r.logError(ctx, "watch.lsp."+reason+".failed", err, language, status)
+}
+
+func (r *MultiLanguageResolver) restartLocked(ctx context.Context, language analyzer.Language, reason string, err error) {
+	status := r.ensureRequestedLocked(language)
+	if session := r.sessions[language]; session != nil {
+		_ = session.Close()
+		delete(r.sessions, language)
+	}
+	for opened := range r.opened {
+		delete(r.opened, opened)
+	}
+	status.State = StateFailed
+	if reason == "memory_limit_exceeded" {
+		status.State = StateMemoryLimited
+	}
+	status.RestartCount++
+	status.PID = 0
+	status.LastError = err.Error()
+	r.logError(ctx, "watch.lsp.restart_scheduled", err, language, status, "reason", reason)
+}
+
+func (r *MultiLanguageResolver) fillActiveStatusLocked(ctx context.Context, language analyzer.Language, status *ServerStatus, session *Session) {
+	status.State = StateActive
+	status.PID = session.PID()
+	status.Definition = session.SupportsDefinition()
+	status.LastHealthcheck = time.Now().UTC().Format(time.RFC3339)
+	if info := session.ServerInfo(); info != nil {
+		status.ServerName = info.Name
+		status.ServerVersion = info.Version
+	}
+	if memoryBytes, ok, err := processMemoryBytes(session.PID()); err != nil {
+		status.LastError = "memory check failed: " + err.Error()
+		r.logError(ctx, "watch.lsp.memory_check_failed", err, language, status)
+	} else if ok {
+		status.MemoryBytes = memoryBytes
+	}
+}
+
+func (r *MultiLanguageResolver) ensureRequestedLocked(language analyzer.Language) *ServerStatus {
+	if status, ok := r.statuses[language]; ok {
+		return status
+	}
+	status := &ServerStatus{Language: string(language), State: StateRequested}
+	commands := DefaultCommands(language)
+	if len(commands) == 0 {
+		status.State = StateUnavailable
+		status.LastError = ErrServerNotConfigured{Language: language}.Error()
+	} else {
+		status.Command = commands[0].Display()
+		if command, err := ResolveServerCommand(language); err == nil {
+			status.Path = command.Path
+			status.Command = commandDisplay(command)
+			status.State = StateAvailable
+		} else {
+			status.State = StateUnavailable
+			status.LastError = err.Error()
+		}
+	}
+	r.statuses[language] = status
+	return status
+}
+
+func (r *MultiLanguageResolver) snapshotLocked() StatusSnapshot {
+	servers := make([]ServerStatus, 0, len(r.statuses))
+	for _, status := range r.statuses {
+		copyStatus := *status
+		servers = append(servers, copyStatus)
+	}
+	sort.Slice(servers, func(i, j int) bool {
+		return servers[i].Language < servers[j].Language
+	})
+	monitoring := "unavailable"
+	if processMemorySupported() {
+		monitoring = "available"
+	}
+	return StatusSnapshot{
+		Enabled:               r.cfg.Enabled,
+		HealthIntervalSeconds: int(r.cfg.HealthInterval.Seconds()),
+		MemoryLimitBytes:      r.cfg.MemoryLimitBytes,
+		MemoryMonitoring:      monitoring,
+		Servers:               servers,
+	}
+}
+
+func (r *MultiLanguageResolver) logInfo(ctx context.Context, msg string, language analyzer.Language, status *ServerStatus, args ...any) {
+	if r.cfg.Logger == nil {
+		return
+	}
+	fields := lspLogFields(language, status, args...)
+	r.cfg.Logger.InfoContext(ctx, msg, fields...)
+}
+
+func (r *MultiLanguageResolver) logError(ctx context.Context, msg string, err error, language analyzer.Language, status *ServerStatus, args ...any) {
+	if r.cfg.Logger == nil {
+		return
+	}
+	fields := lspLogFields(language, status, append([]any{"error", err}, args...)...)
+	r.cfg.Logger.ErrorContext(ctx, msg, fields...)
+}
+
+func lspLogFields(language analyzer.Language, status *ServerStatus, args ...any) []any {
+	fields := []any{"language", string(language)}
+	if status != nil {
+		fields = append(fields,
+			"state", status.State,
+			"command", status.Command,
+			"path", status.Path,
+			"pid", status.PID,
+			"memory_bytes", status.MemoryBytes,
+			"restart_count", status.RestartCount,
+		)
+	}
+	fields = append(fields, args...)
+	return fields
+}
+
+func commandDisplay(command ResolvedCommand) string {
+	parts := []string{command.Path}
+	parts = append(parts, command.Args...)
+	return strings.Join(parts, " ")
 }

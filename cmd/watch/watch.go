@@ -1,14 +1,17 @@
 package watch
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -109,10 +112,14 @@ func NewWatchCmd() *cobra.Command {
 				"poll_interval", watchSettings.PollInterval.String(),
 				"debounce", watchSettings.Debounce.String(),
 				"languages", strings.Join(watchSettings.Languages, ","),
+				"lsp_enabled", watchSettings.LSP.Enabled,
+				"lsp_health_interval", watchSettings.LSP.HealthInterval.String(),
+				"lsp_memory_limit_bytes", watchSettings.LSP.MemoryLimitBytes,
 			)
 			term.PrintLogo(cmd.OutOrStdout(), version.Version)
 			term.Label(cmd.OutOrStdout(), 20, "Mode", "watch")
 			term.Label(cmd.OutOrStdout(), 20, "Data directory", term.Path(cmd.OutOrStdout(), dataDir))
+			term.Label(cmd.OutOrStdout(), 20, "LSP", formatWatchLSPStatus(watch.InitialLSPStatus(watchSettings)))
 			hasEmbedding := embeddingCfg.Provider != "" && embeddingCfg.Provider != "none" && embeddingCfg.Provider != "local-lexical"
 			if hasEmbedding {
 				term.Label(cmd.OutOrStdout(), 20, "Embedding provider", embeddingCfg.Provider)
@@ -219,7 +226,7 @@ func NewWatchCmd() *cobra.Command {
 			}()
 			errCh := make(chan error, 1)
 			go func() {
-				_, runErr := watch.NewRunner(watchStore).Run(ctx, watch.RunnerOptions{Path: path, Rescan: rescan, Verbose: verbose, Embedding: embeddingCfg, Settings: watchSettings, DataDir: dataDir, Progress: progress, Logger: logger, Events: events, Ready: ready})
+				_, runErr := watch.NewRunner(watchStore).Run(ctx, watch.RunnerOptions{Path: path, Rescan: rescan, Verbose: verbose, Embedding: embeddingCfg, Settings: watchSettings, DataDir: dataDir, Progress: progress, Logger: logger, Events: events, Ready: ready, ConfirmAfterScan: confirmWatchLSPProceed(cmd)})
 				errCh <- runErr
 				events.Close()
 			}()
@@ -247,6 +254,7 @@ func NewWatchCmd() *cobra.Command {
 			term.Label(cmd.OutOrStdout(), 20, "Repository", repoIdentity(repo))
 			term.Label(cmd.OutOrStdout(), 20, "Branch", result.GitStatus.Branch)
 			term.Label(cmd.OutOrStdout(), 20, "HEAD", result.GitStatus.HeadCommit)
+			term.Label(cmd.OutOrStdout(), 20, "Active LSPs", formatWatchLSPServers(result.InitialScan.LSP))
 			term.Label(cmd.OutOrStdout(), 20, "tlDiagram available at", term.URL(cmd.OutOrStdout(), url))
 			term.Separator(cmd.OutOrStdout())
 			term.Hint(cmd.OutOrStdout(), "Press Ctrl-C to stop watching.")
@@ -370,6 +378,17 @@ func logWatchEvent(cmd *cobra.Command, event watch.Event, activity *watchActivit
 			)
 		}
 		return true
+	case "lsp.status":
+		status, ok := event.Data.(watch.LSPStatus)
+		if !ok {
+			return false
+		}
+		degraded := status.Summary.Unavailable + status.Summary.Failed
+		if degraded == 0 && !hasLSPRestarts(status) {
+			return false
+		}
+		_, _ = fmt.Fprintf(out, "%s %s\n", term.Colorize(out, term.ColorYellow, "lsp:"), formatWatchLSPStatus(status))
+		return true
 	case "watch.error":
 		message := event.Message
 		if message == "" {
@@ -383,6 +402,94 @@ func logWatchEvent(cmd *cobra.Command, event watch.Event, activity *watchActivit
 	default:
 		return false
 	}
+}
+
+func formatWatchLSPStatus(status watch.LSPStatus) string {
+	if !status.Enabled {
+		return "disabled"
+	}
+	return fmt.Sprintf("requested=%d available=%d active=%d degraded=%d restarted=%d",
+		status.Summary.Requested,
+		status.Summary.Available,
+		status.Summary.Active,
+		status.Summary.Unavailable+status.Summary.Failed,
+		status.Summary.Restarted,
+	)
+}
+
+func formatWatchLSPServers(status watch.LSPStatus) string {
+	if !status.Enabled {
+		return "disabled"
+	}
+	var active []string
+	for _, server := range status.Servers {
+		if server.State == "active" {
+			active = append(active, server.Language)
+		}
+	}
+	if len(active) == 0 {
+		return "none"
+	}
+	sort.Strings(active)
+	return strings.Join(active, ",")
+}
+
+func hasLSPRestarts(status watch.LSPStatus) bool {
+	for _, server := range status.Servers {
+		if server.RestartCount > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func confirmWatchLSPProceed(cmd *cobra.Command) func(context.Context, watch.ScanResult) error {
+	return func(_ context.Context, scan watch.ScanResult) error {
+		return confirmLSPProceed(cmd, scan.LSP)
+	}
+}
+
+func confirmLSPProceed(cmd *cobra.Command, status watch.LSPStatus) error {
+	if !watch.LSPNeedsConfirmation(status) {
+		return nil
+	}
+	term.Warn(cmd.OutOrStdout(), "Some requested language servers are unavailable or unhealthy. Reference resolution quality will be lower.")
+	term.Hint(cmd.OutOrStdout(), "tld will fall back to conservative name matching, which may drop ambiguous connectors.")
+	for _, server := range watch.LSPDegradedServers(status) {
+		detail := server.Command
+		if detail == "" {
+			detail = server.Language
+		}
+		if server.LastError != "" {
+			detail += ": " + server.LastError
+		}
+		term.Hint(cmd.OutOrStdout(), detail)
+	}
+	term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server, ensure it is on PATH, or disable LSP with `tld config set watch.lsp.enabled false`.")
+	term.Hint(cmd.OutOrStdout(), "Examples: gopls, pyright-langserver, rust-analyzer, jdtls, typescript-language-server, clangd.")
+	if !isInteractiveInput(cmd.InOrStdin()) {
+		term.Hint(cmd.OutOrStdout(), "Non-interactive input detected; continuing without confirmation.")
+		return nil
+	}
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), "  Continue with lower-quality reference resolution? [yes/no]: ")
+	scanner := bufio.NewScanner(cmd.InOrStdin())
+	if !scanner.Scan() {
+		return errors.New("aborted")
+	}
+	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	if answer != "yes" && answer != "y" {
+		return errors.New("aborted: LSP confirmation declined")
+	}
+	return nil
+}
+
+func isInteractiveInput(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
 func representationChangeSummary(rep watch.RepresentResult, tags watch.GitTagUpdateResult) string {
@@ -523,6 +630,7 @@ func newScanCmd() *cobra.Command {
 			term.Label(cmd.OutOrStdout(), 15, "Files", fmt.Sprintf("%d seen, %d parsed, %d skipped", result.FilesSeen, result.FilesParsed, result.FilesSkipped))
 			term.Label(cmd.OutOrStdout(), 15, "Symbols", fmt.Sprintf("%d", result.SymbolsSeen))
 			term.Label(cmd.OutOrStdout(), 15, "References", fmt.Sprintf("%d", result.ReferencesSeen))
+			term.Label(cmd.OutOrStdout(), 15, "LSP", formatWatchLSPStatus(result.LSP))
 			if result.Warning != "" {
 				term.Warn(cmd.OutOrStdout(), result.Warning)
 			}
@@ -604,6 +712,7 @@ func newRepresentCmd() *cobra.Command {
 			term.Label(cmd.OutOrStdout(), 18, "Elements", fmt.Sprintf("%d created, %d updated", result.ElementsCreated, result.ElementsUpdated))
 			term.Label(cmd.OutOrStdout(), 18, "Connectors", fmt.Sprintf("%d created, %d updated", result.ConnectorsCreated, result.ConnectorsUpdated))
 			term.Label(cmd.OutOrStdout(), 18, "Views", fmt.Sprintf("%d created", result.ViewsCreated))
+			term.Label(cmd.OutOrStdout(), 18, "LSP", formatWatchLSPStatus(scanResult.LSP))
 			term.Label(cmd.OutOrStdout(), 18, "Raw graph hash", result.RawGraphHash)
 			term.Label(cmd.OutOrStdout(), 18, "Representation", result.RepresentationHash)
 			return nil
@@ -863,6 +972,11 @@ func resolveWatchSettings(cfg *workspace.Config, languages []string, watcherMode
 			Strategy:        cfg.Watch.Scale.Strategy,
 			MaxTrackedFiles: cfg.Watch.Scale.MaxTrackedFiles,
 			MaxLimitedFiles: cfg.Watch.Scale.MaxLimitedFiles,
+		}
+		settings.LSP = watch.LSPConfig{
+			Enabled:          cfg.Watch.LSP.Enabled,
+			HealthInterval:   parseDurationOrZero(cfg.Watch.LSP.HealthInterval),
+			MemoryLimitBytes: cfg.Watch.LSP.MemoryLimitBytes,
 		}
 	}
 	if len(languages) > 0 {

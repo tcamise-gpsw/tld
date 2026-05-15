@@ -56,6 +56,38 @@ func TestWatchSubcommandsFailClearlyOutsideGitRepositoryWithoutRepositoryRows(t 
 	}
 }
 
+func TestConfirmLSPProceedWarnsAndContinuesForNonInteractiveInput(t *testing.T) {
+	cmd := NewWatchCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(""))
+
+	status := watchpkg.LSPStatus{
+		Enabled: true,
+		Summary: watchpkg.LSPStatusSummary{Requested: 1, Unavailable: 1},
+		Servers: []watchpkg.LSPServerStatus{{
+			Language:  "go",
+			Command:   "gopls",
+			State:     "unavailable",
+			LastError: "no installed LSP server found",
+		}},
+	}
+	if err := confirmLSPProceed(cmd, status); err != nil {
+		t.Fatalf("confirmLSPProceed: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"Reference resolution quality will be lower",
+		"gopls: no installed LSP server found",
+		"Remediation: install the missing language server",
+		"Non-interactive input detected; continuing without confirmation",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in output:\n%s", want, got)
+		}
+	}
+}
+
 func TestScanCommandPrintsCountsAndSkipsRepeatScan(t *testing.T) {
 	repo := initGitRepoNoCommit(t)
 	writeFile(t, repo, "main.go", `package main

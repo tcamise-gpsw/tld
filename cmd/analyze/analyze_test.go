@@ -414,6 +414,7 @@ func TestAnalyzeCmd_JSONDryRunUsesWatchDiffShape(t *testing.T) {
 	var payload struct {
 		Changed        bool             `json:"changed"`
 		Scan           map[string]any   `json:"scan"`
+		LSP            map[string]any   `json:"lsp"`
 		Representation map[string]any   `json:"representation"`
 		Export         map[string]any   `json:"export"`
 		Diffs          []map[string]any `json:"diffs"`
@@ -423,6 +424,9 @@ func TestAnalyzeCmd_JSONDryRunUsesWatchDiffShape(t *testing.T) {
 	}
 	if payload.Scan["repository_id"] == nil || payload.Representation["representation_hash"] == nil || payload.Export["elements_written"] == nil {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if payload.LSP["summary"] == nil {
+		t.Fatalf("expected top-level lsp summary in payload: %+v", payload)
 	}
 	logData, err := os.ReadFile(localserver.LogPath(dataDir))
 	if err != nil {

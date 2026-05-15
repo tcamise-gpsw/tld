@@ -32,6 +32,7 @@ type RunnerOptions struct {
 	Logger            EventLogger
 	Events            *EventQueue
 	Ready             chan<- RunnerResult
+	ConfirmAfterScan  func(context.Context, ScanResult) error
 }
 
 type RunnerResult struct {
@@ -101,14 +102,16 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 
 	gitStatus, _ := gitStatusSnapshot(repoRoot)
 	emit(opts.Events, Event{Type: "scan.started", At: nowString(), Phase: "scan", WatcherMode: settings.Watcher, Languages: settings.Languages})
-	once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Rescan: opts.Rescan, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger})
+	once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Rescan: opts.Rescan, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger, ConfirmAfterScan: opts.ConfirmAfterScan})
 	if err != nil {
 		logError(ctx, opts.Logger, "watch.runner.initial_pipeline.failed", err, "repo_root", repoRoot)
 		return RunnerResult{}, err
 	}
 	logInfo(ctx, opts.Logger, "watch.runner.initial_pipeline.completed", "repository_id", once.Repository.ID, "scan_run_id", once.Scan.ScanRunID, "representation_run_id", once.Representation.RepresentationRun)
 	scan := once.Scan
+	logInfo(ctx, opts.Logger, "watch.lsp.status", "repository_id", scan.RepositoryID, "requested", scan.LSP.Summary.Requested, "available", scan.LSP.Summary.Available, "active", scan.LSP.Summary.Active, "failed", scan.LSP.Summary.Failed, "unavailable", scan.LSP.Summary.Unavailable, "restarted", scan.LSP.Summary.Restarted, "memory_limited", scan.LSP.Summary.MemoryLimited)
 	emit(opts.Events, Event{Type: "scan.completed", RepositoryID: scan.RepositoryID, At: nowString(), Data: scan, Phase: "scan", WatcherMode: settings.Watcher, Languages: settings.Languages, Warnings: scan.Warnings})
+	emit(opts.Events, Event{Type: "lsp.status", RepositoryID: scan.RepositoryID, At: nowString(), Data: scan.LSP, Phase: "scan", WatcherMode: settings.Watcher, Languages: settings.Languages, Warnings: scan.Warnings})
 	emit(opts.Events, Event{Type: "representation.started", RepositoryID: scan.RepositoryID, At: nowString(), Phase: "represent", WatcherMode: settings.Watcher, Languages: settings.Languages, Warnings: scan.Warnings})
 	repo := once.Repository
 	token := randomToken()
@@ -376,8 +379,10 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			}
 			logInfo(ctx, opts.Logger, "watch.change.pipeline.completed", "elapsed", logElapsed(pipelineStarted), "repository_id", repo.ID, "scan_run_id", once.Scan.ScanRunID, "representation_run_id", once.Representation.RepresentationRun)
 			scan := once.Scan
+			logInfo(ctx, opts.Logger, "watch.lsp.status", "repository_id", scan.RepositoryID, "requested", scan.LSP.Summary.Requested, "available", scan.LSP.Summary.Available, "active", scan.LSP.Summary.Active, "failed", scan.LSP.Summary.Failed, "unavailable", scan.LSP.Summary.Unavailable, "restarted", scan.LSP.Summary.Restarted, "memory_limited", scan.LSP.Summary.MemoryLimited)
 			eventWarnings := append(append([]string{}, warnings...), scan.Warnings...)
 			emit(opts.Events, Event{Type: "scan.completed", RepositoryID: repo.ID, At: nowString(), Data: scan, Phase: "scan", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(sourceChanges), Warnings: eventWarnings})
+			emit(opts.Events, Event{Type: "lsp.status", RepositoryID: repo.ID, At: nowString(), Data: scan.LSP, Phase: "scan", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(sourceChanges), Warnings: eventWarnings})
 			emit(opts.Events, Event{Type: "representation.started", RepositoryID: repo.ID, At: nowString(), Phase: "represent", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(sourceChanges), Warnings: eventWarnings})
 			rep := once.Representation
 			emit(opts.Events, Event{Type: "representation.updated", RepositoryID: repo.ID, At: nowString(), Data: rep, Phase: "represent", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(sourceChanges), Warnings: eventWarnings})
