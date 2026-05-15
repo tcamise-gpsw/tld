@@ -3,7 +3,9 @@ package watch
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -293,6 +295,84 @@ func TestWatchCommandWritesRuntimeLogWithoutBanner(t *testing.T) {
 	}
 }
 
+func TestWatchCommandDetectsAddedFileAndMaterializesSymbol(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", `package main
+
+func Main() {}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial")
+	dataDir := t.TempDir()
+
+	cancel, done, out := startPollingWatchCommand(t, repo, dataDir)
+	defer cancel()
+	waitForWatchLogContains(t, dataDir, "msg=watch.command.ready")
+
+	sqliteStore := openWatchCommandTestStore(t, dataDir)
+	defer func() { _ = sqliteStore.DB().Close() }()
+
+	writeFile(t, repo, "pkg/added.go", `package pkg
+
+func AddedLive() string {
+	return "added"
+}
+`)
+
+	waitForWatchLogContains(t, dataDir, "type=source.changed")
+	waitForWatchLogContains(t, dataDir, "path=pkg/added.go")
+	waitForWatchDBCondition(t, sqliteStore.DB(), "AddedLive element", func(db *sql.DB) bool {
+		return watchElementNameExists(t, db, "AddedLive")
+	})
+
+	cancel()
+	waitForWatchCommandDone(t, done, out)
+}
+
+func TestWatchCommandDetectsModifiedSymbolAndMaterializesReference(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", `package main
+
+func Main() {}
+
+func Helper() string {
+	return "helper"
+}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial")
+	dataDir := t.TempDir()
+
+	cancel, done, out := startPollingWatchCommand(t, repo, dataDir)
+	defer cancel()
+	waitForWatchLogContains(t, dataDir, "msg=watch.command.ready")
+
+	sqliteStore := openWatchCommandTestStore(t, dataDir)
+	defer func() { _ = sqliteStore.DB().Close() }()
+
+	writeFile(t, repo, "main.go", `package main
+
+func Main() {}
+
+func Helper() string {
+	return "helper"
+}
+
+func NewCaller() string {
+	return Helper()
+}
+`)
+
+	waitForWatchLogContains(t, dataDir, "type=source.changed")
+	waitForWatchLogContains(t, dataDir, "path=main.go")
+	waitForWatchDBCondition(t, sqliteStore.DB(), "NewCaller materialization", func(db *sql.DB) bool {
+		return watchElementNameExists(t, db, "NewCaller") && watchConnectorExistsBetween(t, db, "NewCaller", "Helper")
+	})
+
+	cancel()
+	waitForWatchCommandDone(t, done, out)
+}
+
 func TestWatchDryRunCleanHeadInitializesWithoutDrift(t *testing.T) {
 	repo := initGitRepoNoCommit(t)
 	writeFile(t, repo, "main.go", `package main
@@ -364,6 +444,121 @@ func sameDiffPayload(a, b []watchpkg.RepresentationDiff) bool {
 		if left[i] != right[i] {
 			return false
 		}
+	}
+	return true
+}
+
+func startPollingWatchCommand(t *testing.T, repo, dataDir string) (context.CancelFunc, <-chan error, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv("TLD_CONFIG_DIR", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := NewWatchCmd()
+	cmd.SetContext(ctx)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		repo,
+		"--data-dir", dataDir,
+		"--embedding-provider", "none",
+		"--no-serve",
+		"--watcher", "poll",
+		"--poll-interval", "50ms",
+		"--debounce", "10ms",
+	})
+	done := make(chan error, 1)
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		done <- cmd.Execute()
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-stopped:
+		case <-time.After(2 * time.Second):
+		}
+	})
+	return cancel, done, &out
+}
+
+func waitForWatchCommandDone(t *testing.T, done <-chan error, out *bytes.Buffer) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("watch command failed: %v\n%s", err, out.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("watch command did not stop\n%s", out.String())
+	}
+}
+
+func waitForWatchLogContains(t *testing.T, dataDir, needle string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	logPath := localserver.LogPath(dataDir)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(logPath)
+		if err == nil && strings.Contains(string(data), needle) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	data, _ := os.ReadFile(logPath)
+	t.Fatalf("watch log did not contain %q:\n%s", needle, string(data))
+}
+
+func openWatchCommandTestStore(t *testing.T, dataDir string) *storepkg.SQLiteStore {
+	t.Helper()
+	sqliteStore, err := storepkg.Open(localserver.DatabasePath(dataDir), assets.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sqliteStore
+}
+
+func waitForWatchDBCondition(t *testing.T, db *sql.DB, label string, condition func(*sql.DB) bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition(db) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("watch DB condition did not become true: %s", label)
+}
+
+func watchElementNameExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var id int64
+	err := db.QueryRow(`SELECT id FROM elements WHERE name = ? ORDER BY id LIMIT 1`, name).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return true
+}
+
+func watchConnectorExistsBetween(t *testing.T, db *sql.DB, sourceName, targetName string) bool {
+	t.Helper()
+	var id int64
+	err := db.QueryRow(`
+		SELECT c.id
+		FROM connectors c
+		JOIN elements s ON s.id = c.source_element_id
+		JOIN elements target ON target.id = c.target_element_id
+		WHERE s.name = ? AND target.name = ?
+		ORDER BY c.id
+		LIMIT 1`, sourceName, targetName).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 	return true
 }

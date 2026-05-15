@@ -272,7 +272,10 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			nextGitFingerprint = gitStatusFingerprint(nextGit)
 			var sourceChanges []SourceFileChange
 			if limitedMode {
-				sourceChanges = sourceChangesFromGit(repoRoot, opts.Logger)
+				sourceChanges = mergeSourceFileChanges(
+					sourceChangesFromGit(repoRoot, opts.Logger),
+					sourceChangesSinceLatestWatchVersion(ctx, r.Store, repo.ID, repoRoot, opts.Logger),
+				)
 				sourceChanged = len(sourceChanges) > 0
 			} else {
 				sourceChanges = diffSourceFileSnapshots(lastSourceSnapshot, stableSourceSnapshot)
@@ -570,6 +573,86 @@ func sourceChangesFromGit(repoRoot string, logger EventLogger) []SourceFileChang
 			changeType = string(tldgit.WorktreeUpdated)
 		}
 		out = append(out, SourceFileChange{Path: path, ChangeType: changeType})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Path == out[j].Path {
+			return out[i].ChangeType < out[j].ChangeType
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
+}
+
+func sourceChangesSinceLatestWatchVersion(ctx context.Context, store *Store, repositoryID int64, repoRoot string, logger EventLogger) []SourceFileChange {
+	changes, err := gitChangesSinceLatestWatchVersion(ctx, store, repositoryID, repoRoot)
+	if err != nil {
+		logError(ctx, logger, "watch.git.committed_changes.failed", err, "repository_id", repositoryID)
+		return nil
+	}
+	return sourceFileChangesFromGitChanges(changes)
+}
+
+func gitChangesSinceLatestWatchVersion(ctx context.Context, store *Store, repositoryID int64, repoRoot string) (map[string]tldgit.WorktreeChange, error) {
+	if store == nil {
+		return nil, nil
+	}
+	latest, found, err := store.LatestWatchVersion(ctx, repositoryID)
+	if err != nil || !found || strings.TrimSpace(latest.CommitHash) == "" {
+		return nil, err
+	}
+	current, err := tldgit.DetectHeadCommit(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(current) == "" || current == latest.CommitHash {
+		return nil, nil
+	}
+	return tldgit.FileChangesSince(repoRoot, latest.CommitHash)
+}
+
+func sourceFileChangesFromGitChanges(changes map[string]tldgit.WorktreeChange) []SourceFileChange {
+	out := make([]SourceFileChange, 0, len(changes))
+	for path, change := range changes {
+		changeType := string(change)
+		if changeType == "" {
+			changeType = string(tldgit.WorktreeUpdated)
+		}
+		language, _, _ := watchedFileLanguage(path)
+		out = append(out, SourceFileChange{Path: path, ChangeType: changeType, Language: language})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Path == out[j].Path {
+			return out[i].ChangeType < out[j].ChangeType
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
+}
+
+func mergeSourceFileChanges(groups ...[]SourceFileChange) []SourceFileChange {
+	merged := map[string]SourceFileChange{}
+	for _, group := range groups {
+		for _, change := range group {
+			path := filepathToSlash(change.Path)
+			if path == "" {
+				continue
+			}
+			change.Path = path
+			if existing, ok := merged[path]; ok {
+				if existing.ChangeType == string(tldgit.WorktreeDeleted) || existing.ChangeType == "deleted" {
+					continue
+				}
+				if change.ChangeType == string(tldgit.WorktreeDeleted) || change.ChangeType == "deleted" || existing.Language == "" {
+					merged[path] = change
+				}
+				continue
+			}
+			merged[path] = change
+		}
+	}
+	out := make([]SourceFileChange, 0, len(merged))
+	for _, change := range merged {
+		out = append(out, change)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Path == out[j].Path {

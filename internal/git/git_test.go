@@ -214,6 +214,51 @@ func TestFilesChangedSince(t *testing.T) {
 	}
 }
 
+func TestFileChangesSinceClassifiesCommittedChanges(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{
+		"main.go":   "package main\nfunc Main() {}\n",
+		"delete.go": "package main\nfunc DeleteMe() {}\n",
+	})
+
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	head, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	base := strings.TrimSpace(string(head))
+
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc Changed() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "added.go"), []byte("package main\nfunc Added() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "delete.go")); err != nil {
+		t.Fatal(err)
+	}
+	commit := exec.Command("git", "add", "-A")
+	commit.Dir = dir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commit = exec.Command("git", "commit", "-m", "mixed changes")
+	commit.Dir = dir
+	commit.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	changes, err := FileChangesSince(dir, base)
+	if err != nil {
+		t.Fatalf("FileChangesSince: %v", err)
+	}
+	if changes["main.go"] != WorktreeUpdated || changes["added.go"] != WorktreeAdded || changes["delete.go"] != WorktreeDeleted {
+		t.Fatalf("unexpected changes: %#v", changes)
+	}
+}
+
 func TestParseLineHunks(t *testing.T) {
 	diff := `diff --git a/main.go b/main.go
 index 1111111..2222222 100644

@@ -6,6 +6,44 @@ import (
 	"strings"
 )
 
+// FileChangesSince returns files changed between fromSHA and HEAD, keyed by
+// repository-relative path.
+func FileChangesSince(repoRoot, fromSHA string) (map[string]WorktreeChange, error) {
+	fromSHA = strings.TrimSpace(fromSHA)
+	if fromSHA == "" {
+		return nil, nil
+	}
+	out, err := run(repoRoot, "diff", "--name-status", fromSHA+"..HEAD", "--")
+	if err != nil {
+		return nil, fmt.Errorf("git diff name-status: %w", err)
+	}
+	changes := map[string]WorktreeChange{}
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		code := strings.TrimSpace(fields[0])
+		switch {
+		case strings.HasPrefix(code, "R") || strings.HasPrefix(code, "C"):
+			if len(fields) >= 3 {
+				changes[filepath.ToSlash(fields[1])] = WorktreeDeleted
+				changes[filepath.ToSlash(fields[2])] = WorktreeAdded
+			}
+		case strings.HasPrefix(code, "A"):
+			changes[filepath.ToSlash(fields[1])] = WorktreeAdded
+		case strings.HasPrefix(code, "D"):
+			changes[filepath.ToSlash(fields[1])] = WorktreeDeleted
+		default:
+			changes[filepath.ToSlash(fields[1])] = WorktreeUpdated
+		}
+	}
+	return changes, nil
+}
+
 // FilesChangedSince returns the list of files modified between fromSHA and HEAD.
 func FilesChangedSince(repoRoot, fromSHA string) ([]string, error) {
 	out, err := run(repoRoot, "diff", "--name-only", fromSHA+"..HEAD")

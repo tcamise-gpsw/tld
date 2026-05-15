@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/mertcikla/tld/v2/internal/analyzer"
+	analyzerlsp "github.com/mertcikla/tld/v2/internal/analyzer/lsp"
 	tldgit "github.com/mertcikla/tld/v2/internal/git"
 	"github.com/mertcikla/tld/v2/internal/layout"
 	"github.com/mertcikla/tld/v2/internal/watch/enrich"
@@ -2145,6 +2146,152 @@ func quietAdded() string {
 	}
 	if !filterDecisionHasReason(decisions, added.ID, "added since latest watch version") {
 		t.Fatalf("expected added private symbol to be forced visible, got decisions %+v", decisions)
+	}
+}
+
+func TestLimitedRunOnceScansCommittedFilesChangedSinceLatestVersion(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", `package main
+
+func Main() {}
+`)
+	writeFile(t, repo, "pkg/feature.go", `package pkg
+
+func OldFeature() {}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial")
+
+	settings := DefaultSettings()
+	settings.Scale.Strategy = ScanStrategyLimited
+	settings.Scale.MaxTrackedFiles = 1
+	settings.Scale.MaxLimitedFiles = 1
+
+	store := NewStore(db)
+	runner := NewRunner(store)
+	first, err := runner.RunOnce(context.Background(), OneShotOptions{
+		Path:      repo,
+		Embedding: EmbeddingConfig{Provider: "none"},
+		Settings:  settings,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Scan.Mode != "limited" {
+		t.Fatalf("expected limited initial scan, got %+v", first.Scan)
+	}
+	if elementNameExists(t, db, "OldFeature") {
+		t.Fatal("low-signal package file should not be selected by the initial limited scan")
+	}
+	if err := runner.createVersionForHead(context.Background(), first.Repository.ID, first.GitStatus, first.Representation.RepresentationHash, false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, repo, "pkg/feature.go", `package pkg
+
+func OldFeature() {}
+
+func NewMaterialized() {
+	OldFeature()
+}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "change low signal feature")
+
+	second, err := runner.RunOnce(context.Background(), OneShotOptions{
+		Path:      repo,
+		Embedding: EmbeddingConfig{Provider: "none"},
+		Settings:  settings,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Scan.Mode != "limited" || second.Scan.FilesParsed == 0 {
+		t.Fatalf("expected limited scan to parse the committed changed file, got %+v", second.Scan)
+	}
+	if !elementNameExists(t, db, "NewMaterialized") {
+		t.Fatal("committed low-signal change was not materialized")
+	}
+	if !connectorExistsBetween(t, db, "NewMaterialized", "OldFeature") {
+		t.Fatal("committed low-signal change references were not materialized")
+	}
+}
+
+func TestScannerUsesLSPResolverForAffectedAmbiguousReference(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "src/a.ts", `export function shared(): string {
+  return "alpha";
+}
+`)
+	writeFile(t, repo, "src/b.ts", `export function shared(): string {
+  return "beta";
+}
+
+export function caller(): string {
+  return shared();
+}
+`)
+
+	store := NewStore(db)
+	targetPath, err := filepath.EvalSymlinks(filepath.Join(repo, "src", "b.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDefinitionResolver{
+		locationsByName: map[string][]analyzerlsp.DefinitionLocation{
+			"shared": {{FilePath: targetPath, Line: 1}},
+		},
+	}
+	scanner := NewScanner(store)
+	scanner.resolverFactory = func(string) definitionResolver { return fake }
+	scan, err := scanner.Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.calls == 0 {
+		t.Fatal("expected fake LSP resolver to be called")
+	}
+
+	symbols, err := store.SymbolsForRepository(context.Background(), scan.RepositoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string][]Symbol{}
+	for _, sym := range symbols {
+		byName[sym.Name] = append(byName[sym.Name], sym)
+	}
+	if len(byName["shared"]) != 2 {
+		t.Fatalf("expected ambiguous shared symbols, got %+v", byName["shared"])
+	}
+	if _, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "shared", FilePath: filepath.Join(repo, "src", "b.ts"), Line: 6}, byName, symbols); ok {
+		t.Fatal("name-only fallback should not resolve ambiguous shared symbols")
+	}
+
+	caller := mustFindSymbol(t, symbols, "caller", "caller")
+	target := mustFindSymbolByFile(t, symbols, "shared", "src/b.ts")
+	refs, err := store.QueryReferences(context.Background(), scan.RepositoryID, ReferenceQuery{Limit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !referenceExists(refs, caller.ID, target.ID) {
+		t.Fatalf("expected fake LSP to resolve caller -> shared, parsed=%+v refs=%+v caller=%+v target=%+v", fake.refs, refs, caller, target)
+	}
+
+	if _, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+		t.Fatal(err)
+	}
+	callerElement := materializedResourceID(t, db, scan.RepositoryID, "symbol", symbolOwnerKey(caller, nil), "element")
+	targetElement := materializedResourceID(t, db, scan.RepositoryID, "symbol", symbolOwnerKey(target, nil), "element")
+	if callerElement == 0 || targetElement == 0 {
+		t.Fatalf("expected caller and target symbols to be materialized, caller=%d target=%d", callerElement, targetElement)
+	}
+	connectorKey := fmt.Sprintf("symbol:%s:%s:call", symbolOwnerKey(caller, nil), symbolOwnerKey(target, nil))
+	if connector := materializedResourceID(t, db, scan.RepositoryID, "reference", connectorKey, "connector"); connector == 0 {
+		t.Fatal("expected resolved reference connector to be materialized")
 	}
 }
 
@@ -4365,6 +4512,53 @@ func symbolsByName(ctx context.Context, store *Store, repositoryID int64, name s
 		}
 	}
 	return Symbol{}, fmt.Errorf("symbol %q not found", name)
+}
+
+type fakeDefinitionResolver struct {
+	locationsByName map[string][]analyzerlsp.DefinitionLocation
+	calls           int
+	refs            []analyzer.Ref
+}
+
+func (r *fakeDefinitionResolver) ResolveDefinitions(_ context.Context, ref analyzer.Ref) ([]analyzerlsp.DefinitionLocation, error) {
+	r.calls++
+	r.refs = append(r.refs, ref)
+	return append([]analyzerlsp.DefinitionLocation(nil), r.locationsByName[ref.Name]...), nil
+}
+
+func (r *fakeDefinitionResolver) Close() error {
+	return nil
+}
+
+func mustFindSymbol(t *testing.T, symbols []Symbol, name, qualifiedName string) Symbol {
+	t.Helper()
+	for _, sym := range symbols {
+		if sym.Name == name && sym.QualifiedName == qualifiedName {
+			return sym
+		}
+	}
+	t.Fatalf("symbol %s/%s not found in %+v", name, qualifiedName, symbols)
+	return Symbol{}
+}
+
+func mustFindSymbolByFile(t *testing.T, symbols []Symbol, name, filePath string) Symbol {
+	t.Helper()
+	for _, sym := range symbols {
+		if sym.Name == name && sym.FilePath == filePath {
+			return sym
+		}
+	}
+	t.Fatalf("symbol %s in %s not found in %+v", name, filePath, symbols)
+	return Symbol{}
+}
+
+func referenceExists(refs []Reference, sourceID, targetID int64) bool {
+	for _, ref := range refs {
+		if ref.SourceSymbolID == sourceID && ref.TargetSymbolID == targetID {
+			return true
+		}
+	}
+	return false
 }
 
 func filterDecisionHasReason(decisions []FilterDecision, ownerID int64, reason string) bool {

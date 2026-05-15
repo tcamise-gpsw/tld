@@ -43,9 +43,15 @@ type Scanner struct {
 	Logger         EventLogger
 	Settings       Settings
 
-	resolver         *analyzerlsp.MultiLanguageResolver
+	resolver         definitionResolver
+	resolverFactory  func(rootDir string) definitionResolver
 	resolverMu       sync.Mutex
 	resolverRepoRoot string
+}
+
+type definitionResolver interface {
+	ResolveDefinitions(context.Context, analyzer.Ref) ([]analyzerlsp.DefinitionLocation, error)
+	Close() error
 }
 
 type synchronizedProgress struct {
@@ -315,6 +321,12 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	var files []string
 	if plan.Limited {
 		files = append(files, plan.Files...)
+		committed, err := gitChangesSinceLatestWatchVersion(ctx, s.Store, repo.ID, repoRoot)
+		if err != nil {
+			result.Warnings = append(result.Warnings, "limited view: committed change detection failed: "+err.Error())
+		} else {
+			files = append(files, changedScanFiles(repoRoot, committed, settings, effectiveRules)...)
+		}
 		changed, err := tldgit.WorktreeChangesAgainstHead(repoRoot)
 		if err != nil {
 			result.Warnings = append(result.Warnings, "limited view: git change detection failed: "+err.Error())
@@ -488,7 +500,15 @@ func (s *Scanner) deleteLimitedRemovedFiles(ctx context.Context, repoRoot string
 	changes, err := tldgit.WorktreeChangesAgainstHead(repoRoot)
 	if err != nil {
 		logError(ctx, s.Logger, "watch.scan.delete_removed.failed", err, "repository_id", repositoryID)
-		return nil
+		changes = map[string]tldgit.WorktreeChange{}
+	}
+	committed, err := gitChangesSinceLatestWatchVersion(ctx, s.Store, repositoryID, repoRoot)
+	if err != nil {
+		logError(ctx, s.Logger, "watch.scan.delete_committed_removed.failed", err, "repository_id", repositoryID)
+	} else {
+		for path, change := range committed {
+			changes[path] = change
+		}
 	}
 	var deleted []string
 	for rel, change := range changes {
@@ -1137,7 +1157,7 @@ func (s *Scanner) Close() error {
 	return nil
 }
 
-func (s *Scanner) getOrCreateResolver(repoRoot string) *analyzerlsp.MultiLanguageResolver {
+func (s *Scanner) getOrCreateResolver(repoRoot string) definitionResolver {
 	s.resolverMu.Lock()
 	defer s.resolverMu.Unlock()
 	if s.resolver != nil && s.resolverRepoRoot != repoRoot {
@@ -1145,7 +1165,13 @@ func (s *Scanner) getOrCreateResolver(repoRoot string) *analyzerlsp.MultiLanguag
 		s.resolver = nil
 	}
 	if s.resolver == nil {
-		s.resolver = analyzerlsp.NewMultiLanguageResolver(repoRoot)
+		factory := s.resolverFactory
+		if factory == nil {
+			factory = func(rootDir string) definitionResolver {
+				return analyzerlsp.NewMultiLanguageResolver(rootDir)
+			}
+		}
+		s.resolver = factory(repoRoot)
 		s.resolverRepoRoot = repoRoot
 	}
 	return s.resolver
@@ -1206,12 +1232,12 @@ func (s *Scanner) resolveReferences(ctx context.Context, repoRoot string, reposi
 	return refs, "", nil
 }
 
-func resolveTargetSymbol(ctx context.Context, resolver *analyzerlsp.MultiLanguageResolver, repoRoot string, ref analyzer.Ref, byName map[string][]Symbol, symbols []Symbol) (Symbol, bool) {
+func resolveTargetSymbol(ctx context.Context, resolver definitionResolver, repoRoot string, ref analyzer.Ref, byName map[string][]Symbol, symbols []Symbol) (Symbol, bool) {
 	if resolver != nil {
 		locations, err := resolver.ResolveDefinitions(ctx, ref)
 		if err == nil {
 			for _, location := range locations {
-				if sym, ok := symbolAtLocation(repoRoot, symbols, definitionLocation{FilePath: location.FilePath, Line: location.Line}); ok {
+				if sym, ok := symbolAtLocation(repoRoot, symbols, location); ok {
 					return sym, true
 				}
 			}
@@ -1224,12 +1250,7 @@ func resolveTargetSymbol(ctx context.Context, resolver *analyzerlsp.MultiLanguag
 	return targets[0], true
 }
 
-type definitionLocation struct {
-	FilePath string
-	Line     int
-}
-
-func symbolAtLocation(repoRoot string, symbols []Symbol, location definitionLocation) (Symbol, bool) {
+func symbolAtLocation(repoRoot string, symbols []Symbol, location analyzerlsp.DefinitionLocation) (Symbol, bool) {
 	rel, err := filepath.Rel(repoRoot, location.FilePath)
 	if err != nil {
 		return Symbol{}, false
