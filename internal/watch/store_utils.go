@@ -778,3 +778,18 @@ func previousRawSnapshotForMaterialized(previous, current map[string]watchResour
 	}
 	return prev, true
 }
+
+func scanFact(row factScanner) (Fact, error) {
+	var fact Fact
+	var endLine sql.NullInt64
+	var rawTags string
+	if err := row.Scan(&fact.ID, &fact.RepositoryID, &fact.FileID, &fact.FilePath, &fact.StableKey, &fact.Type, &fact.Enricher, &fact.SubjectKind, &fact.SubjectStableKey, &fact.ObjectKind, &fact.ObjectStableKey, &fact.ObjectFilePath, &fact.ObjectName, &fact.Relationship, &fact.StartLine, &endLine, &fact.Confidence, &fact.Name, &rawTags, &fact.AttributesJSON, &fact.VisibilityHintsJSON, &fact.FactHash, &fact.RawJSON, &fact.CreatedAt, &fact.UpdatedAt); err != nil {
+		return Fact{}, err
+	}
+	if endLine.Valid {
+		value := int(endLine.Int64)
+		fact.EndLine = &value
+	}
+	_ = json.Unmarshal([]byte(rawTags), &fact.Tags)
+	return fact, nil
+}
