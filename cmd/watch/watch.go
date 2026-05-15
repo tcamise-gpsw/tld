@@ -535,7 +535,11 @@ func logWatchRuntimeEvent(ctx context.Context, logger *slog.Logger, event watch.
 	if event.Message != "" {
 		fields = append(fields, "message", event.Message)
 	}
-	logger.InfoContext(ctx, "watch.event", fields...)
+	if event.Type == "watch.heartbeat" || event.Type == "watch.changeCounter" || event.Type == "watch.change.skipped" {
+		logger.DebugContext(ctx, "watch.event", fields...)
+	} else {
+		logger.InfoContext(ctx, "watch.event", fields...)
+	}
 }
 
 func repoIdentity(repo watch.Repository) string {

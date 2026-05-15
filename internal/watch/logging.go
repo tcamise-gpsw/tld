@@ -8,11 +8,18 @@ import (
 type EventLogger interface {
 	InfoContext(ctx context.Context, msg string, args ...any)
 	ErrorContext(ctx context.Context, msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
 }
 
 func logInfo(ctx context.Context, logger EventLogger, msg string, args ...any) {
 	if logger != nil {
 		logger.InfoContext(ctx, msg, args...)
+	}
+}
+
+func logDebug(ctx context.Context, logger EventLogger, msg string, args ...any) {
+	if logger != nil {
+		logger.DebugContext(ctx, msg, args...)
 	}
 }
 

@@ -182,7 +182,7 @@ func DefaultConfig() *Config {
 		Watch: WatchConfig{
 			Languages:    []string{"go", "python", "typescript", "javascript", "java", "c", "cpp", "rust"},
 			Watcher:      "auto",
-			PollInterval: "1s",
+			PollInterval: "10s",
 			Debounce:     "500ms",
 			Thresholds: WatchThresholdConfig{
 				MaxElementsPerView:            100,

@@ -321,7 +321,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				contentChanged := nextContentFingerprint != lastContentFingerprint
 				gitChanged := nextGitFingerprint != lastGitFingerprint || nextGit.HeadCommit != lastHead
 				if !contentChanged && !gitChanged {
-					logInfo(ctx, opts.Logger, "watch.change.skipped", "repository_id", repo.ID, "trigger", trigger, "reason", "unchanged_content", "targeted_files", len(targetedFiles), "deleted_files", len(deletedFiles), "source_fingerprint_changed", nextFingerprint != lastFingerprint, "content_fingerprint_changed", false, "git_fingerprint_changed", false)
+					logDebug(ctx, opts.Logger, "watch.change.skipped", "repository_id", repo.ID, "trigger", trigger, "reason", "unchanged_content", "targeted_files", len(targetedFiles), "deleted_files", len(deletedFiles), "source_fingerprint_changed", nextFingerprint != lastFingerprint, "content_fingerprint_changed", false, "git_fingerprint_changed", false)
 					lastSourceSnapshot = stableSourceSnapshot
 					lastFingerprint = nextFingerprint
 					lastContentFingerprint = nextContentFingerprint

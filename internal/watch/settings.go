@@ -32,7 +32,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		Languages:    langs,
 		Watcher:      WatcherAuto,
-		PollInterval: time.Second,
+		PollInterval: 10 * time.Second,
 		Debounce:     500 * time.Millisecond,
 		Thresholds:   defaultThresholds(Thresholds{}),
 		Visibility:   defaultVisibilityConfig(VisibilityConfig{}),
