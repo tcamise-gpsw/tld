@@ -1617,6 +1617,24 @@ func TestSourceSnapshotReusesHashWhenMetadataUnchanged(t *testing.T) {
 	}
 }
 
+func TestSourceContentFingerprintIgnoresMetadataOnlyChanges(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", "package main\nfunc Main() {}\n")
+
+	first := sourceFileSnapshot(repo, Settings{Languages: []string{"go"}}, nil, nil)
+	future := time.Now().Add(time.Second)
+	if err := os.Chtimes(filepath.Join(repo, "main.go"), future, future); err != nil {
+		t.Fatal(err)
+	}
+	second := sourceFileSnapshot(repo, Settings{Languages: []string{"go"}}, nil, first)
+	if sourceFileFingerprint(first) == sourceFileFingerprint(second) {
+		t.Fatalf("expected metadata fingerprint to change after chtimes")
+	}
+	if sourceFileContentFingerprint(first) != sourceFileContentFingerprint(second) {
+		t.Fatalf("expected content fingerprint to ignore metadata-only change, first=%q second=%q", first["main.go"], second["main.go"])
+	}
+}
+
 func TestSourceWatcherFiltersRelevantEvents(t *testing.T) {
 	repo := initGitRepoNoCommit(t)
 	writeFile(t, repo, "main.go", "package main\nfunc Main() {}\n")
@@ -3461,15 +3479,67 @@ func TestApplyGitTagsReportsAddedAndRemovedTags(t *testing.T) {
 		t.Fatalf("expected git:untracked on generated elements")
 	}
 
-	second, err := store.ApplyGitTags(context.Background(), scanResult.RepositoryID, GitStatus{})
+	second, err := store.ApplyGitTags(context.Background(), scanResult.RepositoryID, GitStatus{Untracked: []string{"main.go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.TagsAdded != 0 || second.TagsRemoved != first.TagsAdded {
-		t.Fatalf("expected stale git tags to be removed, first=%+v second=%+v", first, second)
+	if second.TagsAdded != 0 || second.TagsRemoved != 0 {
+		t.Fatalf("expected repeated git tags to be a no-op, first=%+v second=%+v", first, second)
+	}
+
+	clean, err := store.ApplyGitTags(context.Background(), scanResult.RepositoryID, GitStatus{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.TagsAdded != 0 || clean.TagsRemoved != first.TagsAdded {
+		t.Fatalf("expected stale git tags to be removed, first=%+v clean=%+v", first, clean)
 	}
 	if tagged := countElementTag(t, db, "git:untracked"); tagged != 0 {
 		t.Fatalf("expected git:untracked to be removed, found %d tagged elements", tagged)
+	}
+}
+
+func TestWatchElementHashIgnoresManagedGitTags(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", "package main\nfunc Main() {}\n")
+
+	store := NewStore(db)
+	scanResult, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+		t.Fatal(err)
+	}
+	elementID, ok, err := store.MappingResourceID(context.Background(), scanResult.RepositoryID, "file", "file:main.go", "element")
+	if err != nil || !ok {
+		t.Fatalf("expected file element mapping, ok=%v err=%v", ok, err)
+	}
+	before, ok, err := store.WatchResourceHash(context.Background(), "element", elementID)
+	if err != nil || !ok {
+		t.Fatalf("expected element hash, ok=%v err=%v", ok, err)
+	}
+	if _, err := store.ApplyGitTags(context.Background(), scanResult.RepositoryID, GitStatus{Untracked: []string{"main.go"}}); err != nil {
+		t.Fatal(err)
+	}
+	afterManaged, ok, err := store.WatchResourceHash(context.Background(), "element", elementID)
+	if err != nil || !ok {
+		t.Fatalf("expected element hash after managed tags, ok=%v err=%v", ok, err)
+	}
+	if afterManaged != before {
+		t.Fatalf("managed git tags should not affect element hash: before=%s after=%s", before, afterManaged)
+	}
+	if _, err := store.addElementTags(context.Background(), elementID, []string{"role:test"}); err != nil {
+		t.Fatal(err)
+	}
+	afterSemantic, ok, err := store.WatchResourceHash(context.Background(), "element", elementID)
+	if err != nil || !ok {
+		t.Fatalf("expected element hash after semantic tag, ok=%v err=%v", ok, err)
+	}
+	if afterSemantic == before {
+		t.Fatalf("non-managed semantic tags should affect element hash")
 	}
 }
 

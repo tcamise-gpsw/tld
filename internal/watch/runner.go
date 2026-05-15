@@ -162,9 +162,11 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 	limitedMode := once.Scan.Mode == "limited"
 	lastSourceSnapshot := map[string]string{}
 	lastFingerprint := ""
+	lastContentFingerprint := ""
 	if !limitedMode {
 		lastSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, nil)
 		lastFingerprint = sourceFileFingerprint(lastSourceSnapshot)
+		lastContentFingerprint = sourceFileContentFingerprint(lastSourceSnapshot)
 	}
 	lastHead := gitStatus.HeadCommit
 	lastGitFingerprint := gitStatusFingerprint(gitStatus)
@@ -284,9 +286,14 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			}
 			nextGitFingerprint := gitStatusFingerprint(nextGit)
 			nextFingerprint := ""
+			nextContentFingerprint := ""
 			sourceChanged := false
 			var sourceChanges []SourceFileChange
 			stableSourceSnapshot := map[string]string{}
+			trigger := "poll"
+			if !pollCheck {
+				trigger = watcherMode
+			}
 
 			if watcherMode == WatcherFSNotify && !limitedMode {
 				for path := range pendingPaths {
@@ -307,11 +314,20 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				pendingPaths = nil
 				sort.Strings(targetedFiles)
 				sort.Strings(deletedFiles)
+				stableSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
+				nextFingerprint = sourceFileFingerprint(stableSourceSnapshot)
+				nextContentFingerprint = sourceFileContentFingerprint(stableSourceSnapshot)
 
-				if len(targetedFiles) == 0 && len(deletedFiles) == 0 && nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
+				contentChanged := nextContentFingerprint != lastContentFingerprint
+				gitChanged := nextGitFingerprint != lastGitFingerprint || nextGit.HeadCommit != lastHead
+				if !contentChanged && !gitChanged {
+					logInfo(ctx, opts.Logger, "watch.change.skipped", "repository_id", repo.ID, "trigger", trigger, "reason", "unchanged_content", "targeted_files", len(targetedFiles), "deleted_files", len(deletedFiles), "source_fingerprint_changed", nextFingerprint != lastFingerprint, "content_fingerprint_changed", false, "git_fingerprint_changed", false)
+					lastSourceSnapshot = stableSourceSnapshot
+					lastFingerprint = nextFingerprint
+					lastContentFingerprint = nextContentFingerprint
 					continue
 				}
-				logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
+				logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "trigger", trigger, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "source_fingerprint_changed", nextFingerprint != lastFingerprint, "content_fingerprint_changed", contentChanged, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
 
 				if len(deletedFiles) > 0 {
 					if err := r.Store.DeleteFilesByPath(ctx, repo.ID, deletedFiles); err != nil {
@@ -333,13 +349,19 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				if !limitedMode {
 					nextSourceSnapshot := sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
 					nextFingerprint = sourceFileFingerprint(nextSourceSnapshot)
-					if nextFingerprint == lastFingerprint && nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
+					nextContentFingerprint = sourceFileContentFingerprint(nextSourceSnapshot)
+					if nextContentFingerprint == lastContentFingerprint && nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
+						if nextFingerprint != lastFingerprint {
+							lastSourceSnapshot = nextSourceSnapshot
+							lastFingerprint = nextFingerprint
+							lastContentFingerprint = nextContentFingerprint
+						}
 						continue
 					}
 				} else if nextGit.HeadCommit == lastHead && nextGitFingerprint == lastGitFingerprint {
 					continue
 				}
-				logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "source_fingerprint_changed", nextFingerprint != lastFingerprint, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
+				logInfo(ctx, opts.Logger, "watch.change.detected", "repository_id", repo.ID, "trigger", trigger, "limited_mode", limitedMode, "head", nextGit.HeadCommit, "source_fingerprint_changed", nextFingerprint != lastFingerprint, "content_fingerprint_changed", nextContentFingerprint != lastContentFingerprint, "git_fingerprint_changed", nextGitFingerprint != lastGitFingerprint)
 				if !pollCheck {
 					if err := waitDebounce(ctx, opts.Debounce); err != nil {
 						logInfo(ctx, opts.Logger, "watch.runner.context_done", "repository_id", repo.ID, "error", err)
@@ -348,7 +370,9 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				}
 				if !limitedMode {
 					stableSourceSnapshot = sourceFileSnapshot(repoRoot, settings, r.Scanner.Rules, lastSourceSnapshot)
-					sourceChanged = sourceFileFingerprint(stableSourceSnapshot) != lastFingerprint
+					nextFingerprint = sourceFileFingerprint(stableSourceSnapshot)
+					nextContentFingerprint = sourceFileContentFingerprint(stableSourceSnapshot)
+					sourceChanged = nextContentFingerprint != lastContentFingerprint
 				}
 				nextGit, err = gitStatusSnapshot(repoRoot)
 				if err != nil {
@@ -431,9 +455,10 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 				lastHead = nextGit.HeadCommit
 			}
 			limitedMode = once.Scan.Mode == "limited"
-			if !limitedMode && watcherMode != WatcherFSNotify {
+			if !limitedMode {
 				lastSourceSnapshot = stableSourceSnapshot
-				lastFingerprint = sourceFileFingerprint(stableSourceSnapshot)
+				lastFingerprint = nextFingerprint
+				lastContentFingerprint = nextContentFingerprint
 			}
 			lastGitFingerprint = nextGitFingerprint
 		}
@@ -712,6 +737,27 @@ func sourceFileFingerprint(files map[string]string) string {
 		h = hashString(h + path + files[path])
 	}
 	return h
+}
+
+func sourceFileContentFingerprint(files map[string]string) string {
+	h := hashString("")
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		h = hashString(h + path + sourceSnapshotContentHash(files[path]))
+	}
+	return h
+}
+
+func sourceSnapshotContentHash(value string) string {
+	idx := strings.LastIndex(value, ":")
+	if idx < 0 {
+		return value
+	}
+	return value[idx+1:]
 }
 
 func diffSourceFileSnapshots(before, after map[string]string) []SourceFileChange {

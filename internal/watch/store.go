@@ -1499,7 +1499,7 @@ func (s *Store) watchElementHash(ctx context.Context, id int64) (string, bool, e
 		"description":           nullableString(description),
 		"technology":            nullableString(technology),
 		"technology_connectors": normalizedJSONValue(techLinks),
-		"tags":                  normalizedJSONValue(tags),
+		"tags":                  normalizedElementTagsForHash(tags),
 		"repo":                  nullableString(repo),
 		"branch":                nullableString(branch),
 		"file_path":             nullableString(filePath),
@@ -1576,6 +1576,22 @@ func normalizedJSONValue(raw string) any {
 		return raw
 	}
 	return value
+}
+
+func normalizedElementTagsForHash(raw string) any {
+	var tags []string
+	if err := json.Unmarshal([]byte(raw), &tags); err != nil {
+		return normalizedJSONValue(raw)
+	}
+	managed := stringSet(managedGitTags())
+	filtered := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if _, ok := managed[tag]; ok {
+			continue
+		}
+		filtered = append(filtered, tag)
+	}
+	return filtered
 }
 
 func (s *Store) Materialization(ctx context.Context, repositoryID int64) ([]MaterializationMapping, error) {
@@ -2419,15 +2435,31 @@ func (s *Store) ApplyGitTags(ctx context.Context, repositoryID int64, status Git
 		}
 	}
 	var result GitTagUpdateResult
+	desiredByID := make(map[int64]map[string]struct{}, len(updates))
+	for _, item := range updates {
+		if desiredByID[item.id] == nil {
+			desiredByID[item.id] = map[string]struct{}{}
+		}
+		for _, tag := range item.tags {
+			desiredByID[item.id][tag] = struct{}{}
+		}
+	}
 	for _, id := range allElementIDs {
-		removed, err := s.removeElementTags(ctx, id, managedGitTags())
+		var stale []string
+		for _, tag := range managedGitTags() {
+			if _, keep := desiredByID[id][tag]; !keep {
+				stale = append(stale, tag)
+			}
+		}
+		removed, err := s.removeElementTags(ctx, id, stale)
 		if err != nil {
 			return GitTagUpdateResult{}, err
 		}
 		result.TagsRemoved += removed
 	}
 	for _, item := range updates {
-		added, err := s.addElementTags(ctx, item.id, item.tags)
+		desired := sortedSetValues(desiredByID[item.id])
+		added, err := s.addElementTags(ctx, item.id, desired)
 		if err != nil {
 			return GitTagUpdateResult{}, err
 		}
@@ -3531,6 +3563,26 @@ func (s *Store) removeElementTags(ctx context.Context, elementID int64, remove [
 
 func managedGitTags() []string {
 	return []string{"git:staged", "git:unstaged", "git:untracked", "watch:deleted"}
+}
+
+func stringSet(values []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		out[value] = struct{}{}
+	}
+	return out
+}
+
+func sortedSetValues(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func filepathToSlash(path string) string {
