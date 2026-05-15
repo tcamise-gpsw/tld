@@ -12,6 +12,10 @@ it, records the baseline watch representation, applies `change.patch`, reruns
 the real watch pipeline, and prints the resulting element, connector, and view
 diffs.
 
+Inside review, `p` applies `change.patch` to the fixture `baseline/` so you can
+inspect or edit the patched source tree, and `v` reverts it. Reruns expect the
+fixture baseline to be reverted.
+
 Saved annotations live in `expected.yaml`. Empty `expected.yaml` files are
 intentional for new fixtures: the first review pass creates the ground truth.
 

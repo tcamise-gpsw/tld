@@ -28,6 +28,10 @@ const (
 	reviewCorrect    = "correct"
 	reviewIncorrect  = "incorrect"
 	reviewUnreviewed = "unreviewed"
+
+	patchStateClean    = "clean"
+	patchStateApplied  = "applied"
+	patchStateConflict = "conflict"
 )
 
 type CaseManifest struct {
@@ -172,19 +176,16 @@ func discoverCases(root string) ([]string, error) {
 
 func reviewCases(ctx context.Context, in io.Reader, out io.Writer, cases []string, opts runOptions) error {
 	reader := bufio.NewReader(in)
+caseLoop:
 	for i := 0; i < len(cases); i++ {
 		caseDir := cases[i]
 	rerun:
-		result, expected, err := runCaseWithExpected(ctx, caseDir, opts)
-		if err != nil {
-			return err
+		state, stateErr := casePatchState(caseDir)
+		if stateErr != nil {
+			return stateErr
 		}
-		for {
-			printCase(out, i+1, len(cases), result)
-			if result.TempDir != "" {
-				_, _ = fmt.Fprintf(out, "Temp repo: %s\n", result.TempDir)
-			}
-			_, _ = fmt.Fprintln(out, "\nCommands: a=accept all, c N=correct, x N=incorrect, u N=unreviewed, e=edit patch, j=json-ish list, r=rerun, n=next, q=quit")
+		if state == patchStateApplied {
+			printPatchAppliedPrompt(out, i+1, len(cases), caseDir)
 			_, _ = fmt.Fprint(out, "> ")
 			line, err := reader.ReadString('\n')
 			if err != nil && !errors.Is(err, io.EOF) {
@@ -194,39 +195,69 @@ func reviewCases(ctx context.Context, in io.Reader, out io.Writer, cases []strin
 			if errors.Is(err, io.EOF) && line == "" {
 				return nil
 			}
-			switch {
-			case line == "", line == "n":
+			switch line {
+			case "v":
+				if err := revertPatchFromBaseline(caseDir); err != nil {
+					_, _ = fmt.Fprintf(out, "revert patch failed: %v\n", err)
+				}
+				goto rerun
+			case "p":
+				_, _ = fmt.Fprintln(out, "patch is already applied")
+				goto rerun
+			case "n", "":
+				continue caseLoop
+			case "q":
+				return nil
+			default:
+				_, _ = fmt.Fprintf(out, "unknown command %q\n", line)
+				goto rerun
+			}
+		}
+		result, expected, err := runCaseWithExpected(ctx, caseDir, opts)
+		if err != nil {
+			return err
+		}
+		for {
+			printCase(out, i+1, len(cases), result)
+			if result.TempDir != "" {
+				_, _ = fmt.Fprintf(out, "Temp repo: %s\n", result.TempDir)
+			}
+			_, _ = fmt.Fprintln(out, "\nCommands: a=accept all, p=apply patch, v=revert patch, r=rerun, n=next, q=quit")
+			_, _ = fmt.Fprint(out, "> ")
+			line, err := reader.ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return err
+			}
+			line = strings.TrimSpace(line)
+			if errors.Is(err, io.EOF) && line == "" {
+				return nil
+			}
+			switch line{
+			case "", "n":
 				if err := saveExpected(caseDir, expectedFromObjects(result.Objects, expected)); err != nil {
 					return err
 				}
 				goto nextCase
-			case line == "q":
+			case "q":
 				if err := saveExpected(caseDir, expectedFromObjects(result.Objects, expected)); err != nil {
 					return err
 				}
 				return nil
-			case line == "r":
+			case "r":
 				goto rerun
-			case line == "a":
+			case "p":
+				if err := applyPatchToBaseline(caseDir); err != nil {
+					_, _ = fmt.Fprintf(out, "apply patch failed: %v\n", err)
+				}
+				goto rerun
+			case "v":
+				if err := revertPatchFromBaseline(caseDir); err != nil {
+					_, _ = fmt.Fprintf(out, "revert patch failed: %v\n", err)
+				}
+				goto rerun
+			case "a":
 				for idx := range result.Objects {
 					result.Objects[idx].Review = reviewCorrect
-				}
-				if err := saveExpected(caseDir, expectedFromObjects(result.Objects, expected)); err != nil {
-					return err
-				}
-				continue
-			case line == "e":
-				if err := openPatchInEditor(caseDir); err != nil {
-					_, _ = fmt.Fprintf(out, "editor failed: %v\n", err)
-				}
-				goto rerun
-			case line == "j":
-				printJSONishObjects(out, result.Objects)
-				continue
-			case strings.HasPrefix(line, "c "), strings.HasPrefix(line, "x "), strings.HasPrefix(line, "u "):
-				if err := markObjects(result.Objects, line); err != nil {
-					_, _ = fmt.Fprintf(out, "%v\n", err)
-					continue
 				}
 				if err := saveExpected(caseDir, expectedFromObjects(result.Objects, expected)); err != nil {
 					return err
@@ -540,41 +571,15 @@ func printCase(out io.Writer, idx, total int, result CaseResult) {
 	}
 }
 
-func printJSONishObjects(out io.Writer, objects []ObjectDiff) {
-	for i, object := range objects {
-		_, _ = fmt.Fprintf(out, "%d kind=%s change=%s review=%s identity=%q summary=%q\n", i+1, object.Kind, object.Change, object.Review, object.Identity, object.Summary)
-	}
-}
-
-func markObjects(objects []ObjectDiff, line string) error {
-	fields := strings.Fields(line)
-	if len(fields) != 2 {
-		return fmt.Errorf("usage: %s N", fields[0])
-	}
-	mark := map[string]string{"c": reviewCorrect, "x": reviewIncorrect, "u": reviewUnreviewed}[fields[0]]
-	index, err := strconv.Atoi(fields[1])
-	if err != nil || index < 1 || index > len(objects) {
-		return fmt.Errorf("object index must be between 1 and %d", len(objects))
-	}
-	objects[index-1].Review = mark
-	return nil
-}
-
-func openPatchInEditor(caseDir string) error {
+func printPatchAppliedPrompt(out io.Writer, idx, total int, caseDir string) {
 	manifest, err := loadManifest(caseDir)
-	if err != nil {
-		return err
+	name := filepath.Base(caseDir)
+	if err == nil && strings.TrimSpace(manifest.Name) != "" {
+		name = strings.TrimSpace(manifest.Name)
 	}
-	editor := strings.TrimSpace(os.Getenv("EDITOR"))
-	if editor == "" {
-		return fmt.Errorf("EDITOR is not set")
-	}
-	patch := filepath.Join(caseDir, firstNonEmpty(manifest.Patch, "change.patch"))
-	cmd := exec.Command(editor, patch)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	_, _ = fmt.Fprintf(out, "\n[%d/%d] %s\n", idx, total, name)
+	_, _ = fmt.Fprintln(out, "  patch is currently applied to baseline/")
+	_, _ = fmt.Fprintln(out, "\nCommands: v=revert patch, p=apply patch, n=next, q=quit")
 }
 
 func copyDir(src, dst string) error {
@@ -628,6 +633,52 @@ func initBaselineGit(repo string) error {
 
 func runGitApply(repo, patch string) error {
 	return runCommand(repo, "git", "apply", "--whitespace=nowarn", patch)
+}
+
+func applyPatchToBaseline(caseDir string) error {
+	baseline, patch, err := caseBaselineAndPatch(caseDir)
+	if err != nil {
+		return err
+	}
+	return runCommand(baseline, "git", "apply", "--whitespace=nowarn", patch)
+}
+
+func revertPatchFromBaseline(caseDir string) error {
+	baseline, patch, err := caseBaselineAndPatch(caseDir)
+	if err != nil {
+		return err
+	}
+	return runCommand(baseline, "git", "apply", "--reverse", "--whitespace=nowarn", patch)
+}
+
+func casePatchState(caseDir string) (string, error) {
+	baseline, patch, err := caseBaselineAndPatch(caseDir)
+	if err != nil {
+		return "", err
+	}
+	if err := runCommand(baseline, "git", "apply", "--check", "--whitespace=nowarn", patch); err == nil {
+		return patchStateClean, nil
+	}
+	if err := runCommand(baseline, "git", "apply", "--check", "--reverse", "--whitespace=nowarn", patch); err == nil {
+		return patchStateApplied, nil
+	}
+	return patchStateConflict, nil
+}
+
+func caseBaselineAndPatch(caseDir string) (string, string, error) {
+	manifest, err := loadManifest(caseDir)
+	if err != nil {
+		return "", "", err
+	}
+	baseline := filepath.Join(caseDir, firstNonEmpty(manifest.Baseline, "baseline"))
+	patch := filepath.Join(caseDir, firstNonEmpty(manifest.Patch, "change.patch"))
+	if _, err := os.Stat(baseline); err != nil {
+		return "", "", fmt.Errorf("baseline: %w", err)
+	}
+	if _, err := os.Stat(patch); err != nil {
+		return "", "", fmt.Errorf("patch: %w", err)
+	}
+	return baseline, patch, nil
 }
 
 func runCommand(dir, name string, args ...string) error {

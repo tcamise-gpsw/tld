@@ -76,6 +76,46 @@ func TestReviewAcceptAllSavesGroundTruth(t *testing.T) {
 	}
 }
 
+func TestApplyAndRevertPatchCommandsMutateBaseline(t *testing.T) {
+	requireGit(t)
+	caseDir := writeBodyEditCase(t)
+
+	state, err := casePatchState(caseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != patchStateClean {
+		t.Fatalf("expected clean patch state, got %s", state)
+	}
+	if err := applyPatchToBaseline(caseDir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(caseDir, "baseline", "internal", "service", "user.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "strings.ToLower") {
+		t.Fatalf("patch was not applied:\n%s", string(data))
+	}
+	state, err = casePatchState(caseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != patchStateApplied {
+		t.Fatalf("expected applied patch state, got %s", state)
+	}
+	if err := revertPatchFromBaseline(caseDir); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join(caseDir, "baseline", "internal", "service", "user.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "strings.ToLower") {
+		t.Fatalf("patch was not reverted:\n%s", string(data))
+	}
+}
+
 func TestRunCaseMatchesProductionWatchDirtyWorktreeDiffs(t *testing.T) {
 	requireGit(t)
 	caseDir := writeBodyEditCase(t)
