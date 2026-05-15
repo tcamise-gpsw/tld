@@ -126,28 +126,28 @@ func NewWatchCmd() *cobra.Command {
 				term.Label(cmd.OutOrStdout(), 20, "Embedding model", embeddingCfg.Model)
 			}
 			progress := newCLIProgress(cmd.ErrOrStderr())
-		if hasEmbedding {
-			if progress != nil {
-				progress.Start("Checking embedding provider", 1)
-			}
-			healthStarted := time.Now()
-			logger.InfoContext(cmd.Context(), "watch.embedding_healthcheck.started", "provider", embeddingCfg.Provider, "model", embeddingCfg.Model)
-			checked, health, err := watch.CheckEmbeddingHealth(cmd.Context(), embeddingCfg)
-			if err != nil {
+			if hasEmbedding {
 				if progress != nil {
+					progress.Start("Checking embedding provider", 1)
+				}
+				healthStarted := time.Now()
+				logger.InfoContext(cmd.Context(), "watch.embedding_healthcheck.started", "provider", embeddingCfg.Provider, "model", embeddingCfg.Model)
+				checked, health, err := watch.CheckEmbeddingHealth(cmd.Context(), embeddingCfg)
+				if err != nil {
+					if progress != nil {
+						if progress != nil {
+							progress.Finish()
+						}
+					}
+					return fail("watch.embedding_healthcheck.failed", fmt.Errorf("embedding healthcheck failed: %w", err), "elapsed", time.Since(healthStarted).Round(time.Millisecond).String(), "provider", embeddingCfg.Provider, "model", embeddingCfg.Model)
+				}
+				embeddingCfg = checked
+				logger.InfoContext(cmd.Context(), "watch.embedding_healthcheck.completed", "elapsed", time.Since(healthStarted).Round(time.Millisecond).String(), "provider", embeddingCfg.Provider, "model", embeddingCfg.Model, "dimension", health.Dimension, "similarity", health.Similarity)
 				if progress != nil {
+					progress.Advance("")
 					progress.Finish()
 				}
-				}
-				return fail("watch.embedding_healthcheck.failed", fmt.Errorf("embedding healthcheck failed: %w", err), "elapsed", time.Since(healthStarted).Round(time.Millisecond).String(), "provider", embeddingCfg.Provider, "model", embeddingCfg.Model)
-			}
-			embeddingCfg = checked
-			logger.InfoContext(cmd.Context(), "watch.embedding_healthcheck.completed", "elapsed", time.Since(healthStarted).Round(time.Millisecond).String(), "provider", embeddingCfg.Provider, "model", embeddingCfg.Model, "dimension", health.Dimension, "similarity", health.Similarity)
-			if progress != nil {
-				progress.Advance("")
-				progress.Finish()
-			}
-			term.Label(cmd.OutOrStdout(), 20, "Embedding health", fmt.Sprintf("dimension=%d similarity=%.3f", health.Dimension, health.Similarity))
+				term.Label(cmd.OutOrStdout(), 20, "Embedding health", fmt.Sprintf("dimension=%d similarity=%.3f", health.Dimension, health.Similarity))
 			}
 			serveCfg := workspace.ResolveServeOptions(cfg, host, port)
 			serveOpts := localserver.ServeOptions{Host: serveCfg.Host, Port: serveCfg.Port}
@@ -166,18 +166,18 @@ func NewWatchCmd() *cobra.Command {
 			if !noServe {
 				serveStarted := time.Now()
 				logger.InfoContext(cmd.Context(), "watch.server.ensure.started", "url", url)
-			if !serverReady(url) {
-				if progress != nil {
-					progress.Start("Starting watch server", 1)
-				}
-				logger.InfoContext(cmd.Context(), "watch.server.bootstrap.started", "data_dir", dataDir, "addr", addr)
-				app, err := localserver.Bootstrap(dataDir, serveOpts)
-				if err != nil {
+				if !serverReady(url) {
 					if progress != nil {
-						progress.Finish()
+						progress.Start("Starting watch server", 1)
 					}
-					return fail("watch.server.bootstrap.failed", err, "elapsed", time.Since(serveStarted).Round(time.Millisecond).String())
-				}
+					logger.InfoContext(cmd.Context(), "watch.server.bootstrap.started", "data_dir", dataDir, "addr", addr)
+					app, err := localserver.Bootstrap(dataDir, serveOpts)
+					if err != nil {
+						if progress != nil {
+							progress.Finish()
+						}
+						return fail("watch.server.bootstrap.failed", err, "elapsed", time.Since(serveStarted).Round(time.Millisecond).String())
+					}
 					srv = &http.Server{Addr: app.Addr, Handler: app.Handler}
 					go func() {
 						if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
