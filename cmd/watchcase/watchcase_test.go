@@ -30,6 +30,15 @@ func TestRunCaseProducesReviewableObjectDiff(t *testing.T) {
 	if len(first.Objects) != 1 {
 		t.Fatalf("expected one object diff, got %+v", first.Objects)
 	}
+	for _, name := range []string{"workspace.before.yaml", "workspace.after.yaml"} {
+		data, err := os.ReadFile(filepath.Join(caseDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if !strings.Contains(string(data), "CreateUser") {
+			t.Fatalf("%s should include exported workspace state:\n%s", name, string(data))
+		}
+	}
 	object := first.Objects[0]
 	if object.Kind != "element" || object.Change != "updated" || object.Review != reviewUnreviewed {
 		t.Fatalf("unexpected object diff: %+v", object)
@@ -113,6 +122,37 @@ func TestApplyAndRevertPatchCommandsMutateBaseline(t *testing.T) {
 	}
 	if strings.Contains(string(data), "strings.ToLower") {
 		t.Fatalf("patch was not reverted:\n%s", string(data))
+	}
+}
+
+func TestApplyAndRevertPatchCommandsWorkInsideEnclosingGitRepository(t *testing.T) {
+	requireGit(t)
+	parent := t.TempDir()
+	if err := runCommand(parent, "git", "init"); err != nil {
+		t.Fatal(err)
+	}
+	caseDir := filepath.Join(parent, "cases", "body-edit")
+	copyBodyEditCase(t, caseDir)
+
+	if err := applyPatchToBaseline(caseDir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(caseDir, "baseline", "internal", "service", "user.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "strings.ToLower") {
+		t.Fatalf("patch was not applied inside enclosing git repo:\n%s", string(data))
+	}
+	if err := revertPatchFromBaseline(caseDir); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join(caseDir, "baseline", "internal", "service", "user.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "strings.ToLower") {
+		t.Fatalf("patch was not reverted inside enclosing git repo:\n%s", string(data))
 	}
 }
 
@@ -244,6 +284,12 @@ func objectSignatures(objects []ObjectDiff) []string {
 func writeBodyEditCase(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	copyBodyEditCase(t, dir)
+	return dir
+}
+
+func copyBodyEditCase(t *testing.T, dir string) {
+	t.Helper()
 	writeFile(t, filepath.Join(dir, "fixture.yaml"), `name: body-edit
 baseline: baseline
 patch: change.patch
@@ -269,6 +315,7 @@ func CreateUser(name string) User {
 }
 `)
 	writeFile(t, filepath.Join(dir, "change.patch"), `diff --git a/internal/service/user.go b/internal/service/user.go
+index 04b2ccb..b75d2c9 100644
 --- a/internal/service/user.go
 +++ b/internal/service/user.go
 @@ -6,6 +6,9 @@ type User struct {
@@ -283,7 +330,6 @@ func CreateUser(name string) User {
  	return User{Name: clean}
  }
 `)
-	return dir
 }
 
 func writeFile(t *testing.T, path, content string) {

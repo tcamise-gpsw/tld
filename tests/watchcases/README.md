@@ -16,8 +16,11 @@ Inside review, `p` applies `change.patch` to the fixture `baseline/` so you can
 inspect or edit the patched source tree, and `v` reverts it. Reruns expect the
 fixture baseline to be reverted.
 
-Saved annotations live in `expected.yaml`. Empty `expected.yaml` files are
-intentional for new fixtures: the first review pass creates the ground truth.
+Saved annotations live in `expected.yaml`. Each run also refreshes
+`workspace.before.yaml` and `workspace.after.yaml` beside it so the reviewed
+object diffs can be compared against the materialized workspace state before
+and after the patch. Empty `expected.yaml` files are intentional for new
+fixtures: the first review pass creates the ground truth.
 
 ```
 tld watchcase run tests/watchcases/go

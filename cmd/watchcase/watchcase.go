@@ -19,6 +19,7 @@ import (
 	"github.com/mertcikla/tld/v2/internal/localserver"
 	storepkg "github.com/mertcikla/tld/v2/internal/store"
 	"github.com/mertcikla/tld/v2/internal/watch"
+	"github.com/mertcikla/tld/v2/internal/watch/exportyaml"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -53,6 +54,19 @@ type ExpectedObject struct {
 	Review   string `yaml:"review"`
 	Summary  string `yaml:"summary,omitempty"`
 	Comment  string `yaml:"comment,omitempty"`
+}
+
+type WorkspaceSnapshot struct {
+	Elements   map[string]*workspace.Element   `yaml:"elements,omitempty"`
+	Views      map[string]WorkspaceView        `yaml:"views,omitempty"`
+	Connectors map[string]*workspace.Connector `yaml:"connectors,omitempty"`
+}
+
+type WorkspaceView struct {
+	Element      string `yaml:"element"`
+	Name         string `yaml:"name"`
+	Label        string `yaml:"label,omitempty"`
+	DensityLevel int    `yaml:"density_level,omitempty"`
 }
 
 type ObjectDiff struct {
@@ -232,7 +246,7 @@ caseLoop:
 			if errors.Is(err, io.EOF) && line == "" {
 				return nil
 			}
-			switch line{
+			switch line {
 			case "", "n":
 				if err := saveExpected(caseDir, expectedFromObjects(result.Objects, expected)); err != nil {
 					return err
@@ -382,6 +396,9 @@ func RunCase(ctx context.Context, caseDir string, expected ExpectedFile, opts ru
 	if _, err := watchStore.CreateWatchVersion(ctx, baselineRun.Repository.ID, head, "watchcase baseline", "", branch, baselineRun.Representation.RepresentationHash, nil, nil); err != nil {
 		return CaseResult{}, fmt.Errorf("record baseline watch version: %w", err)
 	}
+	if err := writeWorkspaceSnapshot(ctx, caseDir, "workspace.before.yaml", sqliteStore, watchStore, baselineRun.Scan.RepositoryID, repo); err != nil {
+		return CaseResult{}, fmt.Errorf("write workspace.before.yaml: %w", err)
+	}
 	if err := runGitApply(repo, patch); err != nil {
 		return CaseResult{}, err
 	}
@@ -394,6 +411,9 @@ func RunCase(ctx context.Context, caseDir string, expected ExpectedFile, opts ru
 	})
 	if err != nil {
 		return CaseResult{}, fmt.Errorf("patched watch run: %w", err)
+	}
+	if err := writeWorkspaceSnapshot(ctx, caseDir, "workspace.after.yaml", sqliteStore, watchStore, nextRun.Scan.RepositoryID, repo); err != nil {
+		return CaseResult{}, fmt.Errorf("write workspace.after.yaml: %w", err)
 	}
 	objects := objectDiffs(nextRun.Diffs, expected)
 	return CaseResult{Dir: caseDir, Name: name, Objects: objects, TempDir: keepTempPath(tempRoot, opts)}, nil
@@ -432,6 +452,98 @@ func saveExpected(caseDir string, expected ExpectedFile) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(caseDir, "expected.yaml"), data, 0o644)
+}
+
+func writeWorkspaceSnapshot(ctx context.Context, caseDir, name string, sqliteStore *storepkg.SQLiteStore, watchStore *watch.Store, repositoryID int64, repoRoot string) error {
+	exported, _, err := exportyaml.Export(ctx, sqliteStore, watchStore, emptyWorkspace(), repositoryID)
+	if err != nil {
+		return err
+	}
+	snapshot := workspaceSnapshot(exported, repoRoot)
+	data, err := yaml.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(caseDir, name), data, 0o644)
+}
+
+func emptyWorkspace() *workspace.Workspace {
+	return &workspace.Workspace{
+		Elements:   map[string]*workspace.Element{},
+		Connectors: map[string]*workspace.Connector{},
+		Meta: &workspace.Meta{
+			Elements:   map[string]*workspace.ResourceMetadata{},
+			Views:      map[string]*workspace.ResourceMetadata{},
+			Connectors: map[string]*workspace.ResourceMetadata{},
+		},
+	}
+}
+
+func workspaceSnapshot(ws *workspace.Workspace, repoRoot string) WorkspaceSnapshot {
+	snapshot := WorkspaceSnapshot{
+		Elements:   map[string]*workspace.Element{},
+		Views:      map[string]WorkspaceView{},
+		Connectors: map[string]*workspace.Connector{},
+	}
+	if ws == nil {
+		return snapshot
+	}
+	for ref, element := range ws.Elements {
+		if element == nil {
+			continue
+		}
+		copyElement := *element
+		copyElement.Repo = normalizedSnapshotRepo(copyElement.Repo, repoRoot)
+		snapshot.Elements[ref] = &copyElement
+		if element.HasView {
+			label := strings.TrimSpace(element.ViewLabel)
+			name := strings.TrimSpace(element.Name)
+			if label != "" {
+				name = label
+			}
+			snapshot.Views[ref] = WorkspaceView{
+				Element:      ref,
+				Name:         name,
+				Label:        label,
+				DensityLevel: element.DensityLevel,
+			}
+		}
+	}
+	for ref, connector := range ws.Connectors {
+		if connector == nil {
+			continue
+		}
+		copyConnector := *connector
+		snapshot.Connectors[ref] = &copyConnector
+	}
+	if len(snapshot.Elements) == 0 {
+		snapshot.Elements = nil
+	}
+	if len(snapshot.Views) == 0 {
+		snapshot.Views = nil
+	}
+	if len(snapshot.Connectors) == 0 {
+		snapshot.Connectors = nil
+	}
+	return snapshot
+}
+
+func normalizedSnapshotRepo(value, repoRoot string) string {
+	value = strings.TrimSpace(value)
+	repoRoot = strings.TrimSpace(repoRoot)
+	if value == "" || repoRoot == "" {
+		return value
+	}
+	if strings.Contains(filepath.ToSlash(value), "/tld-watchcase-") && strings.HasSuffix(filepath.ToSlash(value), "/repo") {
+		return "<fixture-repo>"
+	}
+	if resolved, err := filepath.EvalSymlinks(repoRoot); err == nil {
+		repoRoot = resolved
+	}
+	if filepath.Clean(value) == filepath.Clean(repoRoot) {
+		return "<fixture-repo>"
+	}
+	return value
 }
 
 func objectDiffs(diffs []watch.RepresentationDiff, expected ExpectedFile) []ObjectDiff {
@@ -640,7 +752,7 @@ func applyPatchToBaseline(caseDir string) error {
 	if err != nil {
 		return err
 	}
-	return runCommand(baseline, "git", "apply", "--whitespace=nowarn", patch)
+	return gitApplyToDir(baseline, patch, false, false)
 }
 
 func revertPatchFromBaseline(caseDir string) error {
@@ -648,7 +760,7 @@ func revertPatchFromBaseline(caseDir string) error {
 	if err != nil {
 		return err
 	}
-	return runCommand(baseline, "git", "apply", "--reverse", "--whitespace=nowarn", patch)
+	return gitApplyToDir(baseline, patch, true, false)
 }
 
 func casePatchState(caseDir string) (string, error) {
@@ -656,13 +768,57 @@ func casePatchState(caseDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := runCommand(baseline, "git", "apply", "--check", "--whitespace=nowarn", patch); err == nil {
+	if err := gitApplyToDir(baseline, patch, false, true); err == nil {
 		return patchStateClean, nil
 	}
-	if err := runCommand(baseline, "git", "apply", "--check", "--reverse", "--whitespace=nowarn", patch); err == nil {
+	if err := gitApplyToDir(baseline, patch, true, true); err == nil {
 		return patchStateApplied, nil
 	}
 	return patchStateConflict, nil
+}
+
+func gitApplyToDir(targetDir, patch string, reverse, check bool) error {
+	targetDir, err := filepath.Abs(targetDir)
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(targetDir); err == nil {
+		targetDir = resolved
+	}
+	patch, err = filepath.Abs(patch)
+	if err != nil {
+		return err
+	}
+	dir := targetDir
+	args := []string{"apply", "--whitespace=nowarn"}
+	if check {
+		args = append(args, "--check")
+	}
+	if reverse {
+		args = append(args, "--reverse")
+	}
+	if root, ok := enclosingGitRoot(targetDir); ok {
+		if rel, err := filepath.Rel(root, targetDir); err == nil && rel != "." {
+			dir = root
+			args = append(args, "--directory="+filepath.ToSlash(rel))
+		}
+	}
+	args = append(args, patch)
+	return runCommand(dir, "git", args...)
+}
+
+func enclosingGitRoot(dir string) (string, bool) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return "", false
+	}
+	return root, true
 }
 
 func caseBaselineAndPatch(caseDir string) (string, string, error) {
