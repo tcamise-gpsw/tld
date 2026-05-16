@@ -20,17 +20,22 @@ function AppLayout() {
   const header = useHeader()
   const node = header && typeof header === 'object' && 'node' in header ? (header as { node: React.ReactNode }).node : header
   const hideMobileBar = header && typeof header === 'object' && 'hideMobileBar' in header ? !!(header as { hideMobileBar?: boolean }).hideMobileBar : false
+  const hideTopBar = typeof window !== 'undefined' && !!window.__TLD_VSCODE__
 
   return (
     <Box h="100dvh" display="flex" flexDirection="column" bg="var(--bg-canvas)" overflow="hidden">
-      <TopMenuBar hideMobileBar={hideMobileBar} rightSlot={<WorkspacePanel />}>
-        {node}
-      </TopMenuBar>
-      <Box
-        h={{ base: 'var(--topbar-h-mobile-total)', sm: 'var(--topbar-h-total)' }}
-        mb={{ base: 'var(--topbar-content-gap)', sm: '0px' }}
-        flexShrink={0}
-      />
+      {!hideTopBar && (
+        <>
+          <TopMenuBar hideMobileBar={hideMobileBar} rightSlot={<WorkspacePanel />}>
+            {node}
+          </TopMenuBar>
+          <Box
+            h={{ base: 'var(--topbar-h-mobile-total)', sm: 'var(--topbar-h-total)' }}
+            mb={{ base: 'var(--topbar-content-gap)', sm: '0px' }}
+            flexShrink={0}
+          />
+        </>
+      )}
       <Box flex="1" minH={0} overflow="hidden" position="relative">
         <Outlet />
       </Box>

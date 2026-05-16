@@ -16,7 +16,7 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '')
 }
 
-const serverUrl = trimTrailingSlash(window.__TLD_SERVER_URL__ ?? 'https://tldiagram.com')
+const serverUrl = trimTrailingSlash(window.__TLD_SERVER_URL__ ?? 'http://127.0.0.1:8060')
 
 export const appBase = '/app/'
 export const routerBasename = undefined
@@ -29,9 +29,7 @@ export function apiUrl(path: string): string {
 }
 
 export function fetchApiAsset(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers)
-  if (window.__TLD_API_KEY__) headers.set('Authorization', `Bearer ${window.__TLD_API_KEY__}`)
-  return fetch(input, { ...init, headers })
+  return fetch(input, init)
 }
 
 export function oauthGoogleStartUrl(): string {

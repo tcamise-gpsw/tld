@@ -142,7 +142,14 @@ func localCORSMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type, X-CSRF-Token, X-Requested-With")
+			if requestedHeaders := r.Header.Get("Access-Control-Request-Headers"); requestedHeaders != "" {
+				w.Header().Set("Access-Control-Allow-Headers", requestedHeaders)
+			} else {
+				w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type, X-CSRF-Token, X-Requested-With")
+			}
+			if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+				w.Header().Set("Access-Control-Allow-Private-Network", "true")
+			}
 			w.Header().Set("Access-Control-Expose-Headers", "Connect-Protocol-Version, Grpc-Status, Grpc-Message")
 		}
 		if r.Method == http.MethodOptions {
@@ -162,7 +169,7 @@ func isAllowedLocalOrigin(origin string) bool {
 		return false
 	}
 	switch u.Scheme {
-	case "vscode-webview", "vscode-webview-resource":
+	case "vscode-webview", "vscode-webview-resource", "vscode-file", "vscode-resource":
 		return true
 	case "http", "https":
 		host := u.Hostname()

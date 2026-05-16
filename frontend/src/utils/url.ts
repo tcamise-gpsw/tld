@@ -10,7 +10,8 @@ export function resolveIconPath(path: string | null | undefined): string {
   // Absolute URLs and data URIs are returned as-is
   if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path
   const vscodeServerUrl = typeof window !== 'undefined' ? window.__TLD_SERVER_URL__?.replace(/\/+$/, '') : undefined
-  if (window.__TLD_VSCODE__ && vscodeServerUrl) {
+  const isVsCode = typeof window !== 'undefined' && !!window.__TLD_VSCODE__
+  if (isVsCode && vscodeServerUrl) {
     const stripped = path.startsWith('/app/') ? path.slice('/app'.length) : path
     const normalizedPath = stripped.startsWith('/') ? stripped : `/${stripped}`
     return `${vscodeServerUrl}${normalizedPath}`
