@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sort"
 	"strings"
 	"time"
@@ -294,10 +295,15 @@ func sourceAnchorRange(filePath string) (int, int) {
 
 func sourceAnchorFilePath(filePath string) string {
 	before, _, ok := strings.Cut(filePath, "#")
-	if !ok {
-		return filepathToSlash(filePath)
+	if ok {
+		return filepathToSlash(before)
 	}
-	return filepathToSlash(before)
+	if idx := strings.LastIndexByte(filePath, ':'); idx > 0 && idx < len(filePath)-1 {
+		if _, err := strconv.Atoi(filePath[idx+1:]); err == nil {
+			return filepathToSlash(filePath[:idx])
+		}
+	}
+	return filepathToSlash(filePath)
 }
 
 func lineDelta(changeType string, lineCount int, previous *watchResourceSnapshot) (int, int) {

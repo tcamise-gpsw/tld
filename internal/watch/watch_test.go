@@ -2523,6 +2523,9 @@ func (i Item) Available() bool {
 	if available := findDiffByOwner(diffs, "symbol", "go:main.go:method:Item.Available", "symbol", "updated"); available != nil {
 		t.Fatalf("Available only moved after earlier edits and should not be a diff, got %+v in %+v", available, diffs)
 	}
+	if available := findDiffByOwner(diffs, "symbol", "go:main.go:method:Item.Available", "element", "updated"); available != nil {
+		t.Fatalf("Available element only moved after earlier edits and should not be a diff, got %s in %s", debugRepresentationDiff(*available), debugRepresentationDiffs(diffs))
+	}
 }
 
 func TestCreateVersionForHeadCanBaselineAlreadyRepresentedCommit(t *testing.T) {
@@ -5014,6 +5017,34 @@ func findDiffByOwner(diffs []RepresentationDiff, ownerType, ownerKey, resourceTy
 		}
 	}
 	return nil
+}
+
+func debugRepresentationDiff(diff RepresentationDiff) string {
+	resourceType := ""
+	if diff.ResourceType != nil {
+		resourceType = *diff.ResourceType
+	}
+	resourceID := int64(0)
+	if diff.ResourceID != nil {
+		resourceID = *diff.ResourceID
+	}
+	before := ""
+	if diff.BeforeHash != nil {
+		before = *diff.BeforeHash
+	}
+	after := ""
+	if diff.AfterHash != nil {
+		after = *diff.AfterHash
+	}
+	return fmt.Sprintf("%s %s %s id=%d +%d -%d before=%s after=%s", diff.OwnerType, diff.OwnerKey, resourceType, resourceID, diff.AddedLines, diff.RemovedLines, before, after)
+}
+
+func debugRepresentationDiffs(diffs []RepresentationDiff) string {
+	parts := make([]string, 0, len(diffs))
+	for _, diff := range diffs {
+		parts = append(parts, debugRepresentationDiff(diff))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func languageSet(languages []string) map[string]struct{} {

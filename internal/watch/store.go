@@ -1371,7 +1371,13 @@ func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64
 		if err != nil {
 			return "", "", "", 0, err
 		}
-		raw := strings.Join([]string{name.String, kind.String, description.String, repo.String, branch.String, filePath.String, language.String}, "\n")
+		descriptionForHash := description.String
+		if ownerType == "symbol" {
+			if path := sourceAnchorFilePath(descriptionForHash); path != "" {
+				descriptionForHash = path
+			}
+		}
+		raw := strings.Join([]string{name.String, kind.String, descriptionForHash, repo.String, branch.String, filePath.String, language.String}, "\n")
 		if ownerType == "symbol" {
 			raw += "\n" + symbolSnapshotHash(ctx, s.db, repositoryID, ownerKey)
 		}
