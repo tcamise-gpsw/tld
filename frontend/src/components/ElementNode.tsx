@@ -18,7 +18,17 @@ import {
   HANDLE_SLOT_COUNT,
 } from '../utils/edgeDistribution'
 
-function VscodeCodePreview({ filePath, isCanvasMoving }: { filePath: string; isCanvasMoving?: boolean }) {
+function VscodeCodePreview({
+  filePath,
+  fallbackSymbolName,
+  fallbackSymbolKind,
+  isCanvasMoving,
+}: {
+  filePath: string
+  fallbackSymbolName?: string
+  fallbackSymbolKind?: string | null
+  isCanvasMoving?: boolean
+}) {
   const [content, setContent] = useState<string | null>(null)
   const [startLineOffset, setStartLineOffset] = useState(0)
   const [isOpen, setIsOpen] = useState(false)
@@ -33,8 +43,8 @@ function VscodeCodePreview({ filePath, isCanvasMoving }: { filePath: string; isC
     }
   }, [anchorStr])
   const startLine = typeof anchor?.startLine === 'number' ? anchor.startLine : undefined
-  const symbolName = typeof anchor?.name === 'string' ? anchor.name : undefined
-  const symbolKind = typeof anchor?.type === 'string' ? anchor.type : undefined
+  const symbolName = typeof anchor?.name === 'string' ? anchor.name : fallbackSymbolName
+  const symbolKind = typeof anchor?.type === 'string' ? anchor.type : fallbackSymbolKind ?? undefined
 
   useEffect(() => {
     if (!isOpen) return
@@ -806,6 +816,8 @@ function ElementNode({ data, selected }: Props) {
           )}
           <VscodeCodePreview
             filePath={data.file_path}
+            fallbackSymbolName={data.name}
+            fallbackSymbolKind={data.kind}
             isCanvasMoving={data.isCanvasMoving}
           />
         </HStack>
