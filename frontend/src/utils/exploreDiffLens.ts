@@ -1,6 +1,6 @@
 import type { WatchDiff } from '../api/client'
 import type { Connector, ExploreData, PlacedElement, ViewTreeNode } from '../types'
-import { normalizeWatchChangeType, type WatchChangeType } from './watchDiffSummary'
+import { isWatchDiffChange, normalizeWatchChangeType, type WatchChangeType } from './watchDiffSummary'
 
 export interface ExploreDiffLineDelta {
   added: number
@@ -160,6 +160,7 @@ export function buildExploreDiffLens(data: ExploreData, diffs: WatchDiff[] | nul
   }
 
   ;(Array.isArray(diffs) ? diffs : []).forEach((diff) => {
+    if (!isWatchDiffChange(diff.change_type)) return
     const detail = targetBase(diff)
     totalAddedLines += detail.addedLines
     totalRemovedLines += detail.removedLines

@@ -35,7 +35,10 @@ import {
 import { buildWorkspaceVersionPreview, useWorkspaceVersionPreview } from '../context/WorkspaceVersionContext'
 import {
   buildWatchDiffLocations,
+  formatDiagramResourceSummary,
+  isWatchDiffChange,
   summarizeWatchDiffs,
+  totalResourceCount,
   type WatchDiffLocation,
   type WatchDiffSummary,
 } from '../utils/watchDiffSummary'
@@ -127,9 +130,7 @@ function ResourceCountDisplay({ summary }: { summary: WatchDiffSummary }) {
     { label: 'Elements', stat: summary.elements },
     { label: 'Connectors', stat: summary.connectors },
   ]
-  const total = rows.reduce((sum, row) => (
-    sum + row.stat.added + row.stat.updated + row.stat.deleted + row.stat.initialized
-  ), 0)
+  const total = rows.reduce((sum, row) => sum + totalResourceCount(row.stat), 0)
   const changes = [
     { key: 'added', label: 'added', color: 'green.300' },
     { key: 'updated', label: 'updated', color: 'yellow.300' },
@@ -165,7 +166,7 @@ function ResourceCountDisplay({ summary }: { summary: WatchDiffSummary }) {
                   </Text>
                 ) : null
               })}
-              {row.stat.added + row.stat.updated + row.stat.deleted + row.stat.initialized === 0 && (
+              {totalResourceCount(row.stat) === 0 && (
                 <Text fontSize="11px" color="gray.600" fontFamily="mono">none</Text>
               )}
             </HStack>
@@ -416,9 +417,9 @@ export default function WorkspacePanel() {
   }, [activeVersion, navigate, selectedVersion])
 
   const diffSummary = useMemo(() => summarizeWatchDiffs(diffs), [diffs])
-  const totalFileChanges = diffSummary.files.added + diffSummary.files.updated + diffSummary.files.deleted + diffSummary.files.initialized
-  const totalTldChanges = diffSummary.elements.added + diffSummary.elements.updated + diffSummary.elements.deleted + diffSummary.elements.initialized +
-    diffSummary.connectors.added + diffSummary.connectors.updated + diffSummary.connectors.deleted + diffSummary.connectors.initialized
+  const totalFileChanges = totalResourceCount(diffSummary.files)
+  const diagramResourceSummary = formatDiagramResourceSummary(diffSummary)
+  const hasDiffMapTargets = useMemo(() => diffs.some((diff) => isWatchDiffChange(diff.change_type)), [diffs])
   const activeDiffLocation = activeDiffLocationIndex >= 0 ? navigableDiffLocations[activeDiffLocationIndex] : null
   const headerAddedLines = activeDiffLocation?.addedLines ?? diffSummary.elements.addedLines + diffSummary.connectors.addedLines
   const headerRemovedLines = activeDiffLocation?.removedLines ?? diffSummary.elements.removedLines + diffSummary.connectors.removedLines
@@ -723,7 +724,7 @@ export default function WorkspacePanel() {
               <Text fontSize="12px" color="gray.400" fontWeight="500" noOfLines={1} flex={1}>
                 {activeDiffLocation
                   ? `${activeDiffLocationIndex + 1} of ${navigableDiffLocations.length}: ${activeDiffLocation.label}`
-                  : `${totalTldChanges} changed elements`}
+                  : diagramResourceSummary}
               </Text>
             </HStack>
             <HStack spacing={1} flexShrink={0}>
@@ -739,7 +740,7 @@ export default function WorkspacePanel() {
                   leftIcon={<ViewIcon boxSize={3.5} />}
                   fontSize="12px"
                   fontWeight="600"
-                  isDisabled={!activeVersion}
+                  isDisabled={!activeVersion || !hasDiffMapTargets}
                   onClick={navigateToDiffMap}
                 >
                   Diff map

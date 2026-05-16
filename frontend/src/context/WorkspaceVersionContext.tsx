@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { WatchDiff, WatchRepository, WatchVersion, WorkspaceVersion } from '../api/client'
-import { normalizeWatchChangeType } from '../utils/watchDiffSummary'
+import { isWatchDiffChange, normalizeWatchChangeType } from '../utils/watchDiffSummary'
 
 export type VersionChangeType = 'added' | 'updated' | 'deleted' | 'initialized'
 
@@ -62,16 +62,16 @@ export function buildWorkspaceVersionPreview(args: {
     const change = normalizeWatchChangeType(diff.change_type)
     summary[change] += 1
     if (diff.resource_type === 'element' && diff.resource_id) {
-      elementChanges.set(diff.resource_id, change)
+      if (isWatchDiffChange(diff.change_type)) elementChanges.set(diff.resource_id, change)
       const added = Math.max(0, diff.added_lines ?? 0)
       const removed = Math.max(0, diff.removed_lines ?? 0)
-      if (added > 0 || removed > 0) {
+      if (isWatchDiffChange(diff.change_type) && (added > 0 || removed > 0)) {
         elementLineDeltas.set(diff.resource_id, { added, removed })
       }
       summary.elements += 1
     }
     if (diff.resource_type === 'connector' && diff.resource_id) {
-      connectorChanges.set(diff.resource_id, change)
+      if (isWatchDiffChange(diff.change_type)) connectorChanges.set(diff.resource_id, change)
       summary.connectors += 1
     }
   })

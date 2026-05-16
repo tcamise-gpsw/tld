@@ -31,9 +31,22 @@ export interface WatchDiffSummary {
   connectors: WatchResourceStat
 }
 
+export function changedResourceCount(stat: WatchResourceStat): number {
+  return stat.added + stat.updated + stat.deleted
+}
+
+export function totalResourceCount(stat: WatchResourceStat): number {
+  return changedResourceCount(stat) + stat.initialized
+}
+
 export function normalizeWatchChangeType(value: string): WatchChangeType {
   if (value === 'added' || value === 'updated' || value === 'deleted' || value === 'initialized') return value
   return 'updated'
+}
+
+export function isWatchDiffChange(value: string | null | undefined): boolean {
+  const change = normalizeWatchChangeType(value ?? '')
+  return change === 'added' || change === 'updated' || change === 'deleted'
 }
 
 export function emptyWatchResourceStat(): WatchResourceStat {
@@ -64,11 +77,30 @@ export function summarizeWatchDiffs(diffs: WatchDiff[] | null | undefined): Watc
 }
 
 export function formatStatLine(label: string, stat: WatchResourceStat): string {
-  const total = stat.added + stat.updated + stat.deleted + stat.initialized
-  const parts = [`${total} ${label}${total === 1 ? '' : 's'} changed`]
+  const changed = changedResourceCount(stat)
+  const initialized = stat.initialized
+  const parts = []
+  if (changed > 0) parts.push(`${changed} ${label}${changed === 1 ? '' : 's'} changed`)
+  if (initialized > 0) parts.push(`${initialized} ${label}${initialized === 1 ? '' : 's'} initialized`)
+  if (parts.length === 0) parts.push(`0 ${label}s changed`)
   if (stat.addedLines > 0) parts.push(`+${stat.addedLines}`)
   if (stat.removedLines > 0) parts.push(`-${stat.removedLines}`)
   return parts.join(', ')
+}
+
+export function formatDiagramResourceSummary(summary: WatchDiffSummary): string {
+  const changed = changedResourceCount(summary.elements) + changedResourceCount(summary.connectors)
+  const initialized = summary.elements.initialized + summary.connectors.initialized
+  if (changed > 0 && initialized > 0) {
+    return `${changed} changed, ${initialized} initialized resources`
+  }
+  if (changed > 0) {
+    return `${changed} changed resource${changed === 1 ? '' : 's'}`
+  }
+  if (initialized > 0) {
+    return `${initialized} initialized resource${initialized === 1 ? '' : 's'}`
+  }
+  return 'No diagram resource changes'
 }
 
 export function formatTldStatLine(summary: WatchDiffSummary): string {
@@ -131,6 +163,7 @@ export function buildWatchDiffLocations(data: ExploreData, diffs: WatchDiff[] | 
 
   const locations: WatchDiffLocation[] = []
   ;(Array.isArray(diffs) ? diffs : []).forEach((diff) => {
+    if (!isWatchDiffChange(diff.change_type)) return
     if (!diff.resource_id) return
     const base = {
       changeType: normalizeWatchChangeType(diff.change_type),

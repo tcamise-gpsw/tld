@@ -164,6 +164,19 @@ describe('explore diff lens', () => {
     expect(lens.totalRemovedLines).toBe(1)
   })
 
+  it('ignores initialized resources as diff targets', () => {
+    const lens = buildExploreDiffLens(data, [
+      diff({ change_type: 'initialized', resource_type: 'element', resource_id: 301 }),
+      diff({ change_type: 'initialized', resource_type: 'connector', resource_id: 601 }),
+    ], 9)
+
+    expect(lens.orderedTargets).toHaveLength(0)
+    expect(lens.unplacedTargets).toHaveLength(0)
+    expect(lens.changedElementIds.size).toBe(0)
+    expect(lens.changedConnectorIds.size).toBe(0)
+    expect(lens.diffDetailsByResource.size).toBe(0)
+  })
+
   it('extracts source paths from common owner key shapes', () => {
     expect(sourcePathFromDiff({ owner_type: 'file', owner_key: 'cmd/root.go' })).toBe('cmd/root.go')
     expect(sourcePathFromDiff({ owner_type: 'symbol', owner_key: 'go:internal/app/app.go:function:Run' })).toBe('internal/app/app.go')
