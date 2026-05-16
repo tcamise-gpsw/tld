@@ -490,7 +490,21 @@ func (s *WorkspaceService) GetView(
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("view not found"))
 	}
-	return connect.NewResponse(&diagv1.GetViewResponse{View: v}), nil
+	resp := &diagv1.GetViewResponse{View: v}
+	if req.Msg.GetIncludeContent() {
+		densityOverride := req.Msg.DensityOverride
+		if densityOverride != nil && (*densityOverride < -2 || *densityOverride > 2) {
+			return nil, invalidArg("density_override", "must be between -2 and 2")
+		}
+		content, err := s.Store.GetProjectedViewContent(ctx, viewID, workspaceID, densityOverride)
+		if err != nil {
+			return nil, storeErr("get projected view content", err)
+		}
+		resp.Content = content
+	} else if req.Msg.DensityOverride != nil {
+		return nil, invalidArg("density_override", "requires include_content")
+	}
+	return connect.NewResponse(resp), nil
 }
 
 func (s *WorkspaceService) UpdateView(

@@ -204,7 +204,7 @@ func (a *APIAdapter) DeleteElement(ctx context.Context, id int32, _ uuid.UUID) e
 }
 
 func (a *APIAdapter) ListPlacements(ctx context.Context, viewID int32) ([]*diagv1.PlacedElement, error) {
-	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID))
+	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -263,13 +263,36 @@ func (a *APIAdapter) RemovePlacement(ctx context.Context, viewID, elementID int3
 }
 
 func (a *APIAdapter) ListConnectors(ctx context.Context, viewID int32, _ uuid.UUID) ([]*diagv1.Connector, error) {
-	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID))
+	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID), nil)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*diagv1.Connector, 0, len(content.Connectors))
 	for _, connector := range content.Connectors {
 		out = append(out, connectorToProto(connector))
+	}
+	return out, nil
+}
+
+func (a *APIAdapter) GetProjectedViewContent(ctx context.Context, viewID int32, _ uuid.UUID, densityOverride *int32) (*diagv1.ViewContent, error) {
+	var override *int
+	if densityOverride != nil {
+		value := int(*densityOverride)
+		override = &value
+	}
+	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID), override)
+	if err != nil {
+		return nil, err
+	}
+	out := &diagv1.ViewContent{
+		Placements: make([]*diagv1.PlacedElement, 0, len(content.Placements)),
+		Connectors: make([]*diagv1.Connector, 0, len(content.Connectors)),
+	}
+	for _, placement := range content.Placements {
+		out.Placements = append(out.Placements, placedElementToProto(placement))
+	}
+	for _, connector := range content.Connectors {
+		out.Connectors = append(out.Connectors, connectorToProto(connector))
 	}
 	return out, nil
 }
@@ -1076,6 +1099,8 @@ func placedElementToProto(item app.PlacedElement) *diagv1.PlacedElement {
 		Name:      item.Name,
 		Kind:      item.Kind,
 		Tags:      cloneStrings(item.Tags),
+		HasView:   item.HasView,
+		ViewLabel: item.ViewLabel,
 	}
 	if item.Description != nil {
 		p.Description = item.Description

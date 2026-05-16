@@ -37,7 +37,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@buf/tldiagramcom_diagram.bufbuild_es": "^2.12.0-20260510134954-1dd1981cf3f6.1",
+    "@buf/tldiagramcom_diagram.bufbuild_es": "^2.12.0-20260516210401-05aeb295f766.1",
     "@bufbuild/protobuf": "^2.11.0",
     "esbuild": "^0.25.12",
     "zustand": "^5.0.12"

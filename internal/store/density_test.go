@@ -85,7 +85,7 @@ func TestDensityProjectionPromotedConnectorPullsEndpoints(t *testing.T) {
 	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -2); err != nil {
 		t.Fatal(err)
 	}
-	content, err := sqliteStore.ProjectedViewContent(ctx, 1)
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestDensityProjectionPromotedConnectorPullsEndpoints(t *testing.T) {
 	if _, err := sqliteStore.AdjustVisibilityOverride(ctx, 1, "connector", 202, 1); err != nil {
 		t.Fatal(err)
 	}
-	content, err = sqliteStore.ProjectedViewContent(ctx, 1)
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestFullDensityKeepsAllExceptExplicitDemotions(t *testing.T) {
 	if _, err := sqliteStore.AdjustVisibilityOverride(ctx, 1, "element", 102, -1); err != nil {
 		t.Fatal(err)
 	}
-	content, err := sqliteStore.ProjectedViewContent(ctx, 1)
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

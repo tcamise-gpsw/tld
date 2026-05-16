@@ -46,6 +46,85 @@ func TestWorkspaceService_ListElementsReturnsPaginationAndChecksRead(t *testing.
 	}
 }
 
+func TestWorkspaceService_GetViewContentIsOptIn(t *testing.T) {
+	store := &contractStore{
+		getProjectedViewContent: func(context.Context, int32, uuid.UUID, *int32) (*diagv1.ViewContent, error) {
+			t.Fatal("content should not be loaded unless include_content is true")
+			return nil, nil
+		},
+	}
+	service := &WorkspaceService{Store: store, Hooks: &recordingHooks{}}
+
+	resp, err := service.GetView(context.Background(), connect.NewRequest(&diagv1.GetViewRequest{ViewId: 7}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.GetView().GetId() != 7 {
+		t.Fatalf("view id = %d, want 7", resp.Msg.GetView().GetId())
+	}
+	if resp.Msg.GetContent() != nil {
+		t.Fatalf("content = %+v, want nil when include_content is false", resp.Msg.GetContent())
+	}
+}
+
+func TestWorkspaceService_GetViewIncludesProjectedContentWithDensityOverride(t *testing.T) {
+	override := int32(2)
+	store := &contractStore{
+		getProjectedViewContent: func(_ context.Context, viewID int32, _ uuid.UUID, densityOverride *int32) (*diagv1.ViewContent, error) {
+			if viewID != 7 {
+				t.Fatalf("view id = %d, want 7", viewID)
+			}
+			if densityOverride == nil || *densityOverride != override {
+				t.Fatalf("density override = %v, want 2", densityOverride)
+			}
+			return &diagv1.ViewContent{
+				Placements: []*diagv1.PlacedElement{{Id: 10, ViewId: 7, ElementId: 20}},
+				Connectors: []*diagv1.Connector{{Id: 30, ViewId: 7, SourceElementId: 20, TargetElementId: 21}},
+			}, nil
+		},
+	}
+	service := &WorkspaceService{Store: store, Hooks: &recordingHooks{}}
+
+	resp, err := service.GetView(context.Background(), connect.NewRequest(&diagv1.GetViewRequest{
+		ViewId:          7,
+		IncludeContent:  true,
+		DensityOverride: &override,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Msg.GetContent().GetPlacements()) != 1 || len(resp.Msg.GetContent().GetConnectors()) != 1 {
+		t.Fatalf("content = %+v, want one placement and one connector", resp.Msg.GetContent())
+	}
+}
+
+func TestWorkspaceService_GetViewRejectsInvalidDensityOverride(t *testing.T) {
+	override := int32(3)
+	service := &WorkspaceService{Store: &contractStore{}, Hooks: &recordingHooks{}}
+
+	_, err := service.GetView(context.Background(), connect.NewRequest(&diagv1.GetViewRequest{
+		ViewId:          7,
+		IncludeContent:  true,
+		DensityOverride: &override,
+	}))
+	if code := connect.CodeOf(err); code != connect.CodeInvalidArgument {
+		t.Fatalf("error code = %s, want invalid argument", code)
+	}
+}
+
+func TestWorkspaceService_GetViewRejectsDensityOverrideWithoutContent(t *testing.T) {
+	override := int32(1)
+	service := &WorkspaceService{Store: &contractStore{}, Hooks: &recordingHooks{}}
+
+	_, err := service.GetView(context.Background(), connect.NewRequest(&diagv1.GetViewRequest{
+		ViewId:          7,
+		DensityOverride: &override,
+	}))
+	if code := connect.CodeOf(err); code != connect.CodeInvalidArgument {
+		t.Fatalf("error code = %s, want invalid argument", code)
+	}
+}
+
 func TestWorkspaceService_CreateConnectorDefaultsValidatesAndAudits(t *testing.T) {
 	store := &contractStore{
 		createConnector: func(_ context.Context, _ uuid.UUID, input ConnectorInput) (*diagv1.Connector, error) {
@@ -425,18 +504,19 @@ func (h *recordingHooks) AfterWrite(_ context.Context, _ uuid.UUID, action strin
 }
 
 type contractStore struct {
-	listViews       func(context.Context, uuid.UUID) ([]*diagv1.View, error)
-	listElements    func(context.Context, uuid.UUID, int32, int32, string) ([]*diagv1.Element, int, error)
-	getElement      func(context.Context, int32, uuid.UUID) (*diagv1.Element, error)
-	createView      func(context.Context, uuid.UUID, *int32, string, *string, bool) (*diagv1.View, error)
-	updateElement   func(context.Context, int32, uuid.UUID, ElementInput) (*diagv1.Element, error)
-	getView         func(context.Context, int32, uuid.UUID) (*diagv1.View, error)
-	updateView      func(context.Context, int32, uuid.UUID, string, *string) (*diagv1.View, error)
-	addPlacement    func(context.Context, int32, int32, float64, float64) (*diagv1.PlacedElement, error)
-	removePlacement func(context.Context, int32, int32) error
-	createConnector func(context.Context, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
-	getConnector    func(context.Context, int32, uuid.UUID) (*diagv1.Connector, error)
-	updateConnector func(context.Context, int32, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
+	listViews               func(context.Context, uuid.UUID) ([]*diagv1.View, error)
+	listElements            func(context.Context, uuid.UUID, int32, int32, string) ([]*diagv1.Element, int, error)
+	getElement              func(context.Context, int32, uuid.UUID) (*diagv1.Element, error)
+	createView              func(context.Context, uuid.UUID, *int32, string, *string, bool) (*diagv1.View, error)
+	updateElement           func(context.Context, int32, uuid.UUID, ElementInput) (*diagv1.Element, error)
+	getView                 func(context.Context, int32, uuid.UUID) (*diagv1.View, error)
+	getProjectedViewContent func(context.Context, int32, uuid.UUID, *int32) (*diagv1.ViewContent, error)
+	updateView              func(context.Context, int32, uuid.UUID, string, *string) (*diagv1.View, error)
+	addPlacement            func(context.Context, int32, int32, float64, float64) (*diagv1.PlacedElement, error)
+	removePlacement         func(context.Context, int32, int32) error
+	createConnector         func(context.Context, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
+	getConnector            func(context.Context, int32, uuid.UUID) (*diagv1.Connector, error)
+	updateConnector         func(context.Context, int32, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
 }
 
 var _ Store = (*contractStore)(nil)
@@ -455,6 +535,12 @@ func (s *contractStore) GetView(ctx context.Context, id int32, workspaceID uuid.
 		return s.getView(ctx, id, workspaceID)
 	}
 	return &diagv1.View{Id: id}, nil
+}
+func (s *contractStore) GetProjectedViewContent(ctx context.Context, viewID int32, workspaceID uuid.UUID, densityOverride *int32) (*diagv1.ViewContent, error) {
+	if s.getProjectedViewContent != nil {
+		return s.getProjectedViewContent(ctx, viewID, workspaceID, densityOverride)
+	}
+	return &diagv1.ViewContent{}, nil
 }
 func (s *contractStore) CreateView(ctx context.Context, workspaceID uuid.UUID, ownerElementID *int32, name string, label *string, isRoot bool) (*diagv1.View, error) {
 	if s.createView != nil {

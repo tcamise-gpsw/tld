@@ -1,7 +1,7 @@
-buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.19.2-20260510134954-1dd1981cf3f6.1 h1:Y1hoULClRNTEtbaMP/7Adt72RsN5XEWXD4ZpAMnnstk=
-buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.19.2-20260510134954-1dd1981cf3f6.1/go.mod h1:oKIJa0QJy7svCuap10lG7Mhm2dRC+axvc6zz9ngXpl4=
-buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260510134954-1dd1981cf3f6.1 h1:yjAAyX5GtDdhXYVIIKzxnMGUW1Z/n+HgpAU5s6BulSM=
-buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260510134954-1dd1981cf3f6.1/go.mod h1:LAKkY9RBJgkdENcD9Hq6EBmfTMH7U6xhhQOu1M6sCHM=
+buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.19.2-20260516210401-05aeb295f766.1 h1:m1BVZilvuC1oBGeMWyTtXEOWGT8bx8v85Z2Fhg3hHZY=
+buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.19.2-20260516210401-05aeb295f766.1/go.mod h1:fRDzdzViPIkCATO8sueTZlpUuEEj1nDpzuK5H2Nd/lk=
+buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260516210401-05aeb295f766.1 h1:G/4seO4REknj3UJIFgmaeC7RjDKfuTt7dCaj561xFx0=
+buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260516210401-05aeb295f766.1/go.mod h1:LAKkY9RBJgkdENcD9Hq6EBmfTMH7U6xhhQOu1M6sCHM=
 connectrpc.com/connect v1.19.2 h1:McQ83FGdzL+t60peksi0gXC7MQ/iLKgLduAnThbM0mo=
 connectrpc.com/connect v1.19.2/go.mod h1:tN20fjdGlewnSFeZxLKb0xwIZ6ozc3OQs2hTXy4du9w=
 github.com/bmatcuk/doublestar/v4 v4.6.1 h1:FH9SifrbvJhnlQpztAx++wlkk70QBf0iBWDwNy7PA4I=

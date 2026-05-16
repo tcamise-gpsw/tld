@@ -221,10 +221,16 @@ func (s *SQLiteStore) visibilityOverride(ctx context.Context, viewID int64, reso
 	return item, err
 }
 
-func (s *SQLiteStore) ProjectedViewContent(ctx context.Context, viewID int64) (ProjectedViewContent, error) {
+func (s *SQLiteStore) ProjectedViewContent(ctx context.Context, viewID int64, densityOverride *int) (ProjectedViewContent, error) {
 	level, err := s.ViewDensityLevel(ctx, viewID)
 	if err != nil {
 		return ProjectedViewContent{}, err
+	}
+	if densityOverride != nil {
+		if err := ValidateDensityLevel(*densityOverride); err != nil {
+			return ProjectedViewContent{}, err
+		}
+		level = *densityOverride
 	}
 	placements, err := s.legacy.Placements(ctx, viewID)
 	if err != nil {
