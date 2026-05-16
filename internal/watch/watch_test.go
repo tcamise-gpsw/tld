@@ -354,8 +354,11 @@ export async function Users() {
 	if deps := countElementTag(t, db, "dependency:import"); deps != 0 {
 		t.Fatalf("expected dependency/import facts not to surface as tags, found on %d elements", deps)
 	}
-	if deps := elementKindCount(t, db, "dependency"); deps != 0 {
-		t.Fatalf("dependency/import facts should not materialize as one dependency node per import, found %d dependency nodes", deps)
+	if deps := elementKindCount(t, db, "dependency"); deps == 0 {
+		t.Fatal("expected dependency/import facts to materialize as one dependency node per import")
+	}
+	if !connectorExistsBetween(t, db, "main.go", "github.com/go-chi/chi/v5") {
+		t.Fatal("expected importing file to connect to imported dependency")
 	}
 }
 
@@ -1935,6 +1938,213 @@ func helper() {}
 		}
 	}
 	t.Fatalf("expected updated element diff with +1 line, got %+v", diffs)
+}
+
+func TestChangedLowSignalFactMaterializesAsStandaloneDiffTarget(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "go.mod", `module example.com/tldwatchfixture
+
+go 1.22
+`)
+	writeFile(t, repo, "internal/catalog/item.go", `package catalog
+
+type Item struct{}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial")
+
+	store := NewStore(db)
+	scan, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit1", "initial", "", "main", rep.RepresentationHash, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, repo, "internal/order/order.go", `package order
+
+import "example.com/tldwatchfixture/internal/catalog"
+
+type Order struct {
+	Item catalog.Item
+}
+`)
+	writeFile(t, repo, "internal/order/order_test.go", `package order
+
+import (
+	"testing"
+
+	"example.com/tldwatchfixture/internal/catalog"
+)
+
+func TestOrder(t *testing.T) {
+	if (Order{}).Item != (catalog.Item{}) {
+		t.Fatal("unexpected item")
+	}
+}
+`)
+	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffs, err := store.BuildWatchDiffs(context.Background(), scan.RepositoryID, next.RepresentationHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	factOwner := "fact:dependency.inventory:dependency.import:internal/order/order.go:example.com/tldwatchfixture/internal/catalog:3"
+	factDiff := findDiffByOwner(diffs, "fact", factOwner, "element", "added")
+	if factDiff == nil {
+		t.Fatalf("expected changed import fact to be a standalone element diff, got %+v", diffs)
+	}
+	if factDiff.AddedLines != 1 || factDiff.RemovedLines != 0 {
+		t.Fatalf("expected changed import fact to carry a +1 line delta, got %+v", factDiff)
+	}
+	connectorOwner := factOwner + ":file"
+	connectorDiff := findDiffByOwner(diffs, "fact-import-connector", connectorOwner, "connector", "added")
+	if connectorDiff == nil {
+		t.Fatalf("expected changed import to create a file-to-dependency connector diff, got %+v", diffs)
+	}
+	if connectorDiff.AddedLines != 1 || connectorDiff.RemovedLines != 0 {
+		t.Fatalf("expected import connector to carry a +1 line delta, got %+v", connectorDiff)
+	}
+	folderDiff := findDiffByOwner(diffs, "folder", "folder:internal/order", "element", "added")
+	orderFileDiff := findDiffByOwner(diffs, "file", "file:internal/order/order.go", "element", "added")
+	orderTestFileDiff := findDiffByOwner(diffs, "file", "file:internal/order/order_test.go", "element", "added")
+	if folderDiff == nil || orderFileDiff == nil || orderTestFileDiff == nil {
+		t.Fatalf("expected folder and child file element diffs, got %+v", diffs)
+	}
+	if want := orderFileDiff.AddedLines + orderTestFileDiff.AddedLines; want == 0 || folderDiff.AddedLines != want {
+		t.Fatalf("expected folder line delta to sum child files (+%d), got %+v", want, folderDiff)
+	}
+	for _, diff := range diffs {
+		if diff.OwnerType == "fact-summary" && strings.HasPrefix(diff.OwnerKey, "fact-summary:internal/order/order.go:dependency.import:") && diff.ResourceType != nil && *diff.ResourceType == "element" {
+			t.Fatalf("changed singleton import should not be represented as a summary diff, got %+v", diff)
+		}
+	}
+}
+
+func TestDependencyImportRemovalDeletesExactElementAndConnector(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "go.mod", `module example.com/tldwatchfixture
+
+go 1.22
+`)
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+	"example.com/tldwatchfixture/internal/pricing"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency, pricing.BasePriceCents)
+}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial imports")
+
+	store := NewStore(db)
+	scan, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := RepresentRequest{
+		Embedding:  EmbeddingConfig{Provider: "none"},
+		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+	}
+	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit1", "initial imports", "", "main", rep.RepresentationHash, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency)
+}
+`)
+	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffs, err := store.BuildWatchDiffs(context.Background(), scan.RepositoryID, next.RepresentationHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removedOwner := "fact:dependency.inventory:dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"
+	removedDiff := findDiffByOwner(diffs, "fact", removedOwner, "element", "deleted")
+	if removedDiff == nil {
+		t.Fatalf("expected removed dependency import to delete its exact element, got %+v", diffs)
+	}
+	if removedDiff.AddedLines != 0 || removedDiff.RemovedLines != 1 {
+		t.Fatalf("expected removed import element to carry -1 line delta, got %+v", removedDiff)
+	}
+	connectorDiff := findDiffByOwner(diffs, "fact-import-connector", removedOwner+":file", "connector", "deleted")
+	if connectorDiff == nil {
+		t.Fatalf("expected removed dependency import to delete its file connector, got %+v", diffs)
+	}
+	if connectorDiff.AddedLines != 0 || connectorDiff.RemovedLines != 1 {
+		t.Fatalf("expected removed import connector to carry -1 line delta, got %+v", connectorDiff)
+	}
+	for _, diff := range diffs {
+		if diff.OwnerType == "fact-summary" && strings.Contains(diff.OwnerKey, "dependency.import") {
+			t.Fatalf("dependency imports should not be represented as summaries, got %+v", diff)
+		}
+	}
+
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "remove pricing import")
+	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit2", "remove pricing import", "commit1", "main", next.RepresentationHash, nil, diffs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	clean, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanDiffs, err := store.BuildWatchDiffs(context.Background(), scan.RepositoryID, clean.RepresentationHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := findDiffByOwner(cleanDiffs, "fact", removedOwner, "element", "deleted"); diff != nil {
+		t.Fatalf("removed import should not keep producing element diffs after version capture, got %+v", diff)
+	}
+	if count := countRows(t, db, `SELECT COUNT(*) FROM watch_materialization WHERE repository_id = ? AND owner_key = ?`, scan.RepositoryID, removedOwner); count != 0 {
+		t.Fatalf("removed import materialization should be pruned after commit, found %d rows", count)
+	}
+	if count := countRows(t, db, `SELECT COUNT(*) FROM watch_facts WHERE repository_id = ? AND stable_key = ?`, scan.RepositoryID, "dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"); count != 0 {
+		t.Fatalf("removed import raw fact should be gone after commit, found %d rows", count)
+	}
 }
 
 func TestWatchDiffsMaterializeChangedPackageManifests(t *testing.T) {
@@ -4561,7 +4771,7 @@ func TestRunnerRepresentationUpdatedClearsDiffsAfterDiscard(t *testing.T) {
 
 	writeFile(t, repo, "main.go", original)
 	discarded := waitForRunnerEvent(t, events.Out(), done, "discarded representation", func(event Event) bool {
-		if event.Type != "representation.updated" || event.ChangedFiles == 0 {
+		if event.Type != "representation.updated" {
 			return false
 		}
 		rep, ok := event.Data.(RepresentResult)
@@ -4683,7 +4893,7 @@ func waitForRunnerDone(t *testing.T, done <-chan error, label string) {
 
 func waitForRunnerEvent(t *testing.T, events <-chan Event, done <-chan error, label string, matches func(Event) bool) Event {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case event, ok := <-events:

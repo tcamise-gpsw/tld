@@ -88,6 +88,70 @@ func TestConfirmLSPProceedWarnsAndContinuesForNonInteractiveInput(t *testing.T) 
 	}
 }
 
+func TestLogWatchEventUpdatesWorkspaceStatusInPlace(t *testing.T) {
+	cmd := NewWatchCmd()
+	var stdout bytes.Buffer
+	var status bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	activity := &watchActivityProgress{out: &status}
+	activity.Start("Workspace status: current")
+
+	event := watchpkg.Event{
+		Type:         "source.changed",
+		ChangedFiles: 2,
+		Data: watchpkg.SourceFileChangeResult{
+			Change:                watchpkg.SourceFileChange{Path: "cmd/service/main.go", ChangeType: "modified"},
+			RepresentationChanged: true,
+			Representation: watchpkg.RepresentResult{
+				ElementsUpdated:   28,
+				ConnectorsUpdated: 4,
+			},
+			GitTags: watchpkg.GitTagUpdateResult{TagsAdded: 13},
+		},
+	}
+	if !logWatchEvent(cmd, event, activity) {
+		t.Fatalf("expected source.changed to be handled")
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("source.changed should not print verbose source output, got %q", got)
+	}
+	got := status.String()
+	for _, want := range []string{"\r\033[K", "Workspace status: current", "2 files changed", "elements", "28", "connectors", "4", "tags", "13"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%q", want, got)
+		}
+	}
+	if strings.Contains(got, "\n") || strings.Contains(got, "source modified") || strings.Contains(got, "cmd/service/main.go") {
+		t.Fatalf("status should update in place without source file chatter:\n%q", got)
+	}
+}
+
+func TestLogWatchEventSuppressesLSPStatusUpdates(t *testing.T) {
+	cmd := NewWatchCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	event := watchpkg.Event{
+		Type: "lsp.status",
+		Data: watchpkg.LSPStatus{
+			Enabled: true,
+			Summary: watchpkg.LSPStatusSummary{
+				Requested:   1,
+				Available:   1,
+				Unavailable: 1,
+				Restarted:   1,
+			},
+		},
+	}
+	if !logWatchEvent(cmd, event, nil) {
+		t.Fatalf("expected lsp.status to be handled")
+	}
+	if out.String() != "" {
+		t.Fatalf("lsp.status should not print CLI updates, got %q", out.String())
+	}
+}
+
 func TestScanCommandPrintsCountsAndSkipsRepeatScan(t *testing.T) {
 	repo := initGitRepoNoCommit(t)
 	writeFile(t, repo, "main.go", `package main

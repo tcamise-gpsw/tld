@@ -11,8 +11,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +21,16 @@ import (
 
 func applyGitLineDiff(diff *RepresentationDiff, snapshot watchResourceSnapshot, previous *watchResourceSnapshot, lineDiffs map[string]tldgit.LineDiff, lineHunks map[string][]tldgit.LineHunk) {
 	if diff == nil || len(lineDiffs) == 0 || diff.ChangeType != "updated" {
+		return
+	}
+	if snapshot.OwnerType == "fact-summary" {
+		return
+	}
+	if snapshot.OwnerType == "folder" {
+		if added, removed, ok := folderLineDiff(snapshot, lineDiffs); ok {
+			diff.AddedLines = added
+			diff.RemovedLines = removed
+		}
 		return
 	}
 	file := snapshotDiffFilePath(snapshot)
@@ -60,6 +70,23 @@ func symbolLineDiff(snapshot watchResourceSnapshot, previous *watchResourceSnaps
 		removed += countLinesInRange(hunk.RemovedLines, oldStart, oldEnd)
 	}
 	return added, removed, true
+}
+
+func folderLineDiff(snapshot watchResourceSnapshot, lineDiffs map[string]tldgit.LineDiff) (int, int, bool) {
+	folder := strings.TrimPrefix(filepathToSlash(firstNonEmpty(snapshot.FilePath, snapshot.OwnerKey)), "folder:")
+	folder = strings.TrimSuffix(strings.TrimSpace(folder), "/")
+	if folder == "" {
+		return 0, 0, false
+	}
+	added, removed := 0, 0
+	for file, diff := range lineDiffs {
+		file = filepathToSlash(file)
+		if file == folder || strings.HasPrefix(file, folder+"/") {
+			added += diff.Added
+			removed += diff.Removed
+		}
+	}
+	return added, removed, added != 0 || removed != 0
 }
 
 func countLinesInRange(lines []int, start, end int) int {
@@ -144,6 +171,16 @@ func materializedLineCount(ctx context.Context, db *sql.DB, repositoryID int64, 
 		return symbolLineCount(ctx, db, repositoryID, ownerKey)
 	case "file":
 		return fileLineCount(ctx, db, repositoryID, strings.TrimPrefix(ownerKey, "file:"))
+	case "folder":
+		return folderLineCount(ctx, db, repositoryID, strings.TrimPrefix(ownerKey, "folder:"))
+	case "fact":
+		_, start, end := factLineRange(ctx, db, repositoryID, ownerKey)
+		return lineCountFromRange(start, sql.NullInt64{Int64: int64(end), Valid: end >= start && start > 0})
+	case "fact-import-connector":
+		_, start, end := factLineRange(ctx, db, repositoryID, importConnectorFactOwnerKey(ownerKey))
+		return lineCountFromRange(start, sql.NullInt64{Int64: int64(end), Valid: end >= start && start > 0})
+	case "fact-summary":
+		return factSummaryLineCount(ctx, db, repositoryID, ownerKey)
 	}
 	if count := sourceAnchorLineCount(filePath); count > 0 {
 		return count
@@ -177,6 +214,10 @@ func materializedSourceRange(ctx context.Context, db *sql.DB, repositoryID int64
 			path = fallbackFilePath
 		}
 		return filepathToSlash(path), 0, 0
+	case "fact":
+		return factLineRange(ctx, db, repositoryID, ownerKey)
+	case "fact-import-connector":
+		return factLineRange(ctx, db, repositoryID, importConnectorFactOwnerKey(ownerKey))
 	default:
 		if path := sourceAnchorFilePath(fallbackFilePath); path != "" {
 			start, end := sourceAnchorRange(fallbackFilePath)
@@ -202,6 +243,50 @@ func symbolLineRange(ctx context.Context, db *sql.DB, repositoryID int64, ownerK
 		return "", 0, 0
 	}
 	return filepathToSlash(filePath), startLine, normalizedEndLine(startLine, endLine)
+}
+
+func factLineRange(ctx context.Context, db *sql.DB, repositoryID int64, ownerKey string) (string, int, int) {
+	var filePath string
+	var startLine int
+	var endLine sql.NullInt64
+	err := db.QueryRowContext(ctx, `
+		SELECT file_path, start_line, end_line
+		FROM watch_facts
+		WHERE repository_id = ? AND ('fact:' || enricher || ':' || stable_key) = ?
+		ORDER BY id
+		LIMIT 1`, repositoryID, ownerKey).Scan(&filePath, &startLine, &endLine)
+	if err != nil {
+		return "", 0, 0
+	}
+	return filepathToSlash(filePath), startLine, normalizedEndLine(startLine, endLine)
+}
+
+func factSummaryLineCount(ctx context.Context, db *sql.DB, repositoryID int64, ownerKey string) int {
+	file, factType, ok := factSummaryOwnerIdentity(ownerKey)
+	if !ok {
+		return 0
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT start_line, end_line
+		FROM watch_facts
+		WHERE repository_id = ? AND file_path = ? AND type = ?`, repositoryID, file, factType)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = rows.Close() }()
+	total := 0
+	for rows.Next() {
+		var startLine int
+		var endLine sql.NullInt64
+		if err := rows.Scan(&startLine, &endLine); err != nil {
+			return 0
+		}
+		total += lineCountFromRange(startLine, endLine)
+	}
+	if err := rows.Err(); err != nil {
+		return 0
+	}
+	return total
 }
 
 func symbolSnapshotHash(ctx context.Context, db *sql.DB, repositoryID int64, ownerKey string) string {
@@ -259,6 +344,37 @@ func fileLineCount(ctx context.Context, db *sql.DB, repositoryID int64, filePath
 		return 0
 	}
 	return int(maxEnd.Int64)
+}
+
+func folderLineCount(ctx context.Context, db *sql.DB, repositoryID int64, folderPath string) int {
+	folderPath = strings.TrimSuffix(filepathToSlash(strings.TrimSpace(folderPath)), "/")
+	if folderPath == "" {
+		return 0
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT MAX(COALESCE(s.end_line, s.start_line))
+		FROM watch_symbols s
+		JOIN watch_files f ON f.id = s.file_id
+		WHERE s.repository_id = ? AND (f.path = ? OR f.path LIKE ?)
+		GROUP BY f.path`, repositoryID, folderPath, folderPath+"/%")
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = rows.Close() }()
+	total := 0
+	for rows.Next() {
+		var maxEnd sql.NullInt64
+		if err := rows.Scan(&maxEnd); err != nil {
+			return 0
+		}
+		if maxEnd.Valid {
+			total += int(maxEnd.Int64)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0
+	}
+	return total
 }
 
 func sourceAnchorLineCount(filePath string) int {
@@ -758,9 +874,13 @@ func snapshotDiff(snapshot watchResourceSnapshot, changeType string, beforeHash,
 	return RepresentationDiff{OwnerType: snapshot.OwnerType, OwnerKey: snapshot.OwnerKey, ChangeType: changeType, BeforeHash: beforeHash, AfterHash: afterHash, ResourceType: &resourceType, ResourceID: snapshot.ResourceID, Language: &language, Summary: &summary, AddedLines: addedLines, RemovedLines: removedLines}
 }
 
-func previousRawSnapshotForMaterialized(previous, current map[string]watchResourceSnapshot, snapshot watchResourceSnapshot) (watchResourceSnapshot, bool) {
+func rawFactSnapshot(snapshot watchResourceSnapshot) bool {
+	return snapshot.OwnerType == "fact" && snapshot.ResourceType == "fact"
+}
+
+func previousRawSnapshotForMaterialized(previous, current map[string]watchResourceSnapshot, snapshot watchResourceSnapshot) (watchResourceSnapshot, string, bool, bool) {
 	if snapshot.ResourceType != "element" {
-		return watchResourceSnapshot{}, false
+		return watchResourceSnapshot{}, "", false, false
 	}
 	rawType := ""
 	rawOwnerKey := snapshot.OwnerKey
@@ -770,19 +890,95 @@ func previousRawSnapshotForMaterialized(previous, current map[string]watchResour
 		rawOwnerKey = strings.TrimPrefix(snapshot.OwnerKey, "file:")
 	case "symbol":
 		rawType = "symbol"
+	case "fact":
+		rawType = "fact"
+	case "fact-summary":
+		return previousFactSummarySnapshot(previous, snapshot)
 	default:
-		return watchResourceSnapshot{}, false
+		return watchResourceSnapshot{}, "", false, false
 	}
 	rawKey := resourceSnapshotKey(snapshot.OwnerType, rawOwnerKey, rawType)
 	prev, ok := previous[rawKey]
 	if !ok {
-		return watchResourceSnapshot{}, false
+		return watchResourceSnapshot{}, "", false, false
 	}
 	next, ok := current[rawKey]
 	if !ok || prev.Hash == next.Hash {
-		return watchResourceSnapshot{}, false
+		return watchResourceSnapshot{}, "", false, false
 	}
-	return prev, true
+	return prev, rawKey, false, true
+}
+
+func importConnectorFactOwnerKey(ownerKey string) string {
+	return strings.TrimSuffix(ownerKey, ":file")
+}
+
+func previousFactSummarySnapshot(previous map[string]watchResourceSnapshot, snapshot watchResourceSnapshot) (watchResourceSnapshot, string, bool, bool) {
+	file, factType, ok := factSummaryOwnerIdentity(snapshot.OwnerKey)
+	if !ok {
+		return watchResourceSnapshot{}, "", false, false
+	}
+	for key, prev := range previous {
+		if prev.OwnerType != "fact-summary" || prev.ResourceType != snapshot.ResourceType {
+			continue
+		}
+		prevFile, prevFactType, ok := factSummaryOwnerIdentity(prev.OwnerKey)
+		if !ok || prevFile != file || prevFactType != factType {
+			continue
+		}
+		if prev.Hash == snapshot.Hash {
+			return watchResourceSnapshot{}, "", false, false
+		}
+		if prev.LineCount == 0 {
+			prev.LineCount = factSummaryLineCountFromSummary(prev.Summary)
+		}
+		return prev, key, true, true
+	}
+	return watchResourceSnapshot{}, "", false, false
+}
+
+func factSummaryOwnerIdentity(ownerKey string) (string, string, bool) {
+	rest := strings.TrimPrefix(ownerKey, "fact-summary:")
+	if rest == ownerKey || strings.TrimSpace(rest) == "" {
+		return "", "", false
+	}
+	parts := strings.Split(rest, ":")
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	if len(parts) >= 3 && isStableHashPart(parts[len(parts)-1]) {
+		parts = parts[:len(parts)-1]
+	}
+	factType := strings.TrimSpace(parts[len(parts)-1])
+	file := filepathToSlash(strings.Join(parts[:len(parts)-1], ":"))
+	if file == "" || factType == "" {
+		return "", "", false
+	}
+	return file, factType, true
+}
+
+func isStableHashPart(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func factSummaryLineCountFromSummary(summary string) int {
+	fields := strings.Fields(summary)
+	if len(fields) == 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(fields[0])
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func scanFact(row factScanner) (Fact, error) {

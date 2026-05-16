@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mertcikla/tld/v2/internal/codeowners"
+	tldgit "github.com/mertcikla/tld/v2/internal/git"
 	"github.com/mertcikla/tld/v2/internal/layout"
 	"github.com/mertcikla/tld/v2/internal/tagcolors"
 	"github.com/mertcikla/tld/v2/internal/tech"
@@ -1201,7 +1202,7 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 			}
 		}
 	}
-	if err := m.materializeFacts(ctx, filtered.VisibleFacts, filtered.VisibleSymbols, fileViews, symbolElements, symbolViews, symbolPositions, occupied, filtered); err != nil {
+	if err := m.materializeFacts(ctx, filtered.VisibleFacts, filtered.VisibleSymbols, fileElements, fileViews, symbolElements, symbolViews, symbolPositions, occupied, filtered); err != nil {
 		return m.stats, err
 	}
 
@@ -1644,7 +1645,7 @@ type filePairReference struct {
 	Count int
 }
 
-func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbols map[int64]Symbol, fileViews map[string]int64, symbolElements map[int64]int64, symbolViews map[int64]int64, symbolPositions map[int64]layoutPoint, occupied map[int64]map[string]struct{}, filtered filterResult) error {
+func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbols map[int64]Symbol, fileElements map[string]int64, fileViews map[string]int64, symbolElements map[int64]int64, symbolViews map[int64]int64, symbolPositions map[int64]layoutPoint, occupied map[int64]map[string]struct{}, filtered filterResult) error {
 	if len(facts) == 0 {
 		return nil
 	}
@@ -1654,9 +1655,14 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 	}
 	nodeFactsByFile := map[string][]Fact{}
 	summaryFactsByFile := map[string][]Fact{}
+	dependencyImportFactsByFile := map[string][]Fact{}
 	connectionFactsByFile := map[string][]Fact{}
 	for _, fact := range facts {
 		if strings.TrimSpace(fact.FilePath) == "" || fileViews[fact.FilePath] == 0 {
+			continue
+		}
+		if dependencyImportFact(fact) {
+			dependencyImportFactsByFile[fact.FilePath] = append(dependencyImportFactsByFile[fact.FilePath], fact)
 			continue
 		}
 		if runtimeConnectionFact(fact) {
@@ -1676,9 +1682,13 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 	for file := range summaryFactsByFile {
 		fileSet[file] = struct{}{}
 	}
+	for file := range dependencyImportFactsByFile {
+		fileSet[file] = struct{}{}
+	}
 	for file := range connectionFactsByFile {
 		fileSet[file] = struct{}{}
 	}
+	changedFactLines := changedLineSetForFacts(m.repo.RepoRoot, filtered.ChangedFiles)
 	componentFactsByFile := runtimeComponentFactsByFile(facts)
 	componentElementsByFile := map[string]map[string]int64{}
 	volumeFactsByFile := map[string][]Fact{}
@@ -1761,10 +1771,36 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 		if limit < len(items) {
 			summaryFacts = append(summaryFacts, items[limit:]...)
 		}
+		var extractedFacts []Fact
+		summaryFacts, extractedFacts = extractStandaloneSummaryFacts(summaryFacts, filtered.ChangedFiles, changedFactLines)
+		for i, fact := range extractedFacts {
+			elem, err := m.upsertElement(ctx, "fact", factOwnerKey(fact), elementInput{
+				Name:        m.factNodeName(fact),
+				Kind:        factNodeKind(fact),
+				Description: factNodeDescription(fact),
+				Technology:  factTechnology(fact),
+				Repo:        repoIdentity(m.repo),
+				Branch:      nullStringValue(m.repo.Branch),
+				FilePath:    fact.FilePath,
+				Language:    languageForFile(fact.FilePath, symbols),
+				Tags:        m.tagPlan.tagsFor("fact", factOwnerKey(fact)),
+			})
+			if err != nil {
+				return err
+			}
+			point := nextOpenGridPoint(fileViews[file], occupied, 500+i)
+			if err := m.upsertPlacement(ctx, fileViews[file], elem, point.X, point.Y); err != nil {
+				return err
+			}
+			markOccupied(occupied, fileViews[file], point)
+		}
 		if len(summaryFacts) > 0 {
 			if err := m.materializeFactSummaries(ctx, file, fileViews[file], summaryFacts, occupied); err != nil {
 				return err
 			}
+		}
+		if err := m.materializeDependencyImports(ctx, file, dependencyImportFactsByFile[file], fileElements[file], fileViews[file], symbols, occupied); err != nil {
+			return err
 		}
 	}
 	if err := m.materializeRuntimeFactConnectors(ctx, connectionFactsByFile, componentFactsByFile, componentElementsByFile, fileViews); err != nil {
@@ -1777,6 +1813,118 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 		return err
 	}
 	return nil
+}
+
+func (m *materializer) materializeDependencyImports(ctx context.Context, file string, facts []Fact, fileElementID, viewID int64, symbols map[int64]Symbol, occupied map[int64]map[string]struct{}) error {
+	if len(facts) == 0 || viewID == 0 {
+		return nil
+	}
+	sort.SliceStable(facts, func(i, j int) bool {
+		leftName, rightName := dependencyImportName(facts[i]), dependencyImportName(facts[j])
+		if leftName == rightName {
+			return factOwnerKey(facts[i]) < factOwnerKey(facts[j])
+		}
+		return leftName < rightName
+	})
+	for i, fact := range facts {
+		ownerKey := factOwnerKey(fact)
+		elem, err := m.upsertElement(ctx, "fact", ownerKey, elementInput{
+			Name:        dependencyImportName(fact),
+			Kind:        "dependency",
+			Description: factNodeDescription(fact),
+			Technology:  dependencyImportTechnology(fact),
+			Repo:        repoIdentity(m.repo),
+			Branch:      nullStringValue(m.repo.Branch),
+			FilePath:    fact.FilePath,
+			Language:    languageForFile(fact.FilePath, symbols),
+			Tags:        m.tagPlan.tagsFor("fact", ownerKey),
+		})
+		if err != nil {
+			return err
+		}
+		point := nextOpenGridPoint(viewID, occupied, 700+i)
+		if err := m.upsertPlacement(ctx, viewID, elem, point.X, point.Y); err != nil {
+			return err
+		}
+		markOccupied(occupied, viewID, point)
+		if fileElementID == 0 {
+			continue
+		}
+		label := firstNonEmpty(fact.Relationship, "imports")
+		if err := m.upsertConnectorDetailed(ctx, "fact-import-connector", ownerKey+":file", viewID, fileElementID, elem, label, label, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func changedLineSetForFacts(repoRoot string, changedFiles map[string]struct{}) map[string]map[int]struct{} {
+	if len(changedFiles) == 0 || strings.TrimSpace(repoRoot) == "" {
+		return nil
+	}
+	hunks, err := tldgit.LineHunksAgainstHead(repoRoot)
+	if err != nil {
+		return nil
+	}
+	out := map[string]map[int]struct{}{}
+	for file := range changedFiles {
+		for _, hunk := range hunks[filepathToSlash(file)] {
+			for _, line := range hunk.AddedLines {
+				if out[file] == nil {
+					out[file] = map[int]struct{}{}
+				}
+				out[file][line] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+func extractStandaloneSummaryFacts(facts []Fact, changedFiles map[string]struct{}, changedLines map[string]map[int]struct{}) ([]Fact, []Fact) {
+	if len(facts) <= 1 {
+		return nil, facts
+	}
+	remaining := make([]Fact, 0, len(facts))
+	extracted := make([]Fact, 0)
+	for _, fact := range facts {
+		if factAffectedByDiff(fact, changedFiles, changedLines) {
+			extracted = append(extracted, fact)
+			continue
+		}
+		remaining = append(remaining, fact)
+	}
+	return remaining, extracted
+}
+
+func factAffectedByDiff(fact Fact, changedFiles map[string]struct{}, changedLines map[string]map[int]struct{}) bool {
+	file := filepathToSlash(fact.FilePath)
+	if file == "" {
+		return false
+	}
+	if _, ok := changedFiles[file]; !ok {
+		return false
+	}
+	if changedLines == nil {
+		return true
+	}
+	lines, ok := changedLines[file]
+	if !ok {
+		return true
+	}
+	start := fact.StartLine
+	if start <= 0 {
+		return true
+	}
+	end := start
+	if fact.EndLine != nil && *fact.EndLine >= start {
+		end = *fact.EndLine
+	}
+	for line := start; line <= end; line++ {
+		if _, ok := lines[line]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *materializer) materializeRuntimeFactConnectors(ctx context.Context, connectionFactsByFile map[string][]Fact, componentFactsByFile map[string]map[string]Fact, componentElementsByFile map[string]map[string]int64, fileViews map[string]int64) error {
@@ -1950,6 +2098,10 @@ func storageVolumeFact(fact Fact) bool {
 	return fact.Type == "storage.volume"
 }
 
+func dependencyImportFact(fact Fact) bool {
+	return fact.Type == "dependency.import"
+}
+
 func runtimeEndpointFact(fact Fact) bool {
 	return fact.Type == "runtime.endpoint"
 }
@@ -1990,12 +2142,7 @@ func (m *materializer) materializeFactSummaries(ctx context.Context, file string
 	i := 0
 	for _, factType := range sortedKeysFromFactSummaryGroups(byType) {
 		items := byType[factType]
-		keys := make([]string, 0, len(items))
-		for _, fact := range items {
-			keys = append(keys, factOwnerKey(fact))
-		}
-		sort.Strings(keys)
-		ownerKey := "fact-summary:" + file + ":" + factType + ":" + stableHash(keys)
+		ownerKey := "fact-summary:" + file + ":" + factType
 		elem, err := m.upsertElement(ctx, "fact-summary", ownerKey, elementInput{
 			Name:        fmt.Sprintf("%d %s", len(items), factSummaryLabel(factType, len(items))),
 			Kind:        "summary",
@@ -2095,6 +2242,8 @@ func factSummaryLabel(factType string, count int) string {
 	switch factType {
 	case "http.route", "frontend.route":
 		label = "routes"
+	case "dependency.import":
+		label = "imports"
 	case "orm.query":
 		label = "data access facts"
 	}
@@ -2118,6 +2267,9 @@ func summaryTagsForFacts(facts []Fact) []string {
 }
 
 func (m *materializer) factNodeName(fact Fact) string {
+	if dependencyImportFact(fact) {
+		return dependencyImportName(fact)
+	}
 	if storageVolumeFact(fact) {
 		return m.storageVolumeFactName(fact)
 	}
@@ -2166,6 +2318,8 @@ func endpointConnectorLabel(fact Fact) string {
 
 func factNodeKind(fact Fact) string {
 	switch fact.Type {
+	case "dependency.import":
+		return "dependency"
 	case "http.route", "frontend.route":
 		return "route"
 	case "orm.query":
@@ -2189,6 +2343,9 @@ func factNodeKind(fact Fact) string {
 }
 
 func factTechnology(fact Fact) string {
+	if dependencyImportFact(fact) {
+		return dependencyImportTechnology(fact)
+	}
 	if storageVolumeFact(fact) {
 		return "Folder"
 	}
@@ -2207,6 +2364,16 @@ func factTechnology(fact Fact) string {
 		return technology
 	}
 	return "Runtime"
+}
+
+func dependencyImportName(fact Fact) string {
+	attrs := factAttributes(fact)
+	return firstNonEmpty(attrs["module"], fact.ObjectName, fact.Name, fact.Type)
+}
+
+func dependencyImportTechnology(fact Fact) string {
+	attrs := factAttributes(fact)
+	return firstNonEmpty(attrs["ecosystem"], attrs["language"], "Dependency")
 }
 
 func extractTechnologyFromTags(currentTechnology string, tags []string) (string, []string) {
@@ -2409,7 +2576,7 @@ func (m *materializer) upsertConnectorDetailedWithDirection(ctx context.Context,
 	}
 	direction = normalizedArchitectureConnectorDirection(direction)
 	sourceHandle, targetHandle := "", ""
-	if ownerType == "fact-reference" {
+	if ownerType == "fact-reference" || ownerType == "fact-import-connector" {
 		sourceHandle = "right"
 		targetHandle = "left"
 	}

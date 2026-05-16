@@ -119,7 +119,6 @@ func NewWatchCmd() *cobra.Command {
 			term.PrintLogo(cmd.OutOrStdout(), version.Version)
 			term.Label(cmd.OutOrStdout(), 20, "Mode", "watch")
 			term.Label(cmd.OutOrStdout(), 20, "Data directory", term.Path(cmd.OutOrStdout(), dataDir))
-			term.Label(cmd.OutOrStdout(), 20, "LSP", formatWatchLSPStatus(watch.InitialLSPStatus(watchSettings)))
 			hasEmbedding := embeddingCfg.Provider != "" && embeddingCfg.Provider != "none" && embeddingCfg.Provider != "local-lexical"
 			if hasEmbedding {
 				term.Label(cmd.OutOrStdout(), 20, "Embedding provider", embeddingCfg.Provider)
@@ -290,6 +289,9 @@ func NewWatchCmd() *cobra.Command {
 			term.Label(cmd.OutOrStdout(), 20, "tlDiagram available at", term.URL(cmd.OutOrStdout(), url))
 			term.Separator(cmd.OutOrStdout())
 			term.Hint(cmd.OutOrStdout(), "Press Ctrl-C to stop watching.")
+			if watchProgress != nil {
+				watchProgress.Start("Workspace status: current")
+			}
 			logger.InfoContext(cmd.Context(), "watch.command.ready", "repository_id", repo.ID, "repo_root", repo.RepoRoot, "url", url)
 			if err := <-errCh; err != nil {
 				return fail("watch.runner.failed", err)
@@ -350,54 +352,12 @@ func logWatchEvent(cmd *cobra.Command, event watch.Event, activity *watchActivit
 			return false
 		}
 		if activity != nil {
-			activity.Advance("")
+			activity.Advance(workspaceStatusSummary(result, event.ChangedFiles))
 		}
-		status := term.Colorize(out, term.ColorYellow, "no representation update")
-		if result.RepresentationChanged {
-			status = term.Colorize(out, term.ColorGreen, "representation updated")
-		}
-		_, _ = fmt.Fprintf(out, "%s %s %s: %s (%s)\n",
-			term.Colorize(out, term.ColorBlue, "source"),
-			term.Colorize(out, term.ColorYellow, result.Change.ChangeType),
-			result.Change.Path,
-			status,
-			representationChangeSummary(result.Representation, result.GitTags),
-		)
 		return true
 	case "watch.changeCounter":
-		counter, ok := event.Data.(watch.ChangeCounter)
-		if !ok {
-			return false
-		}
-		if activity != nil {
-			if counter.IntervalChangesProcessed > 0 {
-				activity.Advance(fmt.Sprintf("watching: %d total, %d in last minute", counter.TotalChangesProcessed, counter.IntervalChangesProcessed))
-			} else {
-				activity.Advance(fmt.Sprintf("watching: %d total", counter.TotalChangesProcessed))
-			}
-			return true
-		}
-		if counter.IntervalChangesProcessed > 0 {
-			_, _ = fmt.Fprintf(out, "changes processed: %d total, %d in the last minute\n",
-				counter.TotalChangesProcessed,
-				counter.IntervalChangesProcessed,
-			)
-		} else {
-			_, _ = fmt.Fprintf(out, "changes processed: %d total\n",
-				counter.TotalChangesProcessed,
-			)
-		}
 		return true
 	case "lsp.status":
-		status, ok := event.Data.(watch.LSPStatus)
-		if !ok {
-			return false
-		}
-		degraded := status.Summary.Unavailable + status.Summary.Failed
-		if degraded == 0 && !hasLSPRestarts(status) {
-			return false
-		}
-		_, _ = fmt.Fprintf(out, "%s %s\n", term.Colorize(out, term.ColorYellow, "lsp:"), formatWatchLSPStatus(status))
 		return true
 	case "watch.error":
 		message := event.Message
@@ -442,15 +402,6 @@ func formatWatchLSPServers(status watch.LSPStatus) string {
 	}
 	sort.Strings(active)
 	return strings.Join(active, ",")
-}
-
-func hasLSPRestarts(status watch.LSPStatus) bool {
-	for _, server := range status.Servers {
-		if server.RestartCount > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func confirmWatchLSPProceed(cmd *cobra.Command) func(context.Context, watch.ScanResult) error {
@@ -500,6 +451,18 @@ func isInteractiveInput(r io.Reader) bool {
 	}
 	info, err := f.Stat()
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+func workspaceStatusSummary(result watch.SourceFileChangeResult, changedFiles int) string {
+	state := "current"
+	if !result.RepresentationChanged {
+		state = "current; no representation update"
+	}
+	fileLabel := ""
+	if changedFiles > 1 {
+		fileLabel = fmt.Sprintf("; %d files changed", changedFiles)
+	}
+	return fmt.Sprintf("Workspace status: %s%s (%s)", state, fileLabel, representationChangeSummary(result.Representation, result.GitTags))
 }
 
 func representationChangeSummary(rep watch.RepresentResult, tags watch.GitTagUpdateResult) string {
@@ -942,10 +905,6 @@ type cliProgress struct {
 type watchActivityProgress struct {
 	out         io.Writer
 	mu          sync.Mutex
-	ticker      *time.Ticker
-	stopCh      chan struct{}
-	startTime   time.Time
-	dots        int
 	label       string
 	clientCount func() int
 }
@@ -970,38 +929,14 @@ func (p *watchActivityProgress) Start(label string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.ticker != nil {
-		if label != "" {
-			p.label = label
-			p.renderLocked(false)
-		}
+	if label == "" {
 		return
 	}
 	p.label = label
-	p.startTime = time.Now()
-	p.ticker = time.NewTicker(1 * time.Second)
-	p.stopCh = make(chan struct{})
-	p.renderLocked(false)
-	go func() {
-		for {
-			select {
-			case <-p.ticker.C:
-				p.mu.Lock()
-				p.renderLocked(true)
-				p.mu.Unlock()
-			case <-p.stopCh:
-				return
-			}
-		}
-	}()
+	p.renderLocked()
 }
 
-func (p *watchActivityProgress) renderLocked(incrementDots bool) {
-	if incrementDots {
-		p.dots = (p.dots + 1) % 4
-	}
-	dotsStr := strings.Repeat(".", p.dots) + strings.Repeat(" ", 3-p.dots)
-	elapsed := time.Since(p.startTime).Round(time.Second)
+func (p *watchActivityProgress) renderLocked() {
 	clientLabel := ""
 	if p.clientCount != nil {
 		clients := p.clientCount()
@@ -1011,7 +946,7 @@ func (p *watchActivityProgress) renderLocked(incrementDots bool) {
 		}
 		clientLabel = fmt.Sprintf(" · %d client%s connected", clients, plural)
 	}
-	_, _ = fmt.Fprintf(p.out, "\r\033[K%s%s [%s]%s", term.Colorize(p.out, term.ColorCyan, p.label), dotsStr, elapsed, clientLabel)
+	_, _ = fmt.Fprintf(p.out, "\r\033[K%s%s", term.Colorize(p.out, term.ColorCyan, p.label), clientLabel)
 }
 
 func (p *watchActivityProgress) Advance(label string) {
@@ -1020,13 +955,10 @@ func (p *watchActivityProgress) Advance(label string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.ticker == nil {
-		return
-	}
 	if label != "" {
 		p.label = label
-		p.renderLocked(false)
 	}
+	p.renderLocked()
 }
 
 func (p *watchActivityProgress) Stop() {
@@ -1035,14 +967,6 @@ func (p *watchActivityProgress) Stop() {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.ticker != nil {
-		p.ticker.Stop()
-		p.ticker = nil
-	}
-	if p.stopCh != nil {
-		close(p.stopCh)
-		p.stopCh = nil
-	}
 	_, _ = fmt.Fprintf(p.out, "\r\033[K")
 }
 

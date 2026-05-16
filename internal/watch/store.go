@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -1233,13 +1235,20 @@ func (s *Store) BuildWatchDiffs(ctx context.Context, repositoryID int64, represe
 	}
 	diffs = append(diffs, RepresentationDiff{OwnerType: "repository", OwnerKey: repoKey, ChangeType: change, BeforeHash: stringPtrIf(found, latest.RepresentationHash), AfterHash: &representationHash, Summary: &repoSummary})
 	for key, next := range current {
+		if rawFactSnapshot(next) {
+			delete(previous, key)
+			continue
+		}
 		prev, ok := previous[key]
 		if !ok {
-			if prevRaw, rawOK := previousRawSnapshotForMaterialized(previousBaseline, current, next); rawOK {
+			if prevRaw, previousKey, consumePrevious, rawOK := previousRawSnapshotForMaterialized(previousBaseline, current, next); rawOK {
 				before, after := prevRaw.Hash, next.Hash
 				diff := snapshotDiff(next, "updated", &before, &after, &prevRaw)
 				applyGitLineDiff(&diff, next, &prevRaw, lineDiffs, lineHunks)
 				diffs = append(diffs, diff)
+				if consumePrevious {
+					delete(previous, previousKey)
+				}
 				continue
 			}
 			changeType := "added"
@@ -1264,11 +1273,18 @@ func (s *Store) BuildWatchDiffs(ctx context.Context, repositoryID int64, represe
 		delete(previous, key)
 	}
 	for _, prev := range previous {
+		if rawFactSnapshot(prev) {
+			continue
+		}
 		before := prev.Hash
 		diff := snapshotDiff(prev, "deleted", &before, nil, nil)
 		applyGitLineDiff(&diff, prev, nil, lineDiffs, lineHunks)
 		diffs = append(diffs, diff)
 	}
+	if synthetic, err := s.syntheticDeletedImportDiffs(ctx, repositoryID, lineHunks, diffs); err == nil {
+		diffs = append(diffs, synthetic...)
+	}
+	diffs = suppressDependencyImportSummaryDiffs(diffs)
 	sort.Slice(diffs, func(i, j int) bool {
 		if diffs[i].OwnerType == diffs[j].OwnerType {
 			return diffs[i].OwnerKey < diffs[j].OwnerKey
@@ -1276,6 +1292,135 @@ func (s *Store) BuildWatchDiffs(ctx context.Context, repositoryID int64, represe
 		return diffs[i].OwnerType < diffs[j].OwnerType
 	})
 	return diffs, nil
+}
+
+func suppressDependencyImportSummaryDiffs(diffs []RepresentationDiff) []RepresentationDiff {
+	out := diffs[:0]
+	for _, diff := range diffs {
+		if diff.OwnerType == "fact-summary" {
+			_, factType, ok := factSummaryOwnerIdentity(diff.OwnerKey)
+			if ok && factType == "dependency.import" {
+				continue
+			}
+		}
+		out = append(out, diff)
+	}
+	return out
+}
+
+func (s *Store) syntheticDeletedImportDiffs(ctx context.Context, repositoryID int64, lineHunks map[string][]tldgit.LineHunk, existing []RepresentationDiff) ([]RepresentationDiff, error) {
+	if len(lineHunks) == 0 {
+		return nil, nil
+	}
+	summaryFiles := map[string]struct{}{}
+	existingOwners := map[string]struct{}{}
+	for _, diff := range existing {
+		existingOwners[diff.OwnerType+"\x00"+diff.OwnerKey+"\x00"+resourceTypeValue(diff.ResourceType)] = struct{}{}
+		if diff.OwnerType != "fact-summary" || diff.ChangeType != "deleted" {
+			continue
+		}
+		file, factType, ok := factSummaryOwnerIdentity(diff.OwnerKey)
+		if ok && factType == "dependency.import" {
+			summaryFiles[file] = struct{}{}
+		}
+	}
+	if len(summaryFiles) == 0 {
+		return nil, nil
+	}
+	repo, err := s.Repository(ctx, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	var out []RepresentationDiff
+	for file := range summaryFiles {
+		if !strings.HasSuffix(file, ".go") {
+			continue
+		}
+		lines := removedLinesFromHead(repo.RepoRoot, file)
+		if len(lines) == 0 {
+			continue
+		}
+		for _, hunk := range lineHunks[file] {
+			for _, lineNo := range hunk.RemovedLines {
+				module := removedGoImportModule(lines, lineNo)
+				if module == "" {
+					continue
+				}
+				ownerKey := fmt.Sprintf("fact:dependency.inventory:dependency.import:%s:%s:%d", file, module, lineNo)
+				elementKey := "fact\x00" + ownerKey + "\x00element"
+				if _, ok := existingOwners[elementKey]; ok {
+					continue
+				}
+				before := hashString(ownerKey + ":deleted")
+				resourceType := "element"
+				language := "go"
+				summary := module
+				out = append(out, RepresentationDiff{OwnerType: "fact", OwnerKey: ownerKey, ChangeType: "deleted", BeforeHash: &before, ResourceType: &resourceType, Language: &language, Summary: &summary, RemovedLines: 1})
+				existingOwners[elementKey] = struct{}{}
+
+				connectorOwner := ownerKey + ":file"
+				connectorKey := "fact-import-connector\x00" + connectorOwner + "\x00connector"
+				if _, ok := existingOwners[connectorKey]; ok {
+					continue
+				}
+				connectorHash := hashString(connectorOwner + ":deleted")
+				connectorType := "connector"
+				connectorSummary := path.Base(file) + "->" + module
+				out = append(out, RepresentationDiff{OwnerType: "fact-import-connector", OwnerKey: connectorOwner, ChangeType: "deleted", BeforeHash: &connectorHash, ResourceType: &connectorType, Language: stringPtr(""), Summary: &connectorSummary, RemovedLines: 1})
+				existingOwners[connectorKey] = struct{}{}
+			}
+		}
+	}
+	return out, nil
+}
+
+func removedLinesFromHead(repoRoot, file string) map[int]string {
+	if strings.TrimSpace(repoRoot) == "" || strings.TrimSpace(file) == "" {
+		return nil
+	}
+	cmd := exec.Command("git", "-C", repoRoot, "show", "HEAD:"+file)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n")
+	result := make(map[int]string, len(lines))
+	for i, line := range lines {
+		result[i+1] = line
+	}
+	return result
+}
+
+func removedGoImportModule(lines map[int]string, lineNo int) string {
+	line := strings.TrimSpace(lines[lineNo])
+	if line == "" || strings.HasPrefix(line, "//") {
+		return ""
+	}
+	line = strings.TrimPrefix(line, "import ")
+	start := strings.Index(line, `"`)
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(line[start+1:], `"`)
+	if end < 0 {
+		return ""
+	}
+	module := strings.TrimSpace(line[start+1 : start+1+end])
+	if module == "" || strings.ContainsAny(module, " \t") {
+		return ""
+	}
+	return module
+}
+
+func resourceTypeValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID int64) (map[string]watchResourceSnapshot, error) {
@@ -1319,6 +1464,28 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 		out[resourceSnapshotKey("symbol", key, "symbol")] = watchResourceSnapshot{OwnerType: "symbol", OwnerKey: key, ResourceType: "symbol", ResourceID: &id, Language: languageFromStableKey(stableKey), Hash: hash, Summary: name, LineCount: lineCountFromRange(startLine, endLine), FilePath: filepathToSlash(filePath), StartLine: startLine, EndLine: end}
 	}
 	if err := symRows.Close(); err != nil {
+		return nil, err
+	}
+	factRows, err := s.db.QueryContext(ctx, `
+		SELECT enricher, stable_key, type, fact_hash, name, file_path, start_line, end_line
+		FROM watch_facts
+		WHERE repository_id = ?`, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	for factRows.Next() {
+		var enricher, stableKey, factType, factHash, name, filePath string
+		var startLine int
+		var endLine sql.NullInt64
+		if err := factRows.Scan(&enricher, &stableKey, &factType, &factHash, &name, &filePath, &startLine, &endLine); err != nil {
+			_ = factRows.Close()
+			return nil, err
+		}
+		ownerKey := "fact:" + enricher + ":" + stableKey
+		end := normalizedEndLine(startLine, endLine)
+		out[resourceSnapshotKey("fact", ownerKey, "fact")] = watchResourceSnapshot{OwnerType: "fact", OwnerKey: ownerKey, ResourceType: "fact", Language: "", Hash: factHash, Summary: firstNonEmpty(name, factType), LineCount: lineCountFromRange(startLine, endLine), FilePath: filepathToSlash(filePath), StartLine: startLine, EndLine: end}
+	}
+	if err := factRows.Close(); err != nil {
 		return nil, err
 	}
 	deletedElementIDs, err := s.deletedMaterializedElementIDs(ctx, repositoryID)
@@ -1397,7 +1564,7 @@ func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64
 			return "", "", "", 0, err
 		}
 		raw := fmt.Sprintf("%d:%d:%d:%s:%s:%s", viewID, sourceID, targetID, label.String, relationship.String, direction.String)
-		return hashString(raw), s.connectorSummary(ctx, sourceID, targetID, direction.String), "", 0, nil
+		return hashString(raw), s.connectorSummary(ctx, sourceID, targetID, direction.String), "", materializedLineCount(ctx, s.db, repositoryID, ownerType, ownerKey, ""), nil
 	default:
 		return "", "", "", 0, fmt.Errorf("unsupported resource type %q", resourceType)
 	}
