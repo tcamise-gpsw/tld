@@ -61,7 +61,8 @@ func TestServerAllowsVSCodeWebviewCORSPreflight(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/api/diag.v1.WorkspaceService/ListViews", nil)
 	req.Header.Set("Origin", "vscode-webview://abc123")
 	req.Header.Set("Access-Control-Request-Method", "POST")
-	req.Header.Set("Access-Control-Request-Headers", "content-type,connect-protocol-version")
+	req.Header.Set("Access-Control-Request-Headers", "content-type,connect-protocol-version,x-user-agent")
+	req.Header.Set("Access-Control-Request-Private-Network", "true")
 
 	rec := httptest.NewRecorder()
 	routes.ServeHTTP(rec, req)
@@ -77,6 +78,29 @@ func TestServerAllowsVSCodeWebviewCORSPreflight(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "connect-protocol-version") {
 		t.Fatalf("allow headers = %q, want connect-protocol-version", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "x-user-agent") {
+		t.Fatalf("allow headers = %q, want requested x-user-agent reflected", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Fatalf("allow private network = %q, want true", got)
+	}
+}
+
+func TestServerAllowsVSCodeFileOrigin(t *testing.T) {
+	_, routes := newTestServer(t, uuid.New(), nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/diag.v1.WorkspaceService/ListViews", nil)
+	req.Header.Set("Origin", "vscode-file://vscode-app")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "vscode-file://vscode-app" {
+		t.Fatalf("allow origin = %q, want vscode-file origin", got)
 	}
 }
 

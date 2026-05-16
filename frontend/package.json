@@ -30,6 +30,7 @@
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "prebuild:app": "npm run prepare:icons",
     "build:app": "tsc && vite build --config vite.config.ts",
+    "build:vscode": "vite build --config vite.vscode.config.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
