@@ -104,7 +104,7 @@ func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID) (*
 		mux.ServeHTTP(w, r.WithContext(api.WithWorkspaceID(r.Context(), workspaceID)))
 	})
 
-	return &Server{handler: handler}, nil
+	return &Server{handler: localCORSMiddleware(handler)}, nil
 }
 
 type watchLockHooks struct {
@@ -133,6 +133,43 @@ func (s *Server) Routes() http.Handler {
 
 func (s *Server) Shutdown(context.Context) error {
 	return nil
+}
+
+func localCORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); isAllowedLocalOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type, X-CSRF-Token, X-Requested-With")
+			w.Header().Set("Access-Control-Expose-Headers", "Connect-Protocol-Version, Grpc-Status, Grpc-Message")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isAllowedLocalOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "vscode-webview", "vscode-webview-resource":
+		return true
+	case "http", "https":
+		host := u.Hostname()
+		return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	default:
+		return false
+	}
 }
 
 func serveStatic(static fs.FS, w http.ResponseWriter, r *http.Request) {

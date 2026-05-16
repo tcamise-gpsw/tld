@@ -56,6 +56,43 @@ func TestServerReadyReportsResourceCounts(t *testing.T) {
 	}
 }
 
+func TestServerAllowsVSCodeWebviewCORSPreflight(t *testing.T) {
+	_, routes := newTestServer(t, uuid.New(), nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/diag.v1.WorkspaceService/ListViews", nil)
+	req.Header.Set("Origin", "vscode-webview://abc123")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "content-type,connect-protocol-version")
+
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "vscode-webview://abc123" {
+		t.Fatalf("allow origin = %q, want vscode webview origin", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("allow credentials = %q, want true", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "connect-protocol-version") {
+		t.Fatalf("allow headers = %q, want connect-protocol-version", got)
+	}
+}
+
+func TestServerRejectsNonLocalCORSOrigin(t *testing.T) {
+	_, routes := newTestServer(t, uuid.New(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	req.Header.Set("Origin", "https://example.com")
+
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("allow origin = %q, want empty for non-local origin", got)
+	}
+}
+
 func TestServerOrgTagColorsRoundTrip(t *testing.T) {
 	_, routes := newTestServer(t, uuid.MustParse("11111111-2222-3333-4444-555555555555"), nil)
 	server := httptest.NewServer(routes)

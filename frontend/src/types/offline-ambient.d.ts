@@ -8,6 +8,7 @@ declare module "*.svg" {
 declare global {
   interface Window {
     __TLD_VSCODE__?: boolean
+    __TLD_SERVER_URL__?: string
   }
 }
 

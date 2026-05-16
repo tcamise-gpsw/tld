@@ -122,6 +122,7 @@ function ElementLibrary({
       setHasMore(newElements.length === limit)
     } catch (err) {
       console.error('Failed to fetch elements:', err)
+      setHasMore(false)
     } finally {
       isFetching.current = false
       setLoading(false)
