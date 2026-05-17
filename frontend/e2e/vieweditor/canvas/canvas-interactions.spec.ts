@@ -29,7 +29,13 @@ test('dragging a node persists its position after debounce and reload', async ({
   const before = (await listPlacements(page, diagram.id)).find((placement) => placement.elementId === elements[0].id)
   expect(before).toBeTruthy()
 
-  await node.dragTo(page.locator('.react-flow__pane'), { targetPosition: { x: 620, y: 420 } })
+  const box = await node.boundingBox()
+  expect(box).toBeTruthy()
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box!.x + box!.width / 2 + 280, box!.y + box!.height / 2 + 180, { steps: 12 })
+  await page.mouse.up()
+
   await expect.poll(async () => {
     const after = (await listPlacements(page, diagram.id)).find((placement) => placement.elementId === elements[0].id)
     return Boolean(after && (Math.abs(after.positionX - before!.positionX) > 20 || Math.abs(after.positionY - before!.positionY) > 20))

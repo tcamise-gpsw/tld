@@ -5,6 +5,7 @@ import {
   gotoView,
   nodeByName,
   prepareStorage,
+  uniqueName,
 } from '../../helpers/vieweditor'
 
 test.beforeEach(async ({ page }) => {
@@ -25,12 +26,15 @@ test('navigates to a child view from the node zoom control and back from the chi
 })
 
 test('searches and opens a view from the explorer tree', async ({ page }) => {
-  const { diagram } = await createAndLoadDiagramWithNodes(page, 0, 'Explorer Source')
-  const target = await createApiView(page, 'Explorer Target View')
+  const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 1, 'Explorer Source')
+  const target = await createApiView(page, uniqueName('Explorer Target View'), elements[0].id)
   await gotoView(page, diagram.id)
+  await page.reload()
 
   await page.getByTestId('view-explorer-search').fill(target.name)
-  await page.getByTestId('view-explorer-tree-item').filter({ hasText: target.name }).click()
+  const targetItem = page.getByTestId('view-explorer-tree-item').filter({ hasText: target.name })
+  await expect(targetItem).toBeVisible()
+  await targetItem.click()
 
   await expect(page).toHaveURL(new RegExp(`/views/${target.id}$`))
 })

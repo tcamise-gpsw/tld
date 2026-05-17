@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test'
 import {
   createAndLoadDiagramWithNodes,
   createElement,
-  createPlacedElement,
   currentViewId,
   expectPlacement,
   libraryItemByName,

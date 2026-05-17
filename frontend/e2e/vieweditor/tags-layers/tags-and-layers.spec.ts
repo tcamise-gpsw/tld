@@ -21,6 +21,9 @@ test('creates a tag in the explorer and applies it to an element from the panel'
   await page.getByTestId('tag-manager-add-tag').click()
   await page.getByTestId('tag-manager-new-tag-name').fill(tag)
   await page.getByTestId('tag-manager-new-tag-submit').click()
+  const otherTags = page.getByRole('button', { name: /Other tags/ })
+  await expect(otherTags).toBeVisible()
+  await otherTags.click()
   await expect(page.getByTestId('tag-manager-tag').filter({ hasText: tag })).toBeVisible()
 
   await openElementPanel(page, elements[0].name)
