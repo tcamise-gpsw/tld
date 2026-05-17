@@ -20,14 +20,15 @@ test('edits element fields and persists them after reload', async ({ page }) => 
   const tag = uniqueName('panel-tag')
 
   await openElementPanel(page, original.name)
-  await page.getByTestId('element-panel-name-input').fill(nextName)
-  await page.getByTestId('element-panel-type-input').fill('service')
-  await page.getByTestId('element-panel-type-input').press('Enter')
-  await page.getByTestId('element-panel-description-input').fill('Edited from Playwright')
-  await page.getByTestId('element-panel-url-input').fill('https://example.com/element')
-  await page.getByTestId('tag-upsert-input').fill(tag)
-  await page.getByTestId('tag-upsert-input').press('Enter')
-  await page.getByTestId('element-panel-url-input').blur()
+  const panel = page.getByTestId('element-panel').filter({ visible: true }).last()
+  await panel.getByTestId('element-panel-name-input').fill(nextName)
+  await panel.getByTestId('element-panel-type-input').fill('service')
+  await panel.getByTestId('element-panel-type-input').press('Enter')
+  await panel.getByTestId('element-panel-description-input').fill('Edited from Playwright')
+  await panel.getByTestId('element-panel-url-input').fill('https://example.com/element')
+  await panel.getByTestId('tag-upsert-input').fill(tag)
+  await panel.getByTestId('tag-upsert-input').press('Enter')
+  await panel.getByTestId('element-panel-url-input').blur()
 
   await expect.poll(async () => {
     const element = await getElement(page, original.id)

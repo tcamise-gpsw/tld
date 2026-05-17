@@ -260,6 +260,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
   const [techResultIndex, setTechResultIndex] = useState(-1)
   const confirmPermanentDelete = useDisclosure()
   const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
+  const initializedElementIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     setTechResultIndex(-1)
@@ -268,7 +269,20 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
   useEffect(() => {
     let cancelled = false
 
+    if (!isOpen) {
+      initializedElementIdRef.current = null
+      return () => {
+        cancelled = true
+      }
+    }
+
     if (element) {
+      if (initializedElementIdRef.current === element.id) {
+        return () => {
+          cancelled = true
+        }
+      }
+      initializedElementIdRef.current = element.id
       setName(element.name)
       setDescription(element.description ?? '')
       setType(element.kind ?? '')
@@ -312,6 +326,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
           ))
         })
     } else {
+      initializedElementIdRef.current = null
       setName('')
       setDescription('')
       setType('')
@@ -405,7 +420,9 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
       savingRef.current = false
       if (pendingSaveRef.current) {
         pendingSaveRef.current = false
-        void saveIfDirtyRef.current?.()
+        window.setTimeout(() => {
+          void saveIfDirtyRef.current?.()
+        }, 0)
       }
     }
   }, [autoSaveEdit, element, name, buildPayloadAndFingerprint, onSave])
@@ -419,6 +436,14 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
       void saveIfDirtyRef.current?.()
     }, 0)
   }
+
+  useEffect(() => {
+    if (!autoSaveEdit || !element) return
+    const timer = window.setTimeout(() => {
+      void saveIfDirtyRef.current?.()
+    }, 150)
+    return () => window.clearTimeout(timer)
+  }, [autoSaveEdit, element, name, description, type, url, tags, technologyLinks, explicitLogoClear])
 
   const handleClose = useCallback(async () => {
     if (autoSaveEdit) {

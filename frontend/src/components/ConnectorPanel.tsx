@@ -102,9 +102,17 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
   const lastSavedFingerprintRef = useRef<string>('')
   const savingRef = useRef(false)
   const pendingSaveRef = useRef(false)
+  const initializedConnectorIdRef = useRef<number | null>(null)
 
   useEffect(() => {
+    if (!isOpen) {
+      initializedConnectorIdRef.current = null
+      return
+    }
+
     if (connector) {
+      if (initializedConnectorIdRef.current === connector.id) return
+      initializedConnectorIdRef.current = connector.id
       setLabel(connector.label ?? '')
       setDescription(connector.description ?? '')
       setRelType(connector.relationship ?? '')
@@ -123,6 +131,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
         url: connector.url ?? '',
       })
     } else {
+      initializedConnectorIdRef.current = null
       lastSavedFingerprintRef.current = ''
     }
   }, [connector, isOpen])
@@ -169,7 +178,9 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
       savingRef.current = false
       if (pendingSaveRef.current) {
         pendingSaveRef.current = false
-        void saveIfDirtyRef.current?.()
+        window.setTimeout(() => {
+          void saveIfDirtyRef.current?.()
+        }, 0)
       }
     }
   }, [autoSaveEdit, connector, viewId, buildPayloadAndFingerprint, onSave])
@@ -183,6 +194,14 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
       void saveIfDirtyRef.current?.()
     })
   }
+
+  useEffect(() => {
+    if (!autoSaveEdit || !connector) return
+    const timer = window.setTimeout(() => {
+      void saveIfDirtyRef.current?.()
+    }, 150)
+    return () => window.clearTimeout(timer)
+  }, [autoSaveEdit, connector, label, description, relType, direction, connectorType, url])
 
   const handleClose = useCallback(async () => {
     if (autoSaveEdit) {
