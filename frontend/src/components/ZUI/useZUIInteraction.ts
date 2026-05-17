@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import type { BBox, DiagramGroupLayout, LayoutNode, ZUIViewState, HoveredItem } from './types'
 import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY } from './renderer'
+import { hitTestZUIRenderedNode, warmZUIHitTestIndexes } from './hitTest'
 import {
   DEFAULT_SOURCE_HANDLE_SIDE,
   DEFAULT_TARGET_HANDLE_SIDE,
@@ -42,137 +43,7 @@ function normalizeViewState(view: ZUIViewState, canvasW: number, canvasH: number
   }
 }
 
-interface DeepestNodeResult {
-  node: LayoutNode
-  absX: number
-  absY: number
-  absW: number
-  absH: number
-  cumulativeScale: number
-}
-
 type EdgeRoutePoint = { x: number; y: number }
-
-interface NodeSpatialIndex {
-  cellSize: number
-  cells: Map<string, LayoutNode[]>
-}
-
-const NODE_INDEX_CELL_SIZE = 320
-const nodeSpatialIndexCache = new WeakMap<LayoutNode[], NodeSpatialIndex>()
-
-function getNodeSpatialIndex(nodes: LayoutNode[]): NodeSpatialIndex {
-  const cached = nodeSpatialIndexCache.get(nodes)
-  if (cached) return cached
-
-  const index: NodeSpatialIndex = { cellSize: NODE_INDEX_CELL_SIZE, cells: new Map() }
-  for (const node of nodes) {
-    const startX = Math.floor(node.worldX / index.cellSize)
-    const endX = Math.floor((node.worldX + node.worldW) / index.cellSize)
-    const startY = Math.floor(node.worldY / index.cellSize)
-    const endY = Math.floor((node.worldY + node.worldH) / index.cellSize)
-
-    for (let cx = startX; cx <= endX; cx++) {
-      for (let cy = startY; cy <= endY; cy++) {
-        const key = cellKey(cx, cy)
-        let bucket = index.cells.get(key)
-        if (!bucket) {
-          bucket = []
-          index.cells.set(key, bucket)
-        }
-        bucket.push(node)
-      }
-    }
-  }
-
-  nodeSpatialIndexCache.set(nodes, index)
-  return index
-}
-
-function getNodesAtPoint(nodes: LayoutNode[], worldX: number, worldY: number): LayoutNode[] {
-  const index = getNodeSpatialIndex(nodes)
-  return index.cells.get(cellKey(Math.floor(worldX / index.cellSize), Math.floor(worldY / index.cellSize))) ?? []
-}
-
-function warmNodeSpatialIndexes(nodes: LayoutNode[]): void {
-  getNodeSpatialIndex(nodes)
-  for (const node of nodes) {
-    if (node.children.length > 0) warmNodeSpatialIndexes(node.children)
-  }
-}
-
-function findDeepestAt(worldX: number, worldY: number, groups: DiagramGroupLayout[], view: ZUIViewState, thresholds: { start: number, end: number }): DeepestNodeResult | null {
-  for (const group of groups) {
-    if (worldX >= group.worldX && worldX <= group.worldX + group.worldW &&
-      worldY >= group.worldY && worldY <= group.worldY + group.worldH) {
-      // Root nodes in the group have absolute world coordinates already
-      return findDeepestInNodes(worldX, worldY, group.nodes, 0, 0, 1, 0, 0, view, thresholds)
-    }
-  }
-  return null
-}
-
-function findDeepestInNodes(
-  worldX: number,
-  worldY: number,
-  nodes: LayoutNode[],
-  parentAbsX: number,
-  parentAbsY: number,
-  parentAbsScale: number,
-  parentChildOffsetX: number,
-  parentChildOffsetY: number,
-  view: ZUIViewState,
-  thresholds: { start: number, end: number }
-): DeepestNodeResult | null {
-  const candidates = getNodesAtPoint(nodes, worldX, worldY)
-  for (const node of candidates) {
-    if (worldX >= node.worldX && worldX <= node.worldX + node.worldW &&
-      worldY >= node.worldY && worldY <= node.worldY + node.worldH) {
-
-      // Screen width of this node at current zoom level
-      const worldW = node.worldW * parentAbsScale
-      const screenW = worldW * view.zoom
-
-      // Visibility check: if node is too small to be drawn, skip it
-      if (screenW < 2) continue
-
-      // Absolute world position of THIS node
-      const absX = parentAbsX + (node.worldX - parentChildOffsetX) * parentAbsScale
-      const absY = parentAbsY + (node.worldY - parentChildOffsetY) * parentAbsScale
-      const absW = worldW
-      const absH = node.worldH * parentAbsScale
-
-      const childX = (worldX - node.worldX) / node.childScale + node.childOffsetX
-      const childY = (worldY - node.worldY) / node.childScale + node.childOffsetY
-
-      const hasChildren = node.children && node.children.length > 0
-      const t = hasChildren ? Math.max(0, Math.min(1, (screenW - thresholds.start) / (thresholds.end - thresholds.start))) : 0
-
-      // If children are significantly visible, descend
-      if (t > 0.05) {
-        const deeper = findDeepestInNodes(
-          childX,
-          childY,
-          node.children,
-          absX,
-          absY,
-          parentAbsScale * node.childScale,
-          node.childOffsetX,
-          node.childOffsetY,
-          view,
-          thresholds
-        )
-        if (deeper) return deeper
-      }
-
-      // If the node has fully transitioned to its children, the parent itself is no longer hoverable
-      if (t > 0.95) return null
-
-      return { node, absX, absY, absW, absH, cumulativeScale: parentAbsScale }
-    }
-  }
-  return null
-}
 
 function findHoveredGroup(worldX: number, worldY: number, groups: DiagramGroupLayout[], view: ZUIViewState): DiagramGroupLayout | null {
   for (const group of groups) {
@@ -552,7 +423,7 @@ function clampZoom(z: number, prevZ: number, maxZ: number): number {
 }
 
 /** Zoom toward/away from a screen-space focal point. */
-function zoomAround(
+export function zoomAround(
   view: ZUIViewState,
   focalX: number,
   focalY: number,
@@ -601,6 +472,7 @@ export function useZUIInteraction(
   onPan?: () => void,
   isMobile: boolean = false,
   resolveHoveredProxyItem?: (worldX: number, worldY: number, view: ZUIViewState, canvasW: number) => HoveredItem | null,
+  hiddenTags: string[] = [],
 ): ZUIInteraction {
   const [viewState, setViewStateInternal] = useState<ZUIViewState>(initialView)
   const [hoveredItem, setHoveredItemInternal] = useState<HoveredItem | null>(null)
@@ -644,6 +516,7 @@ export function useZUIInteraction(
   // ── Refs for stable event handlers ──────────────────────────────
   const viewStateRef = useRef<ZUIViewState>(initialView)
   const groupsRef = useRef<DiagramGroupLayout[]>(groups)
+  const hiddenTagsRef = useRef<ReadonlySet<string>>(new Set(hiddenTags))
   const edgeSpatialIndexRef = useRef<EdgeSpatialIndex | null>(null)
   if (edgeSpatialIndexRef.current === null) {
     edgeSpatialIndexRef.current = buildEdgeSpatialIndex(groups)
@@ -656,12 +529,16 @@ export function useZUIInteraction(
     groupsRef.current = groups
     edgeSpatialIndexRef.current = buildEdgeSpatialIndex(groups)
     for (const group of groups) {
-      warmNodeSpatialIndexes(group.nodes)
+      warmZUIHitTestIndexes(group.nodes)
     }
     bboxRef.current = bbox
     onZoomRef.current = onZoom
     onPanRef.current = onPan
   }, [groups, bbox, onZoom, onPan])
+
+  useEffect(() => {
+    hiddenTagsRef.current = new Set(hiddenTags)
+  }, [hiddenTags])
 
   const [lastCanvasW, setLastCanvasW] = useState(0)
 
@@ -791,18 +668,7 @@ export function useZUIInteraction(
         factor = Math.max(0.85, Math.min(1.15, factor))
 
         setViewState((prev) => {
-          const worldX = screenToWorldX(focalX, prev)
-          const worldY = screenToWorldY(focalY, prev)
-          const thresholds = getExpandThresholds(rect.width)
-          const deepest = findDeepestAt(worldX, worldY, groupsRef.current, prev, thresholds)
-
-          let currentMaxZ = maxZoomRef.current
-
-          if (deepest && (!deepest.node.children || deepest.node.children.length === 0)) {
-            currentMaxZ = thresholds.end / (deepest.node.worldW * deepest.cumulativeScale)
-          }
-
-          return zoomAround(prev, focalX, focalY, factor, currentMaxZ)
+          return zoomAround(prev, focalX, focalY, factor, maxZoomRef.current)
         })
         onZoomRef.current?.()
       } else if (!isMobile) {
@@ -844,7 +710,7 @@ export function useZUIInteraction(
       const worldY = screenToWorldY(screenY, view)
       const thresholds = getExpandThresholds(rect.width)
 
-      const deepest = findDeepestAt(worldX, worldY, groupsRef.current, view, thresholds)
+      const deepest = hitTestZUIRenderedNode(worldX, worldY, groupsRef.current, view, thresholds, hiddenTagsRef.current)
       if (deepest) {
         const { node, absX, absY, absW, absH } = deepest
         setHoveredItem({
@@ -894,18 +760,7 @@ export function useZUIInteraction(
       setHoveredItem(null, true) // Clear popover immediately on double-click zoom
 
       setViewState((prev) => {
-        const worldX = screenToWorldX(focalX, prev)
-        const worldY = screenToWorldY(focalY, prev)
-        const thresholds = getExpandThresholds(rect.width)
-        const deepest = findDeepestAt(worldX, worldY, groupsRef.current, prev, thresholds)
-
-        let currentMaxZ = maxZoomRef.current
-
-        if (deepest && (!deepest.node.children || deepest.node.children.length === 0)) {
-          currentMaxZ = thresholds.end / (deepest.node.worldW * deepest.cumulativeScale)
-        }
-
-        return zoomAround(prev, focalX, focalY, 2, currentMaxZ)
+        return zoomAround(prev, focalX, focalY, 2, maxZoomRef.current)
       })
       onZoomRef.current?.()
     }
@@ -964,19 +819,7 @@ export function useZUIInteraction(
 
           if (isFinite(factor) && factor > 0) {
             setViewState((prev) => {
-              const rect = el!.getBoundingClientRect()
-              const worldX = screenToWorldX(mid.x, prev)
-              const worldY = screenToWorldY(mid.y, prev)
-              const thresholds = getExpandThresholds(rect.width)
-              const deepest = findDeepestAt(worldX, worldY, groupsRef.current, prev, thresholds)
-
-              let currentMaxZ = maxZoomRef.current
-
-              if (deepest && (!deepest.node.children || deepest.node.children.length === 0)) {
-                currentMaxZ = thresholds.end / (deepest.node.worldW * deepest.cumulativeScale)
-              }
-
-              const zoomed = zoomAround(prev, mid.x, mid.y, factor, currentMaxZ)
+              const zoomed = zoomAround(prev, mid.x, mid.y, factor, maxZoomRef.current)
               return { ...zoomed, x: zoomed.x + dx, y: zoomed.y + dy }
             })
             onZoomRef.current?.()

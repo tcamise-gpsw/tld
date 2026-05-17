@@ -214,8 +214,8 @@ export function rawCameraView(view: ZUIViewState): ZUIViewState {
   }
 }
 
-function connectorAlpha(alpha: number): number {
-  return clamp(alpha * 1.15, CONNECTOR_MIN_ALPHA, CONNECTOR_MAX_ALPHA)
+function connectorAlpha(alpha: number, minAlpha = CONNECTOR_MIN_ALPHA): number {
+  return clamp(alpha * 1.15, minAlpha, CONNECTOR_MAX_ALPHA)
 }
 
 function normalizeEdgeRouteType(type: string | null | undefined): 'bezier' | 'straight' | 'step' | 'smoothstep' {
@@ -835,31 +835,23 @@ function drawNode(
   }
 
   // ── Background ───────────────────────────────────────────────────
-  // We draw two backgrounds:
-  // 1. A base background (canvasBg) that remains opaque (total 'alpha').
-  //    This hides connectors from parent levels.
-  // 2. The node's branded background (nodeBg) that fades out as we zoom in ('parentAlpha').
-  //    This makes the nested diagram appear on a clean canvas background.
-  if (alpha > 0.01) {
+  // Parent visuals fade out completely as child content takes over. Parent-level
+  // edges also fade in drawEdges, so this background no longer needs to mask them.
+  if (parentAlpha > 0.01) {
     ctx.save()
     traceShape()
 
-    // Base background (20% transparent to allow slight ghosting of connectors)
-    ctx.globalAlpha = alpha * 0.8
+    ctx.globalAlpha = parentAlpha * 0.8
     ctx.fillStyle = canvasBg
     ctx.fill()
 
-    // Fading node background
-    if (parentAlpha > 0.01) {
-      ctx.globalAlpha = parentAlpha * 0.8
-      ctx.fillStyle = nodeBg
-      ctx.fill()
+    ctx.fillStyle = nodeBg
+    ctx.fill()
 
-      // Portal overlay: accent-tinted fill derived from --accent CSS var
-      if (node.isPortal) {
-        ctx.fillStyle = portalTintColor(accent, 0.10)
-        ctx.fill()
-      }
+    // Portal overlay: accent-tinted fill derived from --accent CSS var
+    if (node.isPortal) {
+      ctx.fillStyle = portalTintColor(accent, 0.10)
+      ctx.fill()
     }
 
     ctx.restore()
@@ -896,27 +888,31 @@ function drawNode(
     }
   }
   // ── Border - portal uses accent long-dash; others use type-tinted border ─
-  ctx.save()
-  ctx.globalAlpha = alpha
-  traceShape()
-  if (node.isPortal) {
-    // Solid accent border per latest request
-    ctx.strokeStyle = accent
-    ctx.lineWidth = 1 / drawZoom
-    ctx.setLineDash([])
-  } else {
-    ctx.strokeStyle = borderColor
-    ctx.lineWidth = 1.5 / drawZoom
-    if (t > 0.15) {
-      const dashLen = 6
-      ctx.setLineDash([dashLen, dashLen * 0.7])
-    } else {
+  // Keep expanded parent outlines visible as navigation/orientation markers even
+  // after the parent body is no longer hoverable.
+  if (alpha > 0.01) {
+    ctx.save()
+    ctx.globalAlpha = alpha
+    traceShape()
+    if (node.isPortal) {
+      // Solid accent border per latest request
+      ctx.strokeStyle = accent
+      ctx.lineWidth = 1 / drawZoom
       ctx.setLineDash([])
+    } else {
+      ctx.strokeStyle = borderColor
+      ctx.lineWidth = 1.5 / drawZoom
+      if (t > 0.15) {
+        const dashLen = 6
+        ctx.setLineDash([dashLen, dashLen * 0.7])
+      } else {
+        ctx.setLineDash([])
+      }
     }
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.restore()
   }
-  ctx.stroke()
-  ctx.setLineDash([])
-  ctx.restore()
 
   // ── Label - portal shows "PORTAL" badge in accent; otherwise type badge ─
   if (screenW >= MIN_LABEL_PX && parentAlpha > 0.1) {
@@ -1224,6 +1220,11 @@ function getDrawEdgesLayoutMetadata(nodes: LayoutNode[]): DrawEdgesLayoutMetadat
   return metadata
 }
 
+function nodeSelfAlphaFactor(node: LayoutNode, zoom: number, thresholds: { start: number; end: number }): number {
+  if (!node.children || node.children.length === 0) return 1
+  return 1 - transitionT(node.worldW * zoom, thresholds.start, thresholds.end)
+}
+
 function drawEdges(
   ctx: CanvasRenderingContext2D,
   nodes: LayoutNode[],
@@ -1248,6 +1249,13 @@ function drawEdges(
         const tgtHidden = target.tags.length > 0 && target.tags.some(t => currentHiddenTags.has(t))
         if (srcHidden || tgtHidden) continue
       }
+
+      const endpointAlphaFactor = Math.min(
+        nodeSelfAlphaFactor(node, zoom, thresholds),
+        nodeSelfAlphaFactor(target, zoom, thresholds),
+      )
+      const edgeAlpha = alpha * endpointAlphaFactor
+      if (edgeAlpha < 0.05) continue
 
       const dir = edge.direction ?? 'forward'
       const type = normalizeEdgeRouteType(edge.type)
@@ -1314,9 +1322,9 @@ function drawEdges(
       )
       ctx.globalAlpha = versionPreviewActive && !edgeChange
         ? edgeContext
-          ? Math.max(alpha * 0.28, 0.12)
-          : Math.max(alpha * 0.08, 0.04)
-        : connectorAlpha(alpha)
+          ? Math.max(edgeAlpha * 0.28, 0.12 * endpointAlphaFactor)
+          : Math.max(edgeAlpha * 0.08, 0.04 * endpointAlphaFactor)
+        : connectorAlpha(edgeAlpha, CONNECTOR_MIN_ALPHA * endpointAlphaFactor)
       ctx.strokeStyle = edgeChange === 'added'
         ? '#68d391'
         : edgeChange === 'deleted'
@@ -1500,7 +1508,7 @@ function drawEdges(
         )
 
         ctx.save()
-        ctx.globalAlpha = alpha * 0.95
+        ctx.globalAlpha = edgeAlpha * 0.95
         ctx.fillStyle = labelBg
         const px = 4 / zoom, py = 2 / zoom
         ctx.beginPath()
