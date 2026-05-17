@@ -309,6 +309,37 @@ function mapDiagram(d: ProtoDiagram): ViewTreeNode {
   }
 }
 
+function findViewPath(nodes: ViewTreeNode[], viewId: number, path: ViewTreeNode[] = []): ViewTreeNode[] | null {
+  for (const node of nodes) {
+    const nextPath = [...path, node]
+    if (node.id === viewId) return nextPath
+    const found = findViewPath(node.children ?? [], viewId, nextPath)
+    if (found) return found
+  }
+  return null
+}
+
+function pruneDescendants(node: ViewTreeNode, remainingDepth: number): ViewTreeNode {
+  return {
+    ...node,
+    children: remainingDepth <= 0
+      ? []
+      : (node.children ?? []).map((child) => pruneDescendants(child, remainingDepth - 1)),
+  }
+}
+
+function pruneTreeAround(nodes: ViewTreeNode[], viewId: number, ancestorLevels: number, descendantLevels: number): ViewTreeNode[] {
+  const path = findViewPath(nodes, viewId)
+  if (!path) return []
+
+  const start = Math.max(0, path.length - 1 - ancestorLevels)
+  let scoped = pruneDescendants(path[path.length - 1], descendantLevels)
+  for (let index = path.length - 2; index >= start; index -= 1) {
+    scoped = { ...path[index], children: [scoped] }
+  }
+  return [scoped]
+}
+
 function diagramToView(d: ProtoDiagram): View {
   return {
     id: Number(d.id),
@@ -649,13 +680,15 @@ export const api = {
           }))
         }),
 
-      content: (id: number): Promise<{ placements: PlacedElement[]; connectors: Connector[] }> =>
+      content: (id: number): Promise<{ view?: ViewTreeNode; placements: PlacedElement[]; connectors: Connector[] }> =>
         rpc(async () => {
           const res = await workspaceClient.getView({ viewId: id, includeContent: true })
           const json = j<{
+            view?: ProtoDiagram
             content?: { placements?: Record<string, unknown>[]; connectors?: Record<string, unknown>[] }
           }>(GetViewResponseSchema, res)
           return {
+            view: json.view ? mapDiagram(json.view) : undefined,
             placements: (json.content?.placements ?? []).map(protoPlacedElement),
             connectors: (json.content?.connectors ?? []).map(protoConnector),
           }
@@ -704,29 +737,8 @@ export const api = {
       ): Promise<ViewTreeNode[]> => {
         const ancestorLevels = opts.ancestorLevels ?? 2
         const descendantLevels = opts.descendantLevels ?? 2
-        const current = await api.workspace.views.get(viewId)
-
-        const ancestors: ViewTreeNode[] = []
-        let cursor: ViewTreeNode = current
-        for (let depth = 0; depth < ancestorLevels && cursor.parent_view_id != null; depth += 1) {
-          const parent = await api.workspace.views.get(cursor.parent_view_id)
-          ancestors.unshift(parent)
-          cursor = parent
-        }
-
-        const withDescendants = async (node: ViewTreeNode, remainingDepth: number): Promise<ViewTreeNode> => {
-          const scoped: ViewTreeNode = { ...node, children: [] }
-          if (remainingDepth <= 0) return scoped
-          const children = await api.workspace.views.treeChildren(node.id)
-          scoped.children = await Promise.all(children.map((child) => withDescendants(child, remainingDepth - 1)))
-          return scoped
-        }
-
-        let scoped = await withDescendants(current, descendantLevels)
-        for (let index = ancestors.length - 1; index >= 0; index -= 1) {
-          scoped = { ...ancestors[index], children: [scoped] }
-        }
-        return [scoped]
+        const tree = await api.workspace.views.tree()
+        return pruneTreeAround(tree, viewId, ancestorLevels, descendantLevels)
       },
 
       gridData: (): Promise<{

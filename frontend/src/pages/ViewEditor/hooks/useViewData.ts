@@ -94,6 +94,15 @@ type ConnectorLayout = {
   targetHandleSlot: number
 }
 
+function findViewInTree(nodes: ViewTreeNode[], viewId: number): ViewTreeNode | null {
+  for (const node of nodes) {
+    if (node.id === viewId) return node
+    const found = findViewInTree(node.children ?? [], viewId)
+    if (found) return found
+  }
+  return null
+}
+
 function buildConnectorLayouts(connectors: Connector[], elementMap: Map<number, PlacedElement>): ConnectorLayout[] {
   const filtered = connectors.filter((connector) =>
     elementMap.has(connector.source_element_id) && elementMap.has(connector.target_element_id),
@@ -242,15 +251,16 @@ export function useViewData({
     enabled: viewId !== null,
     queryFn: async () => {
       if (viewId === null) throw new Error('Missing view id')
-      const [diag, content, tree] = await Promise.all([
-        api.workspace.views.get(viewId),
+      const [content, tree] = await Promise.all([
         api.workspace.views.content(viewId),
         api.workspace.views.treeAround(viewId, { ancestorLevels: 2, descendantLevels: 2 }),
       ])
       const viewElements = content.placements || []
       const connectors = content.connectors || []
+      const view = content.view ?? findViewInTree(tree, viewId)
+      if (!view) throw new Error('View not found')
       return {
-        view: diag,
+        view,
         viewElements,
         connectors,
         treeData: tree,
