@@ -12,6 +12,8 @@ on:
 permissions:
   contents: read
   checks: write
+  issues: write
+  pull-requests: write
 
 jobs:
   unit-tests:
@@ -32,6 +34,21 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend assets
+        working-directory: frontend
+        run: npm run build:app
+
       - name: Verify dependencies
         run: |
           go mod tidy
@@ -46,8 +63,8 @@ jobs:
             ./...
 
       - name: Publish Test Results
-        if: success() || failure()
-        uses: dorny/test-reporter@v1
+        if: ${{ !cancelled() }}
+        uses: dorny/test-reporter@v3
         with:
           name: Go Unit Tests
           path: results.xml
@@ -72,7 +89,7 @@ jobs:
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
@@ -98,4 +115,13 @@ jobs:
         env:
           TLD_E2E_BINARY: /tmp/tld-e2e
           TLD_E2E_DATA_DIR: /tmp/tld-playwright-${{ github.run_id }}
-        run: npm run test:e2e
+          PLAYWRIGHT_JSON_OUTPUT_NAME: report.json
+        run: npx playwright test -c playwright.config.ts --reporter=json,line
+
+      - name: Publish Playwright report
+        if: ${{ github.event_name == 'pull_request' && !cancelled() }}
+        uses: sidharthv96/playwright-report-action@v2.0-rc.5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          coverage-file: frontend/report.json
+          skip-step: all
