@@ -32,6 +32,25 @@ func (s *Store) Layers(ctx context.Context, viewID int64) ([]ViewLayer, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) AllLayers(ctx context.Context) ([]ViewLayer, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, view_id, name, tags, color, created_at, updated_at FROM view_layers ORDER BY view_id, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]ViewLayer, 0)
+	for rows.Next() {
+		var rawTags string
+		var item ViewLayer
+		if err := rows.Scan(&item.ID, &item.DiagramID, &item.Name, &rawTags, &item.Color, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.Tags = parseStrings(rawTags)
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) CreateLayer(ctx context.Context, viewID int64, name string, tags []string, color *string) (ViewLayer, error) {
 	if err := s.ensureTagColors(ctx, tags); err != nil {
 		return ViewLayer{}, err

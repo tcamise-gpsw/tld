@@ -299,3 +299,40 @@ func TestConnectorAdapterPreservesHandlesDefaultsAndViewFiltering(t *testing.T) 
 		t.Fatalf("connector list mismatch: all=%+v inView=%+v", all, inView)
 	}
 }
+
+func TestListAllViewLayersBatchesAndPreservesTreeOrder(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	db := sqliteStore.DB()
+	if _, err := db.Exec(`
+		INSERT INTO elements(id, name, tags, technology_connectors, created_at, updated_at)
+		VALUES (120, 'Service', '[]', '[]', 'now', 'now');
+		INSERT INTO views(id, owner_element_id, name, description, level_label, level, created_at, updated_at)
+		VALUES
+			(120, NULL, 'System', NULL, 'System', 1, 'now', 'now'),
+			(121, 120, 'Service detail', NULL, 'Service', 2, 'now', 'now');
+		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
+		VALUES (120, 120, 0, 0, 'now', 'now');
+		INSERT INTO view_layers(id, view_id, name, tags, color, created_at, updated_at)
+		VALUES
+			(120, 120, 'Root A', '["api"]', '#111111', 'now', 'now'),
+			(121, 120, 'Root B', '["db"]', '#222222', 'now', 'now'),
+			(122, 121, 'Child A', '["worker"]', '#333333', 'now', 'now');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	layers, err := NewAPIAdapter(sqliteStore).ListAllViewLayers(context.Background(), uuid.Nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, layer := range layers {
+		switch layer.GetId() {
+		case 120, 121, 122:
+			names = append(names, layer.GetName())
+		}
+	}
+	if strings.Join(names, ",") != "Root A,Root B,Child A" {
+		t.Fatalf("layer order = %v, want root layers before child layers", names)
+	}
+}
