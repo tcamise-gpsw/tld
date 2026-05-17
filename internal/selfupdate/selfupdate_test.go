@@ -48,8 +48,8 @@ func TestCheckUsesFreshCachedState(t *testing.T) {
 
 func TestCheckFetchesLatestReleaseWhenCacheIsStale(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/Mertcikla/tld/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"tag_name":"v2.0.4","html_url":"https://github.com/Mertcikla/tld/releases/tag/v2.0.4","assets":[{"name":"` + assetName() + `","browser_download_url":"https://example.test/asset"}]}`))
+	mux.HandleFunc("/repos/Mertcikla/tld/releases", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name":"v2.0.4","prerelease":false,"html_url":"https://github.com/Mertcikla/tld/releases/tag/v2.0.4","assets":[{"name":"` + assetName() + `","browser_download_url":"https://example.test/asset"}]}]`))
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()

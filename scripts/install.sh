@@ -33,8 +33,8 @@ if [ -z "$INSTALL_DIR" ]; then
     fi
 fi
 
-# Get the latest release version
-VERSION=$(curl -s "https://api.github.com/repos/Mertcikla/tld/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+# Get the latest stable release version
+VERSION=$(curl -s "https://api.github.com/repos/Mertcikla/tld/releases" | grep '"tag_name":' | grep -vE "beta|alpha|rc" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
 
 if [ -z "$VERSION" ]; then
     echo "Could not find latest version for Mertcikla/tld"

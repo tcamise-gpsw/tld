@@ -64,10 +64,11 @@ if ([string]::IsNullOrWhiteSpace($env:INSTALL_DIR)) {
     $InstallDir = $env:INSTALL_DIR
 }
 
-$LatestReleaseUrl = "https://api.github.com/repos/$Repo/releases/latest"
-Write-Host "Finding latest tld release..."
-$Release = Invoke-RestMethod -Uri $LatestReleaseUrl -Headers @{ "User-Agent" = "tld-installer" }
-$Version = $Release.tag_name
+$ReleasesUrl = "https://api.github.com/repos/$Repo/releases"
+Write-Host "Finding latest stable tld release..."
+$Releases = Invoke-RestMethod -Uri $ReleasesUrl -Headers @{ "User-Agent" = "tld-installer" }
+$StableRelease = $Releases | Where-Object { $_.tag_name -notmatch "beta|alpha|rc" } | Select-Object -First 1
+$Version = $StableRelease.tag_name
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     throw "Could not find latest version for $Repo"

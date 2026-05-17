@@ -47,9 +47,10 @@ type Status struct {
 }
 
 type releaseInfo struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
-	Assets  []struct {
+	TagName    string `json:"tag_name"`
+	HTMLURL    string `json:"html_url"`
+	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 	} `json:"assets"`
@@ -201,7 +202,7 @@ func normalizeOptions(opts Options) Options {
 }
 
 func fetchLatest(ctx context.Context, opts Options) (releaseInfo, error) {
-	url := strings.TrimRight(opts.APIBaseURL, "/") + "/repos/" + opts.Repo + "/releases/latest"
+	url := strings.TrimRight(opts.APIBaseURL, "/") + "/repos/" + opts.Repo + "/releases"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return releaseInfo{}, err
@@ -213,16 +214,32 @@ func fetchLatest(ctx context.Context, opts Options) (releaseInfo, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return releaseInfo{}, fmt.Errorf("latest release status %d", resp.StatusCode)
+		return releaseInfo{}, fmt.Errorf("releases status %d", resp.StatusCode)
 	}
-	var release releaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	var releases []releaseInfo
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return releaseInfo{}, err
 	}
-	if strings.TrimSpace(release.TagName) == "" {
-		return releaseInfo{}, errors.New("latest release has no tag_name")
+
+	for _, release := range releases {
+		if release.Prerelease {
+			continue
+		}
+		tag := strings.TrimSpace(release.TagName)
+		if tag == "" {
+			continue
+		}
+
+		// Skip if it contains beta, alpha, or rc
+		lowerTag := strings.ToLower(tag)
+		if strings.Contains(lowerTag, "beta") || strings.Contains(lowerTag, "alpha") || strings.Contains(lowerTag, "rc") {
+			continue
+		}
+
+		return release, nil
 	}
-	return release, nil
+
+	return releaseInfo{}, errors.New("no stable release found")
 }
 
 func shouldSkipVersion(version string) bool {
