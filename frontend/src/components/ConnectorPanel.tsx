@@ -142,7 +142,11 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
   const saveIfDirty = useCallback(async () => {
     if (!autoSaveEdit || !connector) return
 
-    if (savingRef.current || viewId == null) return
+    if (viewId == null) return
+    if (savingRef.current) {
+      pendingSaveRef.current = true
+      return
+    }
 
     const { payload, fingerprint } = await buildPayloadAndFingerprint()
     if (fingerprint === lastSavedFingerprintRef.current) return
@@ -165,7 +169,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
       savingRef.current = false
       if (pendingSaveRef.current) {
         pendingSaveRef.current = false
-        void saveIfDirty()
+        void saveIfDirtyRef.current?.()
       }
     }
   }, [autoSaveEdit, connector, viewId, buildPayloadAndFingerprint, onSave])
