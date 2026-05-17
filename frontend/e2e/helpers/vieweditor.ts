@@ -2,17 +2,23 @@ import { expect, type Locator, type Page } from '@playwright/test'
 
 export const onboardingStorage = {
   editor: 'diagrameditor_tutorial_v1_core',
+  explore: 'explore_tutorial_v1_core',
+  explorePage: 'explore_page_tutorial_v1_core',
   viewGrid: 'viewgrid_tutorial_v2_core',
   shown: 'onboarding_shown',
   dependencies: 'dependencies_tutorial_v1_core',
+  sharedZoom: 'shared_zoom_onboarding_dismissed',
 }
 
 export async function prepareStorage(page: Page) {
   await page.addInitScript((keys) => {
     localStorage.setItem(keys.editor, '1')
+    localStorage.setItem(keys.explore, '1')
+    localStorage.setItem(keys.explorePage, '1')
     localStorage.setItem(keys.viewGrid, '1')
     localStorage.setItem(keys.shown, '1')
     localStorage.setItem(keys.dependencies, '1')
+    localStorage.setItem(keys.sharedZoom, 'true')
     localStorage.setItem('diag:libraryOpen', 'true')
     localStorage.setItem('diag:explorerOpen', 'true')
     localStorage.setItem('diag:snapToGrid', 'false')

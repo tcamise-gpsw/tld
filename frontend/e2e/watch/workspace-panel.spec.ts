@@ -17,6 +17,13 @@ async function openWorkspacePanel(page: import('@playwright/test').Page) {
   await expect(page.getByTestId('workspace-panel')).toBeVisible()
 }
 
+async function expectWatchSocketReady(page: import('@playwright/test').Page) {
+  await expect.poll(async () => page.evaluate(() => {
+    const sent = (window as unknown as { __TLD_WATCH_SENT__?: string[] }).__TLD_WATCH_SENT__ ?? []
+    return sent.some((item) => JSON.parse(item).type === 'watch.status')
+  })).toBe(true)
+}
+
 test('inactive workspace versions panel opens from the top bar', async ({ page }) => {
   await mockWatchRuntime(page, { active: false })
   await page.goto('/views')
@@ -44,18 +51,18 @@ test('watch pause resume and stop send websocket commands', async ({ page }) => 
   await mockWatchRuntime(page)
   await page.goto('/views')
   await openWorkspacePanel(page)
+  await expectWatchSocketReady(page)
 
-  await page.getByTestId('workspace-watch-pause').click({ force: true })
-  await page.getByTestId('workspace-watch-resume').click({ force: true })
-  await page.getByTestId('workspace-watch-stop').click({ force: true })
+  await page.getByTestId('workspace-watch-pause').click()
+  await expect(page.getByTestId('workspace-watch-resume')).toBeVisible()
+  await page.getByTestId('workspace-watch-resume').click()
+  await expect(page.getByTestId('workspace-watch-pause')).toBeVisible()
+  await page.getByTestId('workspace-watch-stop').click()
 
-  const sentTypes = await page.evaluate(() => {
+  await expect.poll(async () => page.evaluate(() => {
     const sent = (window as unknown as { __TLD_WATCH_SENT__?: string[] }).__TLD_WATCH_SENT__ ?? []
     return sent.map((item) => JSON.parse(item).type)
-  })
-  expect(sentTypes).toContain('watch.pause')
-  expect(sentTypes).toContain('watch.resume')
-  expect(sentTypes).toContain('watch.stop')
+  })).toEqual(expect.arrayContaining(['watch.pause', 'watch.resume', 'watch.stop']))
 })
 
 test('diff preview list can be expanded and toggled on', async ({ page }) => {
