@@ -38,6 +38,13 @@ describe('ThemeProvider', () => {
     let accentRenders = 0
     let accentValue: ReturnType<typeof useAccentColor> | null = null
 
+    function currentAccentValue() {
+      if (!accentValue) {
+        throw new Error('Accent consumer did not render')
+      }
+      return accentValue
+    }
+
     function Controls() {
       controls = useTheme()
       return null
@@ -58,7 +65,7 @@ describe('ThemeProvider', () => {
       )
     })
 
-    const initialAccentValue = accentValue
+    const initialAccentValue = currentAccentValue()
     expect(accentRenders).toBe(1)
 
     act(() => {
@@ -69,13 +76,13 @@ describe('ThemeProvider', () => {
     })
 
     expect(accentRenders).toBe(1)
-    expect(accentValue).toBe(initialAccentValue)
+    expect(currentAccentValue()).toBe(initialAccentValue)
 
     act(() => {
       controls?.setAccent('#ff3366')
     })
 
     expect(accentRenders).toBe(2)
-    expect(accentValue?.accent).toBe('#ff3366')
+    expect(currentAccentValue().accent).toBe('#ff3366')
   })
 })
