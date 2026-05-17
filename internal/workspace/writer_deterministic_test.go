@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestSave_Deterministic(t *testing.T) {

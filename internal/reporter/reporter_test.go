@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
-	"github.com/mertcikla/tld/internal/planner"
-	"github.com/mertcikla/tld/internal/reporter"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/planner"
+	"github.com/mertcikla/tld/v2/internal/reporter"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func emptyPlan(t *testing.T) *planner.Plan {
@@ -66,10 +66,10 @@ func TestRenderExecutionMarkdown_SummaryTable(t *testing.T) {
 	if !strings.Contains(out, "## Planned vs Created") {
 		t.Errorf("missing summary section: %q", out)
 	}
-	if !strings.Contains(out, "| Elements | 3 | 3 |") {
+	if !strings.Contains(out, "| Elements   | 3      | 3      |") {
 		t.Errorf("wrong element count: %q", out)
 	}
-	if !strings.Contains(out, "| Views | 2 | 2 |") {
+	if !strings.Contains(out, "| Views      | 2      | 2      |") {
 		t.Errorf("wrong view count: %q", out)
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	hashidlib "github.com/mertcikla/tld/internal/hashids"
-	"github.com/mertcikla/tld/internal/workspace"
+	hashidlib "github.com/mertcikla/tld/v2/internal/hashids"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,6 +26,34 @@ func TestSlugify(t *testing.T) {
 		if got := workspace.Slugify(tc.in); got != tc.want {
 			t.Fatalf("Slugify(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestValidateRef(t *testing.T) {
+	tests := []struct {
+		name      string
+		ref       string
+		allowRoot bool
+		wantErr   bool
+	}{
+		{name: "slug", ref: "api-service"},
+		{name: "dots and underscores", ref: "api.v1_service"},
+		{name: "empty", ref: "", wantErr: true},
+		{name: "uppercase", ref: "API", wantErr: true},
+		{name: "colon", ref: "api:db", wantErr: true},
+		{name: "root resource", ref: "root", wantErr: true},
+		{name: "root parent", ref: "root", allowRoot: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := workspace.ValidateRef(tt.ref, tt.allowRoot)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
@@ -69,6 +97,59 @@ func TestUpsertElement_CreatesAndMergesPlacements(t *testing.T) {
 	}
 	if element.Placements[0].ParentRef != "root" || element.Placements[0].PositionX != 30 || element.Placements[0].PositionY != 40 {
 		t.Fatalf("root placement not updated: %+v", element.Placements[0])
+	}
+}
+
+func TestUpsertElement_WritesExplicitFalseHasView(t *testing.T) {
+	dir := t.TempDir()
+	if err := workspace.UpsertElement(dir, "api", &workspace.Element{
+		Name:       "API",
+		Kind:       "service",
+		HasView:    false,
+		Placements: []workspace.ViewPlacement{{ParentRef: "root"}},
+	}); err != nil {
+		t.Fatalf("UpsertElement: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "elements.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "has_view: false") {
+		t.Fatalf("elements.yaml should make missing child view explicit:\n%s", data)
+	}
+}
+
+func TestUpsertElement_MarksExistingParentAsHavingView(t *testing.T) {
+	dir := t.TempDir()
+	if err := workspace.UpsertElement(dir, "platform", &workspace.Element{
+		Name:       "Platform",
+		Kind:       "workspace",
+		Placements: []workspace.ViewPlacement{{ParentRef: "root"}},
+	}); err != nil {
+		t.Fatalf("parent UpsertElement: %v", err)
+	}
+	if err := workspace.UpsertElement(dir, "api", &workspace.Element{
+		Name:       "API",
+		Kind:       "service",
+		Placements: []workspace.ViewPlacement{{ParentRef: "platform"}},
+	}); err != nil {
+		t.Fatalf("child UpsertElement: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "elements.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]workspace.Element
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got["platform"].HasView {
+		t.Fatalf("parent should have a view after child placement, got %+v\n%s", got["platform"], data)
+	}
+	if got["api"].HasView {
+		t.Fatalf("child should not get its own view by default, got %+v\n%s", got["api"], data)
 	}
 }
 

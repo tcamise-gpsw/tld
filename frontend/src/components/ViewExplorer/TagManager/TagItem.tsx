@@ -106,6 +106,8 @@ export const TagItem: React.FC<Props> = ({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          draggable
+          onDragStart={handleDragStart}
           cursor="grab"
           _active={{ cursor: 'grabbing' }}
           role="group"

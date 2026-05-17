@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mertcikla/tld/internal/git"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 type RepoScope struct {

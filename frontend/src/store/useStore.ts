@@ -45,7 +45,6 @@ export type CanvasStoreState = ViewEditorUiState & {
   incomingLinks: IncomingViewConnector[]
   treeData: ViewTreeNode[]
   allElements: LibraryElement[]
-  libraryRefresh: number
 
   setViewEditorUi: (patch: Partial<ViewEditorUiState>) => void
   setSnapToGrid: (snapToGrid: boolean) => void
@@ -61,13 +60,13 @@ export type CanvasStoreState = ViewEditorUiState & {
   setIncomingLinks: (next: StoreSetter<IncomingViewConnector[]>) => void
   setTreeData: (next: StoreSetter<ViewTreeNode[]>) => void
   setAllElements: (next: StoreSetter<LibraryElement[]>) => void
-  setLibraryRefresh: (next: StoreSetter<number>) => void
   resetCanvas: () => void
   hydrateViewContent: (payload: ViewContentPayload) => void
   updateElementPosition: (elementId: number, x: number, y: number) => void
   removeElementPlacement: (elementId: number) => void
   removeElementEverywhere: (elementId: number) => void
   mergeSavedElement: (saved: LibraryElement) => void
+  mergeElementsInto: (sourceId: number, survivor: LibraryElement) => void
   upsertConnector: (connector: Connector) => void
   replaceConnector: (connector: Connector) => void
   removeConnector: (connectorId: number) => void
@@ -180,6 +179,63 @@ export function removePlacedElement(elements: PlacedElement[], elementId: number
   return elements.filter((element) => element.element_id !== elementId)
 }
 
+export function placedElementToLibraryElement(element: PlacedElement): LibraryElement {
+  return {
+    id: element.element_id,
+    name: element.name,
+    kind: element.kind,
+    description: element.description,
+    technology: element.technology,
+    url: element.url,
+    logo_url: element.logo_url,
+    technology_connectors: element.technology_connectors,
+    tags: element.tags,
+    repo: element.repo,
+    branch: element.branch,
+    file_path: element.file_path,
+    language: element.language,
+    created_at: '',
+    updated_at: '',
+    has_view: element.has_view,
+    view_label: element.view_label,
+  }
+}
+
+export function buildElementLibraryItems(allElements: LibraryElement[], viewElements: PlacedElement[]): LibraryElement[] {
+  const byId = new Map<number, LibraryElement>()
+  allElements.forEach((element) => byId.set(element.id, element))
+  viewElements.forEach((element) => {
+    const placed = placedElementToLibraryElement(element)
+    const existing = byId.get(placed.id)
+    byId.set(placed.id, existing
+      ? {
+        ...existing,
+        ...placed,
+        created_at: existing.created_at,
+        updated_at: existing.updated_at,
+        has_view: existing.has_view,
+        view_label: existing.view_label,
+      }
+      : placed)
+  })
+  return Array.from(byId.values())
+}
+
+export function resolveElementForUpdate(
+  elementId: number,
+  selectedElement: LibraryElement | null,
+  allElements: LibraryElement[],
+  viewElements: PlacedElement[],
+): LibraryElement | null {
+  if (selectedElement?.id === elementId) return selectedElement
+
+  const libraryElement = allElements.find((element) => element.id === elementId)
+  if (libraryElement) return libraryElement
+
+  const placedElement = viewElements.find((element) => element.element_id === elementId)
+  return placedElement ? placedElementToLibraryElement(placedElement) : null
+}
+
 export function mergeSavedElementIntoPlacements(elements: PlacedElement[], saved: LibraryElement): PlacedElement[] {
   return elements.map((element) =>
     element.element_id === saved.id
@@ -214,6 +270,56 @@ export function removeConnectorFromList(connectors: Connector[], connectorId: nu
   return connectors.filter((connector) => connector.id !== connectorId)
 }
 
+export function reassignConnectorsToElement(connectors: Connector[], fromId: number, toId: number): Connector[] {
+  return connectors.map((c) => {
+    if (c.source_element_id === fromId && c.target_element_id === fromId) {
+      return { ...c, source_element_id: toId, target_element_id: toId }
+    }
+    if (c.source_element_id === fromId) {
+      return { ...c, source_element_id: toId }
+    }
+    if (c.target_element_id === fromId) {
+      return { ...c, target_element_id: toId }
+    }
+    return c
+  })
+}
+
+export function mergeElementReplacements(elements: PlacedElement[], sourceId: number, survivor: LibraryElement): PlacedElement[] {
+  const survivorId = survivor.id
+  const hasSurvivor = elements.some((el) => el.element_id === survivorId)
+  const sourcePlacement = elements.find((el) => el.element_id === sourceId)
+  if (hasSurvivor) {
+    return elements.filter((el) => el.element_id !== sourceId)
+  }
+  if (sourcePlacement) {
+    return elements.map((el) => {
+      if (el.element_id === sourceId) {
+        return {
+          ...el,
+          element_id: survivorId,
+          name: survivor.name,
+          kind: survivor.kind,
+          description: survivor.description,
+          technology: survivor.technology,
+          url: survivor.url,
+          logo_url: survivor.logo_url,
+          technology_connectors: survivor.technology_connectors,
+          tags: survivor.tags,
+          repo: survivor.repo,
+          branch: survivor.branch,
+          file_path: survivor.file_path,
+          language: survivor.language,
+          has_view: survivor.has_view,
+          view_label: survivor.view_label,
+        }
+      }
+      return el
+    })
+  }
+  return elements
+}
+
 export const useStore = create<CanvasStoreState>((set) => ({
   ...emptyViewEditorUiState,
   view: undefined,
@@ -226,7 +332,6 @@ export const useStore = create<CanvasStoreState>((set) => ({
   incomingLinks: [],
   treeData: [],
   allElements: [],
-  libraryRefresh: 0,
 
   setViewEditorUi: (patch) => set((state) => ({ ...state, ...patch })),
   setSnapToGrid: (snapToGrid) => set({ snapToGrid }),
@@ -242,7 +347,6 @@ export const useStore = create<CanvasStoreState>((set) => ({
   setIncomingLinks: (next) => set((state) => ({ incomingLinks: resolveSetter(next, state.incomingLinks) })),
   setTreeData: (next) => set((state) => ({ treeData: resolveSetter(next, state.treeData) })),
   setAllElements: (next) => set((state) => ({ allElements: resolveSetter(next, state.allElements) })),
-  setLibraryRefresh: (next) => set((state) => ({ libraryRefresh: resolveSetter(next, state.libraryRefresh) })),
   resetCanvas: () => set({ nodes: [], edges: [] }),
   hydrateViewContent: (payload) => set({
     view: payload.view,
@@ -261,11 +365,18 @@ export const useStore = create<CanvasStoreState>((set) => ({
   })),
   removeElementEverywhere: (elementId) => set((state) => ({
     viewElements: removePlacedElement(state.viewElements, elementId),
-    libraryRefresh: state.libraryRefresh + 1,
+    allElements: state.allElements.filter((el) => el.id !== elementId),
   })),
   mergeSavedElement: (saved) => set((state) => ({
     viewElements: mergeSavedElementIntoPlacements(state.viewElements, saved),
-    libraryRefresh: state.libraryRefresh + 1,
+    allElements: state.allElements.map((el) => (el.id === saved.id ? saved : el)),
+  })),
+  mergeElementsInto: (sourceId, survivor) => set((state) => ({
+    viewElements: mergeElementReplacements(state.viewElements, sourceId, survivor),
+    connectors: reassignConnectorsToElement(state.connectors, sourceId, survivor.id),
+    allElements: state.allElements
+      .filter((el) => el.id !== sourceId)
+      .map((el) => (el.id === survivor.id ? survivor : el)),
   })),
   upsertConnector: (connector) => set((state) => ({
     connectors: upsertConnectorInList(state.connectors, connector),

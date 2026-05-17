@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/internal/analyzer"
+	"github.com/mertcikla/tld/v2/internal/analyzer"
 )
 
 func TestResolveServerCommandWithLookPath(t *testing.T) {
@@ -47,5 +47,49 @@ func TestResolveServerCommandWithLookPath_UnconfiguredLanguage(t *testing.T) {
 	var notConfigured ErrServerNotConfigured
 	if !errors.As(err, &notConfigured) {
 		t.Fatalf("expected ErrServerNotConfigured, got %T: %v", err, err)
+	}
+}
+
+func TestSnapshotLanguagesReportsAvailability(t *testing.T) {
+	snapshot := SnapshotLanguages([]analyzer.Language{analyzer.LanguageGo, analyzer.Language("ruby")}, ResolverConfig{
+		Enabled:          true,
+		HealthInterval:   0,
+		MemoryLimitBytes: 1,
+	})
+	if !snapshot.Enabled {
+		t.Fatal("snapshot should be enabled")
+	}
+	if len(snapshot.Servers) != 2 {
+		t.Fatalf("servers = %d, want 2", len(snapshot.Servers))
+	}
+	var ruby ServerStatus
+	for _, server := range snapshot.Servers {
+		if server.Language == "ruby" {
+			ruby = server
+			break
+		}
+	}
+	if ruby.State != StateUnavailable {
+		t.Fatalf("ruby state = %q, want unavailable", ruby.State)
+	}
+	if ruby.LastError == "" {
+		t.Fatal("ruby LastError is empty")
+	}
+}
+
+func TestSnapshotLanguagesReportsDisabled(t *testing.T) {
+	snapshot := SnapshotLanguages([]analyzer.Language{analyzer.LanguageGo}, ResolverConfig{
+		Enabled:          false,
+		HealthInterval:   0,
+		MemoryLimitBytes: 1,
+	})
+	if snapshot.Enabled {
+		t.Fatal("snapshot should be disabled")
+	}
+	if len(snapshot.Servers) != 1 {
+		t.Fatalf("servers = %d, want 1", len(snapshot.Servers))
+	}
+	if snapshot.Servers[0].State != StateDisabled {
+		t.Fatalf("state = %q, want disabled", snapshot.Servers[0].State)
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 	"github.com/spf13/cobra"
 )
 

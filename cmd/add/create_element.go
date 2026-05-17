@@ -3,9 +3,9 @@ package add
 import (
 	"fmt"
 
-	"github.com/mertcikla/tld/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
 
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -34,9 +34,24 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 			if r == "" {
 				r = workspace.Slugify(name)
 			}
+			if err := workspace.ValidateElementRef(r); err != nil {
+				return err
+			}
 			placementParent := parent
 			if placementParent == "" {
 				placementParent = "root"
+			}
+			if err := workspace.ValidateParentRef(placementParent); err != nil {
+				return err
+			}
+			if placementParent != workspace.RootRef {
+				ws, err := workspace.Load(*wdir)
+				if err != nil {
+					return fmt.Errorf("load workspace: %w", err)
+				}
+				if _, ok := ws.Elements[placementParent]; !ok {
+					return fmt.Errorf("parent ref %q not found", placementParent)
+				}
 			}
 			if diagramLabel == "" {
 				diagramLabel = legacyViewLabel
@@ -56,6 +71,7 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 					PositionY: positionY,
 				}},
 			}
+			validateAndWarnTechnology(cmd, technology)
 			if err := workspace.UpsertElement(*wdir, r, spec); err != nil {
 				if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
 					return cmdutil.WriteCommandError(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "add", err)
@@ -66,7 +82,6 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "add", "add", r)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated elements.yaml (upserted %s)\n", r)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to push to cloud.")
 			return nil
 		},
 	}

@@ -73,8 +73,18 @@ func validateEdgeType(t string) error {
 	return nil
 }
 
+func normalizeStoredEdgeType(t string) string {
+	if _, ok := validEdgeTypes[t]; ok {
+		return t
+	}
+	return "bezier"
+}
+
 // ConvertTechnologyLinks validates and converts proto TechnologyLink messages.
 func ConvertTechnologyLinks(links []*diagv1.TechnologyLink) ([]*diagv1.TechnologyLink, error) {
+	if links == nil {
+		return nil, nil
+	}
 	if len(links) == 0 {
 		return []*diagv1.TechnologyLink{}, nil
 	}

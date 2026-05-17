@@ -6,9 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd/version"
+	"github.com/mertcikla/tld/v2/cmd/version"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestRootCmd_HelpMatchesReferenceSurface(t *testing.T) {
@@ -69,6 +70,45 @@ func TestAddCmd_RefOverridesGeneratedSlug(t *testing.T) {
 	}
 }
 
+func TestAddCmd_InvalidRefFails(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+
+	_, _, err := cmd.RunCmd(t, dir, "add", "API", "--ref", "Bad:Ref")
+	if err == nil {
+		t.Fatal("expected invalid ref error")
+	}
+	if !strings.Contains(err.Error(), "invalid ref") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAddCmd_EmptySlugFails(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+
+	_, _, err := cmd.RunCmd(t, dir, "add", "!!!")
+	if err == nil {
+		t.Fatal("expected empty slug error")
+	}
+	if !strings.Contains(err.Error(), "ref is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAddCmd_MissingParentFails(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+
+	_, _, err := cmd.RunCmd(t, dir, "add", "API", "--ref", "api", "--parent", "missing")
+	if err == nil {
+		t.Fatal("expected missing parent error")
+	}
+	if !strings.Contains(err.Error(), `parent ref "missing" not found`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestConnectCmd_HelpHidesStyleFlag(t *testing.T) {
 	stdout, _, err := cmd.RunCmd(t, ".", "connect", "--help")
 	if err != nil {
@@ -80,46 +120,31 @@ func TestConnectCmd_HelpHidesStyleFlag(t *testing.T) {
 	if strings.Contains(stdout, "--style") {
 		t.Fatalf("connect help should hide --style:\n%s", stdout)
 	}
-	if strings.Contains(stdout, "--view") {
-		t.Fatalf("connect help should hide legacy --view:\n%s", stdout)
+	if !strings.Contains(stdout, "--view") {
+		t.Fatalf("connect help should include --view:\n%s", stdout)
 	}
 }
 
 func TestAnalyzeCmd_EmptyGoFileDoesNotChangeWorkspaceContents(t *testing.T) {
 	dir := t.TempDir()
+	dataDir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
 
-	file := filepath.Join(dir, "empty.go")
-	if err := os.WriteFile(file, []byte("package main\n"), 0600); err != nil {
-		t.Fatalf("write empty.go: %v", err)
-	}
+	repoDir := filepath.Join(dir, "repo")
+	cmd.InitGitRepo(t, repoDir, "empty.go", "package main\n")
 
-	beforeElements, err := os.ReadFile(filepath.Join(dir, "elements.yaml"))
-	if err != nil {
-		t.Fatalf("read elements.yaml before analyze: %v", err)
-	}
-	beforeConnectors, err := os.ReadFile(filepath.Join(dir, "connectors.yaml"))
-	if err != nil {
-		t.Fatalf("read connectors.yaml before analyze: %v", err)
-	}
-
-	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", file)
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
 	if err != nil {
 		t.Fatalf("analyze empty.go: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
-
-	afterElements, err := os.ReadFile(filepath.Join(dir, "elements.yaml"))
+	ws, err := workspace.Load(dir)
 	if err != nil {
-		t.Fatalf("read elements.yaml after analyze: %v", err)
+		t.Fatal(err)
 	}
-	afterConnectors, err := os.ReadFile(filepath.Join(dir, "connectors.yaml"))
-	if err != nil {
-		t.Fatalf("read connectors.yaml after analyze: %v", err)
+	if len(ws.Connectors) != 0 {
+		t.Fatalf("empty Go file should not create connectors: %+v", ws.Connectors)
 	}
-	if string(beforeElements) != string(afterElements) {
-		t.Fatalf("elements.yaml changed for an empty Go file\nbefore:\n%s\nafter:\n%s", beforeElements, afterElements)
-	}
-	if string(beforeConnectors) != string(afterConnectors) {
-		t.Fatalf("connectors.yaml changed for an empty Go file\nbefore:\n%s\nafter:\n%s", beforeConnectors, afterConnectors)
+	if len(ws.Elements) == 0 {
+		t.Fatalf("watch-backed analyze should materialize repository/file context")
 	}
 }

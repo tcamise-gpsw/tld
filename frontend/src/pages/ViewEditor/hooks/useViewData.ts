@@ -18,24 +18,27 @@ import {
   getVisualHandleSlot,
 } from '../../../utils/edgeDistribution'
 import { buildViewContentLinks, useStore } from '../../../store/useStore'
+import type { WorkspaceVersionFollowTarget, WorkspaceVersionPreview } from '../../../context/WorkspaceVersionContext'
 
 interface ViewDataOptions {
   viewId: number | null
   interactionSourceId: number | null
   clickConnectMode: { sourceNodeId: string; sourceHandle: string; targetHandle?: string } | null
-  selectedEdgeId: number | null
+  selectedConnector: Connector | null
   activeTags: string[]
   hiddenLayerTags: string[]
   hoveredLayerTags: string[] | null
   hoveredLayerColor: string | null
   tagColors: Record<string, Tag>
+  versionPreview?: WorkspaceVersionPreview | null
+  versionFollowTarget?: WorkspaceVersionFollowTarget | null
   // Node-level callbacks (stable refs from parent)
   stableOnZoomIn: (elementId: number) => Promise<void>
   stableOnZoomOut: (elementId: number) => Promise<void>
   stableOnNavigateToView: (id: number) => void
   stableOnSelect: (obj: PlacedElement) => void
   stableOnOpenCodePreview: (elementId: number) => void
-  stableOnInteractionStart: (elementId: number) => void
+  stableOnInteractionStart: (elementId: number, options?: { sourceHandle?: string; clientX?: number; clientY?: number }) => void
   stableOnConnectTo: (targetElementId: number) => Promise<void>
   stableOnStartHandleReconnect: (args: { edgeId: string; endpoint: 'source' | 'target'; handleId: string; clientX: number; clientY: number }) => void
   stableOnRemoveElement: (elementId: number) => Promise<void>
@@ -52,6 +55,7 @@ function alphaColor(color: string, opacity: number): string {
 // letting structural-sharing fast-path bail out without rebuilding the node.
 const HIDDEN_STYLE: CSSProperties = { opacity: 0.1, pointerEvents: 'none' }
 const SOFT_FOCUS_STYLE: CSSProperties = { opacity: 0.2 }
+const VERSION_DIM_STYLE: CSSProperties = { opacity: 0.1 }
 const EMPTY_ARRAY: readonly never[] = Object.freeze([])
 const EMPTY_NODE_CONNECTION_META = Object.freeze({
   key: '',
@@ -152,12 +156,14 @@ export function useViewData({
   viewId,
   interactionSourceId,
   clickConnectMode,
-  selectedEdgeId,
+  selectedConnector,
   activeTags,
   hiddenLayerTags,
   hoveredLayerTags,
   hoveredLayerColor,
   tagColors,
+  versionPreview,
+  versionFollowTarget,
   stableOnZoomIn,
   stableOnZoomOut,
   stableOnNavigateToView,
@@ -170,6 +176,7 @@ export function useViewData({
   stableOnHoverZoom,
   hoveredZoomRef,
 }: ViewDataOptions) {
+  const selectedEdgeId = selectedConnector?.id ?? null
   const queryClient = useQueryClient()
   const view = useStore((state) => state.view)
   const setView = useStore((state) => state.setView)
@@ -188,9 +195,6 @@ export function useViewData({
   const incomingLinks = useStore((state) => state.incomingLinks)
   const treeData = useStore((state) => state.treeData)
   const allElements = useStore((state) => state.allElements)
-  const setAllElements = useStore((state) => state.setAllElements)
-  const libraryRefresh = useStore((state) => state.libraryRefresh)
-  const setLibraryRefresh = useStore((state) => state.setLibraryRefresh)
   const hydrateViewContent = useStore((state) => state.hydrateViewContent)
   const resetCanvas = useStore((state) => state.resetCanvas)
   const removeElementPlacement = useStore((state) => state.removeElementPlacement)
@@ -217,13 +221,20 @@ export function useViewData({
 
   // ── Fetch tree ─────────────────────────────────────────────────────────────
   const refreshGrid = useCallback(async () => {
+    if (viewId === null) return
     const tree = await queryClient.fetchQuery({
-      queryKey: ['workspace', 'views', 'tree'],
-      queryFn: () => api.workspace.views.tree(),
+      queryKey: ['workspace', 'views', viewId, 'editor-tree'],
+      queryFn: () => api.workspace.views.treeAround(viewId, { ancestorLevels: 2, descendantLevels: 2 }),
       staleTime: 0,
     }).catch(() => null)
-    if (tree) useStore.getState().setTreeData(tree)
-  }, [queryClient])
+    if (tree) {
+      const links = buildViewContentLinks(tree, viewId, viewElementsRef.current)
+      useStore.getState().setTreeData(tree)
+      useStore.getState().setLinksMap(links.linksMap)
+      useStore.getState().setParentLinksMap(links.parentLinksMap)
+      useStore.getState().setIncomingLinks(links.incomingLinks)
+    }
+  }, [queryClient, viewId])
 
   // ── Fetch view content ──────────────────────────────────────────────────
   const viewContentQuery = useQuery({
@@ -234,7 +245,7 @@ export function useViewData({
       const [diag, content, tree] = await Promise.all([
         api.workspace.views.get(viewId),
         api.workspace.views.content(viewId),
-        api.workspace.views.tree(),
+        api.workspace.views.treeAround(viewId, { ancestorLevels: 2, descendantLevels: 2 }),
       ])
       const viewElements = content.placements || []
       const connectors = content.connectors || []
@@ -265,16 +276,6 @@ export function useViewData({
     resetCanvas()
   }, [resetCanvas, viewId])
 
-  // ── Keep all-org elements for inline adder ──────────────────────────────────
-  const allElementsQuery = useQuery({
-    queryKey: ['elements', 'list', libraryRefresh],
-    queryFn: () => api.elements.list(),
-  })
-
-  useEffect(() => {
-    if (allElementsQuery.data) setAllElements(allElementsQuery.data)
-  }, [allElementsQuery.data, setAllElements])
-
   // ── Refresh elements ────────────────────────────────────────────────────────
   const refreshElements = useCallback(async () => {
     if (viewId === null) return
@@ -286,8 +287,12 @@ export function useViewData({
     if (fresh) {
       setViewElements(fresh.placements)
       setConnectors(fresh.connectors)
+      const links = buildViewContentLinks(treeDataRef.current, viewId, fresh.placements)
+      setLinksMap(links.linksMap)
+      setParentLinksMap(links.parentLinksMap)
+      useStore.getState().setIncomingLinks(links.incomingLinks)
     }
-  }, [queryClient, setConnectors, setViewElements, viewId])
+  }, [queryClient, setConnectors, setLinksMap, setParentLinksMap, setViewElements, viewId])
 
   // ── Element mutation helpers ───────────────────────────────────────────────
   const handleElementDeleted = useCallback((deletedId: number) => {
@@ -429,6 +434,9 @@ export function useViewData({
       const activeSet = activeTags.length > 0 ? new Set(activeTags) : null
       const hoveredSet = hoveredLayerTags !== null ? new Set(hoveredLayerTags) : null
       const isClickConnectMode = clickConnectMode !== null
+      const versionElementChanges = versionPreview?.elementChanges
+      const versionElementLineDeltas = versionPreview?.elementLineDeltas
+      const versionActive = !!versionPreview
 
       return viewElements.map((obj) => {
         const nodeId = String(obj.element_id)
@@ -439,13 +447,21 @@ export function useViewData({
         const isInactive = isHiddenByLayer || (activeSet !== null && !objTags.some((t) => activeSet.has(t)))
         const isLayerHighlighted = hoveredSet !== null && objTags.some((t) => hoveredSet.has(t))
         const isSoftFocused = hoveredSet !== null && !isLayerHighlighted
+        const versionChangeType = versionElementChanges?.get(obj.element_id)
+        const versionLineDelta = versionElementLineDeltas?.get(obj.element_id)
+        const versionPulseChangeType = versionFollowTarget?.resourceType === 'element' && versionFollowTarget.resourceId === obj.element_id
+          ? versionFollowTarget.changeType ?? versionChangeType
+          : undefined
+        const isDimmedByVersionPreview = versionActive && !versionChangeType
 
-        const newZIndex = isLayerHighlighted ? 10 : interactionSourceId === obj.element_id ? 1000 : 0
+        const newZIndex = versionPulseChangeType ? 20 : isLayerHighlighted ? 10 : interactionSourceId === obj.element_id ? 1000 : 0
         const newStyle = isInactive
           ? HIDDEN_STYLE
           : isSoftFocused
             ? SOFT_FOCUS_STYLE
-            : undefined
+            : isDimmedByVersionPreview
+              ? VERSION_DIM_STYLE
+              : undefined
         const layerHighlightColor = isLayerHighlighted ? (hoveredLayerColor ?? undefined) : undefined
         const position = existing?.dragging ? existing.position : { x: obj.position_x ?? 0, y: obj.position_y ?? 0 }
         const isZoomHovered = hoveredZoomRef.current?.elementId === obj.element_id ? hoveredZoomRef.current.type : null
@@ -488,7 +504,9 @@ export function useViewData({
           existing.data.connectedHandleIds === connectionMeta.connectedHandleIds &&
           existing.data.selectedHandleIds === connectionMeta.selectedHandleIds &&
           existing.data.reconnectCandidates === connectionMeta.reconnectCandidates &&
-          existing.data.isConnectorHighlighted === connectionMeta.isConnectorHighlighted
+          existing.data.isConnectorHighlighted === connectionMeta.isConnectorHighlighted &&
+          existing.data.versionChangeType === versionPulseChangeType &&
+          existing.data.versionLineDelta === versionLineDelta
         ) {
           return existing
         }
@@ -528,6 +546,8 @@ export function useViewData({
             selectedHandleIds: connectionMeta.selectedHandleIds,
             reconnectCandidates: connectionMeta.reconnectCandidates,
             isConnectorHighlighted: connectionMeta.isConnectorHighlighted,
+            versionChangeType: versionPulseChangeType,
+            versionLineDelta,
           },
         }
       })
@@ -538,7 +558,7 @@ export function useViewData({
     stableOnZoomIn, stableOnZoomOut, stableOnNavigateToView, stableOnSelect,
     stableOnInteractionStart, stableOnConnectTo, stableOnStartHandleReconnect, stableOnRemoveElement, stableOnHoverZoom,
     stableOnOpenCodePreview, hoveredZoomRef, activeTags, hiddenLayerTags, hoveredLayerTags, hoveredLayerColor, tagColors,
-    nodeConnectionMetaByElementId, setRfNodes,
+    nodeConnectionMetaByElementId, setRfNodes, versionPreview, versionFollowTarget,
   ])
 
   // ── Derive RF connectors ────────────────────────────────────────────────────────
@@ -546,6 +566,8 @@ export function useViewData({
     const hiddenSet = hiddenLayerTags.length > 0 ? new Set(hiddenLayerTags) : null
     const activeSet = activeTags.length > 0 ? new Set(activeTags) : null
     const hoveredSet = hoveredLayerTags !== null ? new Set(hoveredLayerTags) : null
+    const versionConnectorChanges = versionPreview?.connectorChanges
+    const versionActive = !!versionPreview
 
     setRfEdges((prevConnectors) => {
       const prevEdgeMap = new Map(prevConnectors.map((e) => [e.id, e]))
@@ -573,11 +595,13 @@ export function useViewData({
           !srcTags.some((t) => hoveredSet.has(t)) ||
           !tgtTags.some((t) => hoveredSet.has(t))
         )
-        const edgeOpacity = isInactive ? 0.1 : isSoftFocused ? 0.2 : 0.8
-        const markerOpacity = isInactive ? 0.1 : isSoftFocused ? 0.2 : 1
+        const versionChangeType = versionConnectorChanges?.get(e.id)
+        const isDimmedByVersionPreview = versionActive && !versionChangeType
+        const edgeOpacity = isInactive || isDimmedByVersionPreview ? 0.1 : isSoftFocused ? 0.2 : 0.8
+        const markerOpacity = isInactive || isDimmedByVersionPreview ? 0.1 : isSoftFocused ? 0.2 : 1
         const newZIndex = selectedEdgeId !== null && edgeId === String(selectedEdgeId) ? 1000 : 100
         const pointerEvents = (isInactive || isSoftFocused) ? 'none' : 'auto'
-        const labelBgOpacity = isInactive ? 0.1 : isSoftFocused ? 0.2 : 0.95
+        const labelBgOpacity = isInactive || isDimmedByVersionPreview ? 0.1 : isSoftFocused ? 0.2 : 0.95
 
         // Structural sharing: when all user-visible outputs match prev exactly, reuse prev ref.
         // We match on the underlying connector ref plus every computed visibility/layout value.
@@ -595,7 +619,8 @@ export function useViewData({
           (existing.data as { sourceGroupIndex?: number }).sourceGroupIndex === layout.sourceGroupIndex &&
           (existing.data as { targetGroupIndex?: number }).targetGroupIndex === layout.targetGroupIndex &&
           (existing.data as { sourceGroupCount?: number }).sourceGroupCount === layout.sourceGroupCount &&
-          (existing.data as { targetGroupCount?: number }).targetGroupCount === layout.targetGroupCount
+          (existing.data as { targetGroupCount?: number }).targetGroupCount === layout.targetGroupCount &&
+          (existing.data as { versionChangeType?: string }).versionChangeType === versionChangeType
         ) {
           return existing
         }
@@ -621,6 +646,7 @@ export function useViewData({
             targetHandleSide: layout.targetHandleSide,
             sourceHandleSlot: layout.sourceHandleSlot,
             targetHandleSlot: layout.targetHandleSlot,
+            versionChangeType,
           },
 
           style: { stroke: 'var(--accent)', strokeWidth: 2, opacity: edgeOpacity, pointerEvents },
@@ -633,7 +659,7 @@ export function useViewData({
         }
       })
     })
-  }, [connectorLayouts, selectedEdgeId, activeTags, hiddenLayerTags, hoveredLayerTags, elementMap, setRfEdges])
+  }, [connectorLayouts, selectedEdgeId, activeTags, hiddenLayerTags, hoveredLayerTags, elementMap, setRfEdges, versionPreview])
 
 
   // ── Boost z-index of selected connector ────────────────────────────────────────
@@ -670,8 +696,6 @@ export function useViewData({
     incomingLinks,
     treeData,
     allElements,
-    libraryRefresh,
-    setLibraryRefresh,
     existingElementIds,
     // Stable refs
     viewElementsRef,
@@ -688,6 +712,5 @@ export function useViewData({
     handleElementDeleted,
     handleElementPermanentlyDeleted,
     handleElementSaved,
-    setAllElements,
   }
 }

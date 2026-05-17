@@ -1,6 +1,6 @@
 {
   "name": "@tldiagram/core-ui",
-  "version": "1.93.0",
+  "version": "2.0.9",
   "type": "module",
   "repository": {
     "type": "git",
@@ -30,6 +30,7 @@
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "prebuild:app": "npm run prepare:icons",
     "build:app": "tsc && vite build --config vite.config.ts",
+    "build:vscode": "vite build --config vite.vscode.config.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
@@ -39,9 +40,8 @@
     "test:e2e:debug": "playwright test -c playwright.config.ts --debug"
   },
   "dependencies": {
-    "@buf/tldiagramcom_diagram.bufbuild_es": "^2.11.0-20260419172603-8192c519478e.1",
+    "@buf/tldiagramcom_diagram.bufbuild_es": "^2.12.0-20260516210401-05aeb295f766.1",
     "@bufbuild/protobuf": "^2.11.0",
-    "@tanstack/react-query": "^5.100.1",
     "esbuild": "^0.25.12",
     "zustand": "^5.0.12"
   },
@@ -62,6 +62,7 @@
     "@connectrpc/connect-web": "^2.1.1",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
+    "@tanstack/react-query": "^5.100.1",
     "@uiw/react-codemirror": "^4.25.8",
     "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
@@ -131,6 +132,7 @@
     "@emotion/styled": "^11.14.0",
     "@eslint/js": "^9.0.0",
     "@playwright/test": "^1.59.1",
+    "@tanstack/react-query": "^5.100.1",
     "@types/dagre": "^0.7.54",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

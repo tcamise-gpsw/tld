@@ -6,7 +6,7 @@ import (
 	"io"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
-	"github.com/mertcikla/tld/internal/planner"
+	"github.com/mertcikla/tld/v2/internal/planner"
 )
 
 // RenderExecutionMarkdown writes an apply execution report comparing plan vs result.
@@ -27,11 +27,11 @@ func RenderExecutionMarkdown(w io.Writer, _ *planner.Plan, resp *diagv1.ApplyPla
 	if s != nil {
 		_, _ = fmt.Fprintln(w, "## Planned vs Created")
 		_, _ = fmt.Fprintln(w)
-		_, _ = fmt.Fprintln(w, "| Resource | Planned | Created |")
-		_, _ = fmt.Fprintln(w, "|----------|---------|---------|")
-		_, _ = fmt.Fprintf(w, "| Elements | %d | %d |\n", s.ElementsPlanned, s.ElementsCreated)
-		_, _ = fmt.Fprintf(w, "| Views | %d | %d |\n", s.ViewsPlanned, s.ViewsCreated)
-		_, _ = fmt.Fprintf(w, "| Connectors | %d | %d |\n", s.ConnectorsPlanned, s.ConnectorsCreated)
+		_, _ = fmt.Fprintln(w, "| Resource   | Planned | Created |")
+		_, _ = fmt.Fprintln(w, "|------------|---------|---------|")
+		_, _ = fmt.Fprintf(w, "| Elements   | %d      | %d      |\n", s.ElementsPlanned, s.ElementsCreated)
+		_, _ = fmt.Fprintf(w, "| Views      | %d      | %d      |\n", s.ViewsPlanned, s.ViewsCreated)
+		_, _ = fmt.Fprintf(w, "| Connectors | %d      | %d      |\n", s.ConnectorsPlanned, s.ConnectorsCreated)
 		_, _ = fmt.Fprintln(w)
 	}
 

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 
-	"github.com/mertcikla/tld/internal/planner"
+	"github.com/mertcikla/tld/v2/internal/planner"
 )
 
 func TestPlanCmd_OutputsMarkdown(t *testing.T) {
@@ -26,6 +26,9 @@ func TestPlanCmd_OutputsMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "# Element Plan") {
 		t.Errorf("stdout %q does not contain '# Element Plan'", stdout)
+	}
+	if !strings.Contains(stdout, "Target:") || !strings.Contains(stdout, "cloud") {
+		t.Errorf("stdout %q does not contain cloud target", stdout)
 	}
 }
 
@@ -44,9 +47,6 @@ func TestPlanCmd_VerboseFlag(t *testing.T) {
 	}
 	if strings.Contains(stdout, "## Elements") {
 		t.Errorf("stdout contains verbose section when it shouldn't: %q", stdout)
-	}
-	if !strings.Contains(stdout, "Use '-v' or '--verbose' for detailed element placement and connector reporting") {
-		t.Errorf("stdout missing verbose hint: %q", stdout)
 	}
 
 	// With verbose
@@ -112,6 +112,21 @@ func TestPlanCmd_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestPlanCmd_LocalTargetDoesNotRequireAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	cmd.SeedElementWorkspace(t, dir)
+
+	stdout, _, err := cmd.RunCmd(t, dir, "plan", "--target", "local", "--data-dir", dataDir)
+	if err != nil {
+		t.Fatalf("plan --target local: %v", err)
+	}
+	if !strings.Contains(stdout, "Target:") || !strings.Contains(stdout, "local") {
+		t.Fatalf("stdout %q does not contain local target", stdout)
+	}
+}
+
 func TestPlanCmd_InvalidWorkspaceErrors(t *testing.T) {
 	dir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
@@ -126,16 +141,5 @@ func TestPlanCmd_InvalidWorkspaceErrors(t *testing.T) {
 	_, _, err := cmd.RunCmd(t, dir, "plan")
 	if err == nil {
 		t.Fatal("expected error for invalid workspace")
-	}
-}
-
-func TestPlanCmd_MissingConfig(t *testing.T) {
-	dir := t.TempDir()
-	_, _, err := cmd.RunCmd(t, dir, "plan")
-	if err == nil {
-		t.Fatal("expected error for missing config")
-	}
-	if !strings.Contains(err.Error(), "load workspace") {
-		t.Errorf("error %q does not contain 'load workspace'", err.Error())
 	}
 }

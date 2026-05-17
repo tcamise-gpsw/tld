@@ -102,8 +102,6 @@ export default function SlidingPanel({
               backdropFilter="blur(24px)"
               border="1px solid"
               borderColor="whiteAlpha.100"
-              borderTop="2px solid"
-              borderTopColor="var(--accent)"
               rounded="xl"
               shadow="panel"
             >

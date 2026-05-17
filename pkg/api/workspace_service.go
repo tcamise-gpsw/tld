@@ -33,6 +33,17 @@ func (s *WorkspaceService) hooks() WorkspaceHooks {
 	return s.Hooks
 }
 
+func intToInt32(n int) int32 {
+	switch {
+	case n > math.MaxInt32:
+		return math.MaxInt32
+	case n < math.MinInt32:
+		return math.MinInt32
+	default:
+		return int32(n) //nolint:gosec // clamped above
+	}
+}
+
 // ─── CLI RPCs ─────────────────────────────────────────────────────────────────
 
 func (s *WorkspaceService) CreateView(
@@ -62,6 +73,18 @@ func (s *WorkspaceService) CreateView(
 
 	if err := s.hooks().CheckWrite(ctx, workspaceID, "views"); err != nil {
 		return nil, err
+	}
+
+	if ownerElementID != nil {
+		views, err := s.Store.ListViews(ctx, workspaceID)
+		if err != nil {
+			return nil, storeErr("list views", err)
+		}
+		for _, view := range views {
+			if view.GetOwnerElementId() == *ownerElementID {
+				return connect.NewResponse(&diagv1.CreateViewResponse{View: view}), nil
+			}
+		}
 	}
 
 	v, err := s.Store.CreateView(ctx, workspaceID, ownerElementID, strings.TrimSpace(m.GetName()), label, false)
@@ -268,7 +291,11 @@ func (s *WorkspaceService) ExportWorkspace(
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { var e error; views, e = s.Store.ListViews(gctx, workspaceID); return e })
-	g.Go(func() error { var e error; elements, e = s.Store.ListElements(gctx, workspaceID, 0, 0, ""); return e })
+	g.Go(func() error {
+		var e error
+		elements, _, e = s.Store.ListElements(gctx, workspaceID, 0, 0, "")
+		return e
+	})
 	g.Go(func() error { var e error; placements, e = s.Store.ListAllPlacements(gctx, workspaceID); return e })
 	g.Go(func() error { var e error; connectors, e = s.Store.ListAllConnectors(gctx, workspaceID); return e })
 	g.Go(func() error { var e error; layers, e = s.Store.ListAllViewLayers(gctx, workspaceID); return e })
@@ -329,31 +356,22 @@ func (s *WorkspaceService) GetWorkspace(
 	}
 	m := req.Msg
 
-	var ownerElementID *int32
+	var parentViewID *int32
 	if m.GetParentId() != 0 {
 		pid := m.GetParentId()
-		ownerElementID = &pid
+		parentViewID = &pid
 	}
 	var isRoot *bool
 	if m.Level != nil {
 		ir := m.GetLevel() == 0
 		isRoot = &ir
 	}
-
-	views, totalCount, err := s.Store.GetViews(ctx, workspaceID, ownerElementID, isRoot, m.GetSearch(), int(m.GetLimit()), int(m.GetOffset()))
+	views, totalCount, err := s.Store.GetViews(ctx, workspaceID, parentViewID, isRoot, m.GetSearch(), int(m.GetLimit()), int(m.GetOffset()))
 	if err != nil {
 		return nil, storeErr("get views", err)
 	}
 
-	var tc int32
-	switch {
-	case totalCount > math.MaxInt32:
-		tc = math.MaxInt32
-	case totalCount < math.MinInt32:
-		tc = math.MinInt32
-	default:
-		tc = int32(totalCount) //nolint:gosec // clamped above
-	}
+	tc := intToInt32(totalCount)
 
 	viewMap := make(map[int32]*diagv1.View)
 	for _, v := range views {
@@ -397,7 +415,14 @@ func (s *WorkspaceService) GetWorkspace(
 		}
 
 		resp.Content = make(map[int32]*diagv1.ViewContent)
+		viewIDs := make(map[int32]struct{}, len(views))
+		for _, v := range views {
+			viewIDs[v.Id] = struct{}{}
+		}
 		for _, p := range allPlacements {
+			if _, ok := viewIDs[p.ViewId]; !ok {
+				continue
+			}
 			if _, ok := resp.Content[p.ViewId]; !ok {
 				resp.Content[p.ViewId] = &diagv1.ViewContent{}
 			}
@@ -411,6 +436,9 @@ func (s *WorkspaceService) GetWorkspace(
 			})
 		}
 		for _, c := range allConnectors {
+			if _, ok := viewIDs[c.ViewId]; !ok {
+				continue
+			}
 			if _, ok := resp.Content[c.ViewId]; !ok {
 				resp.Content[c.ViewId] = &diagv1.ViewContent{}
 			}
@@ -425,6 +453,9 @@ func (s *WorkspaceService) GetWorkspace(
 			}
 		}
 		for _, p := range allPlacements {
+			if _, ok := viewIDs[p.ViewId]; !ok {
+				continue
+			}
 			childView, ok := elementToChildView[p.ElementId]
 			if !ok {
 				continue
@@ -459,7 +490,21 @@ func (s *WorkspaceService) GetView(
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("view not found"))
 	}
-	return connect.NewResponse(&diagv1.GetViewResponse{View: v}), nil
+	resp := &diagv1.GetViewResponse{View: v}
+	if req.Msg.GetIncludeContent() {
+		densityOverride := req.Msg.DensityOverride
+		if densityOverride != nil && (*densityOverride < -2 || *densityOverride > 2) {
+			return nil, invalidArg("density_override", "must be between -2 and 2")
+		}
+		content, err := s.Store.GetProjectedViewContent(ctx, viewID, workspaceID, densityOverride)
+		if err != nil {
+			return nil, storeErr("get projected view content", err)
+		}
+		resp.Content = content
+	} else if req.Msg.DensityOverride != nil {
+		return nil, invalidArg("density_override", "requires include_content")
+	}
+	return connect.NewResponse(resp), nil
 }
 
 func (s *WorkspaceService) UpdateView(
@@ -536,14 +581,19 @@ func (s *WorkspaceService) ListElements(
 	if err := s.hooks().CheckRead(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	elements, err := s.Store.ListElements(ctx, workspaceID, req.Msg.Limit, req.Msg.Offset, req.Msg.Search)
+	elements, totalCount, err := s.Store.ListElements(ctx, workspaceID, req.Msg.Limit, req.Msg.Offset, req.Msg.Search)
 	if err != nil {
 		return nil, storeErr("list elements", err)
 	}
 	if elements == nil {
 		elements = []*diagv1.Element{}
 	}
-	return connect.NewResponse(&diagv1.ListElementsResponse{Elements: elements}), nil
+	return connect.NewResponse(&diagv1.ListElementsResponse{
+		Elements: elements,
+		Pagination: &diagv1.Pagination{
+			TotalCount: intToInt32(totalCount),
+		},
+	}), nil
 }
 
 func (s *WorkspaceService) GetElement(
@@ -623,33 +673,57 @@ func (s *WorkspaceService) UpdateElement(
 	if err != nil {
 		return nil, err
 	}
-	techLinks, err := ConvertTechnologyLinks(m.GetTechnologyLinks())
-	if err != nil {
-		return nil, err
-	}
-	tags := m.GetTags()
-	if tags == nil {
-		tags = []string{}
-	}
-
 	existing, err := s.Store.GetElement(ctx, elementID, workspaceID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("element not found"))
 	}
 
+	techLinks, err := ConvertTechnologyLinks(m.GetTechnologyLinks())
+	if err != nil {
+		return nil, err
+	}
+
+	finalTechLinks := techLinks
+	if finalTechLinks == nil {
+		if m.Technology != nil && *m.Technology == "" {
+			finalTechLinks = []*diagv1.TechnologyLink{}
+			techLinks = finalTechLinks
+		} else {
+			finalTechLinks = existing.TechnologyLinks
+		}
+	}
+
+	logoURL := m.LogoUrl
+	hasPrimary := false
+	for _, tl := range finalTechLinks {
+		if tl.GetIsPrimaryIcon() {
+			hasPrimary = true
+			break
+		}
+	}
+	if !hasPrimary {
+		empty := ""
+		logoURL = &empty
+	}
+
+	tags := m.GetTags()
+	if tags == nil {
+		tags = []string{}
+	}
+
 	input := ElementInput{
 		Name:        m.GetName(),
-		Description: OptStr(m.GetDescription()),
-		Kind:        OptStr(m.GetKind()),
-		Technology:  OptStr(m.GetTechnology()),
-		URL:         OptStr(m.GetUrl()),
-		LogoURL:     OptStr(m.GetLogoUrl()),
+		Description: m.Description,
+		Kind:        m.Kind,
+		Technology:  m.Technology,
+		URL:         m.Url,
+		LogoURL:     logoURL,
 		TechLinks:   techLinks,
 		Tags:        tags,
-		Repo:        OptStr(m.GetRepo()),
-		Branch:      OptStr(m.GetBranch()),
-		Language:    OptStr(m.GetLanguage()),
-		FilePath:    OptStr(m.GetFilePath()),
+		Repo:        m.Repo,
+		Branch:      m.Branch,
+		Language:    m.Language,
+		FilePath:    m.FilePath,
 		HasView:     existing.HasView,
 		ViewLabel:   existing.ViewLabel,
 	}
@@ -927,7 +1001,7 @@ func (s *WorkspaceService) UpdateConnector(
 	}
 	style := m.GetStyle()
 	if style == "" {
-		style = existing.Style
+		style = normalizeStoredEdgeType(existing.Style)
 	}
 	if err := validateEdgeType(style); err != nil {
 		return nil, err
@@ -1030,9 +1104,6 @@ func (s *WorkspaceService) CreateViewLayer(
 		return nil, invalidArg("name", "must not be empty")
 	}
 	color := strings.TrimSpace(m.GetColor())
-	if color == "" {
-		return nil, invalidArg("color", "must not be empty")
-	}
 	l, err := s.Store.CreateViewLayer(ctx, viewID, name, m.GetTags(), color)
 	if err != nil {
 		return nil, storeErr("create layer", err)

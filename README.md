@@ -1,16 +1,30 @@
-# tlDiagram (`tld`)
+<p align="center">
+  <a href="https://tldiagram.com">
+    <img src="./frontend/logo/tld.svg" alt="Logo" width="400">
+  </a>
+</p>
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/mertcikla/tld)](https://go.dev/) [![License](https://img.shields.io/github/license/mertcikla/tld)](./LICENSE) [![Build Status](https://img.shields.io/github/actions/workflow/status/mertcikla/tld/test.yml?branch=main)](https://github.com/mertcikla/tld/actions) [![Go Report Card](https://goreportcard.com/badge/github.com/mertcikla/tld)](https://goreportcard.com/report/github.com/mertcikla/tld)
+<p align="center">
+  <a href="https://go.dev/"><img src="https://img.shields.io/github/go-mod/go-version/mertcikla/tld" alt="Go Version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/mertcikla/tld" alt="License"></a>
+  <a href="https://github.com/mertcikla/tld/actions"><img src="https://img.shields.io/github/actions/workflow/status/mertcikla/tld/test.yml?branch=main" alt="Build Status"></a>
+  <a href="https://goreportcard.com/report/github.com/mertcikla/tld"><img src="https://goreportcard.com/badge/github.com/mertcikla/tld" alt="Go Report Card"></a>
+</p>
 
-`tld` provides a complete software architecture management platform that bundles a high-performance Go backend with an interactive React frontend into a single, standalone binary. Includes a CLI to enable managing diagrams from the shell or in CI.
+`tld` provides a complete software architecture management platform that bundles a high-performance Go backend with an interactive React frontend into a single, standalone binary. Includes a CLI to enable managing diagrams from the shell or in CI. 
 
 Designed for local-first development and private self-hosting, `tld` allows teams to visualize, document, and manage their system architecture using a combination of a rich web UI and "Diagrams as Code" workflows.
 
 ---
 
+<p align="center">
+    <img src="./assets/tld-editor-ss.png" alt="editor-ss">
+</p>
+
 ## Key Features
 
 - **Full-Featured Web UI**: A React frontend designed, polished and optimized to handle complex architectures while attempting to intelligently show and hide details.
+- **Git diff visualization**: Seamlessly sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
 - **Bi-directional Sync**: Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
 - **Standalone Distribution**: A single, dependency-free binary containing both the server and the web application.
 - **CLI built that speaks agent**: Use the [agent skill](./skills/create-diagram/SKILL.md) and teach your agent how to create a diagram of your codebase with the exact detail level you need. You can prompt your agent to add/remove details as needed. 
@@ -29,24 +43,15 @@ Here are some examples that were generated using the agent skill.
 
 ---
 
-## Table of Contents
-
-1. [Quick Start](#quick-start)
-2. [Deployment & Self-Hosting](#deployment--self-hosting)
-3. [The tlDiagram Workflow](#the-tldiagram-workflow)
-4. [Tech Stack](#tech-stack)
-5. [Development Setup](#development-setup)
-6. [Commands Reference](#commands-reference)
-7. [Workspace Structure](#workspace-structure)
-8. [Environment Variables](#environment-variables)
-9. [Troubleshooting](#troubleshooting)
-
----
-
 ## Quick Start
 ### Single line install and start
 ```bash
 curl -LsSf https://tldiagram.com/install.sh | sh -s serve --open
+```
+
+Windows:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | iex; tld serve --open"
 ```
 
 OR
@@ -54,6 +59,11 @@ OR
 ### 1. Install the binary
 ```bash
 curl -LsSf https://tldiagram.com/install.sh | sh
+```
+
+Windows:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | iex"
 ```
 
 ### 2. Launch the Web UI
@@ -76,6 +86,9 @@ Run `tld serve` in any directory to start a local instance that uses your curren
 1. Provide a persistent volume for the `.tld/` directory (where YAMLs and the SQLite cache are stored).
 2. Set `TLD_ADDR=0.0.0.0` and `PORT=8060`.
 
+### Configuration
+Various configuration options are available in `~/.config/tldiagram/tld.yaml`
+
 ---
 
 ## The tlDiagram Workflow
@@ -85,48 +98,6 @@ Run `tld serve` in any directory to start a local instance that uses your curren
 1. **Visualize**: Use `tld serve` to open the interactive UI. Drag, drop, and connect components.
 2. **Automate**: Run `tld analyze` to scan your repository. It will suggest new elements and connectors based on your actual source code.
 3. **Commit**: Save your changes. All UI edits are persisted to `elements.yaml` and `connectors.yaml`. Commit these to Git to version your architecture.
-
----
-
-## Tech Stack
-
-- **Backend**: Go 1.26+ 
-  - *CLI*: Cobra
-  - *API*: Connect RPC (gRPC compatible)
-  - *Analysis*: Tree-sitter
-  - *Database*: Embedded SQLite (`modernc.org/sqlite`)
-- **Frontend**: React 18 & TypeScript
-  - *Visualization*: ReactFlow, ElkJS (auto-layout), D3-force
-  - *UI Components*: Chakra UI
-- **Build System**: GoReleaser (for cross-platform standalone binaries)
-
----
-
-## Development Setup
-
-If you want to contribute to `tld` or build it from source:
-
-  1. **Clone the Repo**:
-   ```bash
-   git clone https://github.com/Mertcikla/tld.git
-   cd tld
-   ```
-
-2. **Install Frontend Dependencies**:
-   ```bash
-   make frontend-deps
-   ```
-
-3. **Development Mode (Hot Reloading)**:
-   This starts the Vite dev server for the frontend and the Air reloader for the Go backend.
-   ```bash
-   make dev
-   ```
-
-4. **Production Build**:
-   ```bash
-   make build
-   ```
 
 ---
 
@@ -168,7 +139,7 @@ Flags:
       --format string      output format: text or json (default "text")
   -h, --help               help for tld
   -v, --version            version for tld
-  -w, --workspace string   workspace directory (default "tld")
+  -w, --workspace string   workspace directory (prefers .tld, then tld; empty when neither exists)
 
 Use "tld [command] --help" for more information about a command
 
@@ -189,13 +160,9 @@ Use "tld [command] --help" for more information about a command
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `TLD_ADDR` | Host address to bind the server. | `127.0.0.1` |
-| `PORT` | Port for the web UI and API. | `8081` |
+| `PORT` | Port for the web UI and API. | `8060` |
 | `TLD_API_KEY` | API key for cloud synchronization. | - |
 
----
+see `tld config list` for the full list of configuration options.
 
-## Troubleshooting
-
-- **"Server already running"**: Run `tld stop` to clear the PID file and shut down the background process.
-- **UI not reflecting YAML changes**: Restart the server or ensure `tld serve` is running in the correct directory.
-- **Language support**: If a language isn't detected, ensure the parser is registered in `internal/analyzer`.
+`tld config path` shows the path to the current configuration file.

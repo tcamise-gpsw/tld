@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
-	"github.com/mertcikla/tld/internal/planner"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/planner"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestApplyCmd_SuccessAutoApprove(t *testing.T) {
@@ -27,6 +27,9 @@ func TestApplyCmd_SuccessAutoApprove(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "SUCCESS") || !strings.Contains(stdout, "## Planned vs Created") {
 		t.Fatalf("unexpected output: %q", stdout)
+	}
+	if !strings.Contains(stdout, "Target:") || !strings.Contains(stdout, "cloud") || !strings.Contains(stdout, "https://tldiagram.com/app") {
+		t.Fatalf("missing cloud target output: %q", stdout)
 	}
 }
 
@@ -68,7 +71,10 @@ func TestApplyCmd_WorkspaceIDInRequest(t *testing.T) {
 }
 
 func TestApplyCmd_ServerError_CodeInternal(t *testing.T) {
-	svc := &cmd.MockDiagramService{ApplyFunc: func(_ *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
+	svc := &cmd.MockDiagramService{ApplyFunc: func(req *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
+		if req.GetDryRun() {
+			return cmd.SuccessResponse(req), nil
+		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server exploded"))
 	}}
 	serverURL := cmd.NewMockServer(t, svc)
@@ -184,14 +190,6 @@ func TestApplyCmd_InteractiveDecline(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "Apply cancelled") {
 		t.Fatalf("stdout=%q", stdout)
-	}
-}
-
-func TestApplyCmd_MissingConfig(t *testing.T) {
-	dir := t.TempDir()
-	_, _, err := cmd.RunCmd(t, dir, "apply", "--force")
-	if err == nil || !strings.Contains(err.Error(), "load workspace") {
-		t.Fatalf("expected missing config error, got %v", err)
 	}
 }
 

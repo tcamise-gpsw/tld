@@ -16,10 +16,12 @@ import {
   Text,
   VStack,
   Icon,
+  useDisclosure,
 } from '@chakra-ui/react'
 import { ChevronDownIcon, ChevronRightIcon } from './Icons'
 import { api } from '../api/client'
 import type { ViewTreeNode } from '../types'
+import ConfirmDialog from './ConfirmDialog'
 
 type Algorithm = 'dagre' | 'force'
 
@@ -47,13 +49,15 @@ const ALGO_META: Record<Algorithm, { label: string }> = {
 interface Props {
   view: ViewTreeNode | null
   canEdit: boolean
+  onUnsupportedMutation?: () => void
 }
 
-export default function LayoutSection({ view, canEdit }: Props) {
+export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: Props) {
   const [open, setOpen] = useState(false)
   const [algo, setAlgo] = useState<Algorithm>('dagre')
   const [running, setRunning] = useState(false)
   const [collisionRunning, setCollisionRunning] = useState(false)
+  const adjustConnectorsConfirm = useDisclosure()
 
   const [dagreConfig, setDagreConfig] = useState<DagreConfig>({
     direction: 'TB',
@@ -62,7 +66,7 @@ export default function LayoutSection({ view, canEdit }: Props) {
   })
 
   const [forceConfig, setForceConfig] = useState<ForceConfig>({
-    linkDistance: 180,
+    linkDistance: 300,
     chargeStrength: -150,
     collideRadius: 130,
     iterations: 300,
@@ -70,6 +74,7 @@ export default function LayoutSection({ view, canEdit }: Props) {
 
   const handleCollisionRemoval = async () => {
     if (!canEdit || !view) return
+    onUnsupportedMutation?.()
     setCollisionRunning(true)
     try {
       const [objs, edgeList] = await Promise.all([
@@ -189,6 +194,7 @@ export default function LayoutSection({ view, canEdit }: Props) {
 
   const applyLayout = async () => {
     if (!view || !canEdit) return
+    onUnsupportedMutation?.()
     setRunning(true)
     try {
       const [objs, edgeList] = await Promise.all([
@@ -575,7 +581,7 @@ export default function LayoutSection({ view, canEdit }: Props) {
               w="full"
               variant="outline"
               colorScheme="blue"
-              onClick={handleCollisionRemoval}
+              onClick={adjustConnectorsConfirm.onOpen}
               isLoading={collisionRunning}
               isDisabled={!canEdit || !view}
               loadingText="Removing Connector Collisions..."
@@ -594,6 +600,19 @@ export default function LayoutSection({ view, canEdit }: Props) {
 
         </VStack>
       </Collapse>
+      <ConfirmDialog
+        isOpen={adjustConnectorsConfirm.isOpen}
+        onClose={adjustConnectorsConfirm.onClose}
+        onConfirm={() => {
+          adjustConnectorsConfirm.onClose();
+          void handleCollisionRemoval();
+        }}
+        title="Adjust Connectors"
+        body="This action will re-attach existing connectors to form the shortest path between the elements."
+        confirmLabel="Confirm"
+        confirmColorScheme="blue"
+        isLoading={collisionRunning}
+      />
     </Box>
   )
 }

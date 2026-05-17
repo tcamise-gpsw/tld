@@ -3,9 +3,9 @@ package connect
 import (
 	"fmt"
 
-	"github.com/mertcikla/tld/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
 
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -27,16 +27,24 @@ func NewConnectElementsCmd(wdir *string) *cobra.Command {
 		Short: "Add a connector between two elements; owner diagram is inferred from their shared parent",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateConnectorRefs(from, to, legacyView); err != nil {
+				return err
+			}
 			ws, err := workspace.Load(*wdir)
 			if err != nil {
 				return fmt.Errorf("load workspace: %w", err)
 			}
+			if err := validateConnectorEndpointsExist(ws, from, to); err != nil {
+				return err
+			}
 			view := legacyView
 			if view == "" {
-				view, err = inferConnectorView(ws, from, to)
+				view, _, err = inferConnectorView(ws, from, to)
 				if err != nil {
 					return err
 				}
+			} else if err := validateConnectorViewExists(ws, view); err != nil {
+				return err
 			}
 			spec := &workspace.Connector{
 				View:         view,
@@ -59,7 +67,6 @@ func NewConnectElementsCmd(wdir *string) *cobra.Command {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "connect", "connect", fmt.Sprintf("%s:%s", from, to))
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Appended connector %s -> %s in view %s to connectors.yaml\n", from, to, view)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to push to cloud.")
 			return nil
 		},
 	}

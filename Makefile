@@ -1,4 +1,4 @@
-.PHONY: frontend-deps frontend-build lint-be lint-fe build run clean dev test-backend build-go setup-hooks
+.PHONY: frontend-deps frontend-build lint-be lint-fe build run clean dev dev-stop test-backend build-go setup-hooks make-be make-fe
 
 setup-hooks:
 	chmod +x scripts/pre-commit.sh
@@ -18,11 +18,19 @@ lint-be:
 lint-fe: frontend-deps
 	cd frontend && npm run lint
 
-dev: frontend-deps
+be:
+	TLD_DATA_DIR=data/dev TLD_CONFIG_DIR=data/dev/config DEV=true air
+
+fe: frontend-deps
+	cd frontend && npm run dev
+
+dev:
 	@echo "Starting development stack..."
-	@(cd frontend && npm run dev) & \
-	DEV=true air; \
-	wait
+	@$(MAKE) -j 2 be fe
+
+dev-stop:
+	@echo "Stopping development backend..."
+	-pkill -x tlddebug
 
 proto: ## Update go.mod to latest BSR-published proto versions (run after buf push in proto/)
 	go get buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go@$(shell buf registry sdk version --module=buf.build/tldiagramcom/diagram --plugin=buf.build/protocolbuffers/go)

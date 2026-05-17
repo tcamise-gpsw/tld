@@ -8,7 +8,7 @@
  */
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
-export { default as ViewEditor } from './pages/ViewEditor'
+export { default as ViewEditor, type ViewEditorPermissions } from './pages/ViewEditor'
 export { default as ViewsPage } from './pages/Views'
 export { default as ViewsGrid } from './pages/ViewsGrid'
 export { default as Dependencies } from './pages/Dependencies'
@@ -94,6 +94,13 @@ export { default as theme } from './theme'
 // ─── Contexts ────────────────────────────────────────────────────────────────
 export { ThemeProvider, useAccentColor, useTheme } from './context/ThemeContext'
 export { HeaderProvider, useSetHeader, useHeader } from './components/HeaderContext'
+export {
+  WorkspaceVersionProvider,
+  buildWorkspaceVersionPreview,
+  useWorkspaceVersionPreview,
+  type WorkspaceVersionFollowTarget,
+  type WorkspaceVersionPreview,
+} from './context/WorkspaceVersionContext'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export * from './types'

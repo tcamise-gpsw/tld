@@ -34,7 +34,6 @@ interface Props {
   existingElementIds: Set<number>
   existingElements?: LibraryElement[]
   onCreateNew: () => void
-  refresh: number
   isOpen: boolean
   onClose: () => void
   onTapAdd?: (obj: LibraryElement) => void
@@ -89,7 +88,6 @@ function ElementLibrary({
   existingElementIds,
   existingElements = [],
   onCreateNew,
-  refresh,
   isOpen,
   onClose,
   onTapAdd,
@@ -124,6 +122,7 @@ function ElementLibrary({
       setHasMore(newElements.length === limit)
     } catch (err) {
       console.error('Failed to fetch elements:', err)
+      setHasMore(false)
     } finally {
       isFetching.current = false
       setLoading(false)
@@ -134,7 +133,7 @@ function ElementLibrary({
     if (isOpen) {
       fetchElements(0, searchRef.current, true)
     }
-  }, [isOpen, refresh, fetchElements])
+  }, [isOpen, fetchElements])
 
   // Debounced search
   useEffect(() => {

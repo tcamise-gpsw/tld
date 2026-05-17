@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/mertcikla/tld/internal/completion"
+	"github.com/mertcikla/tld/v2/internal/completion"
 )
 
 func setupConfig(t *testing.T) {

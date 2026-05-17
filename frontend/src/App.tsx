@@ -10,7 +10,9 @@ import Settings from './pages/Settings'
 import AppearanceSettings from './pages/AppearanceSettings'
 import { HeaderProvider, useHeader } from './components/HeaderContext'
 import TopMenuBar from './components/TopMenuBar'
+import WorkspacePanel from './components/WorkspacePanel'
 import { ThemeProvider } from './context/ThemeContext'
+import { WorkspaceVersionProvider } from './context/WorkspaceVersionContext'
 import { ACCENT_DEFAULT, BACKGROUND_DEFAULT, ELEMENT_DEFAULT, hexToRgba } from './constants/colors'
 import { platform } from './platform/local'
 
@@ -18,18 +20,23 @@ function AppLayout() {
   const header = useHeader()
   const node = header && typeof header === 'object' && 'node' in header ? (header as { node: React.ReactNode }).node : header
   const hideMobileBar = header && typeof header === 'object' && 'hideMobileBar' in header ? !!(header as { hideMobileBar?: boolean }).hideMobileBar : false
+  const hideTopBar = typeof window !== 'undefined' && !!window.__TLD_VSCODE__
 
   return (
-    <Box h="100vh" display="flex" flexDirection="column" bg="var(--bg-canvas)" overflow="hidden">
-      <TopMenuBar hideMobileBar={hideMobileBar}>
-        {node}
-      </TopMenuBar>
-      <Box
-        h={{ base: 'var(--topbar-h-mobile-total)', sm: 'var(--topbar-h-total)' }}
-        mb={{ base: 'var(--topbar-content-gap)', sm: '0px' }}
-        flexShrink={0}
-      />
-      <Box flex="1" overflow="hidden" position="relative">
+    <Box h="100dvh" display="flex" flexDirection="column" bg="var(--bg-canvas)" overflow="hidden">
+      {!hideTopBar && (
+        <>
+          <TopMenuBar hideMobileBar={hideMobileBar} rightSlot={<WorkspacePanel />}>
+            {node}
+          </TopMenuBar>
+          <Box
+            h={{ base: 'var(--topbar-h-mobile-total)', sm: 'var(--topbar-h-total)' }}
+            mb={{ base: 'var(--topbar-content-gap)', sm: '0px' }}
+            flexShrink={0}
+          />
+        </>
+      )}
+      <Box flex="1" minH={0} overflow="hidden" position="relative">
         <Outlet />
       </Box>
     </Box>
@@ -77,7 +84,7 @@ function HomeRedirect() {
 
   if (loading) {
     return (
-      <Center h="100vh">
+      <Center h="100%">
         <Spinner size="xl" />
       </Center>
     )
@@ -97,7 +104,7 @@ export default function App() {
 
   if (!ready) {
     return (
-      <Center h="100vh">
+      <Center h="100dvh">
         <Spinner size="xl" />
       </Center>
     )
@@ -105,15 +112,17 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <Box minH="100vh" bg="var(--bg-canvas)">
+      <Box h="100dvh" bg="var(--bg-canvas)" overflow="hidden">
         <Routes>
           {platform.getRoutes({ user: null })}
 
-          <Route path="/explore/shared/:token" element={<Box h="100vh" overflow="hidden"><HeaderProvider><SharedInfiniteZoom /></HeaderProvider></Box>} />
+          <Route path="/explore/shared/:token" element={<Box h="100dvh" overflow="hidden"><HeaderProvider><WorkspaceVersionProvider><SharedInfiniteZoom /></WorkspaceVersionProvider></HeaderProvider></Box>} />
           <Route
             element={
               <HeaderProvider>
-                <AppLayout />
+                <WorkspaceVersionProvider>
+                  <AppLayout />
+                </WorkspaceVersionProvider>
               </HeaderProvider>
             }
           >

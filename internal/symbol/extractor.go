@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mertcikla/tld/internal/ignore"
-	"github.com/mertcikla/tld/internal/symbol/grammars"
+	"github.com/mertcikla/tld/v2/internal/ignore"
+	"github.com/mertcikla/tld/v2/internal/symbol/grammars"
 )
 
 // ExtractFile extracts symbols and refs from a single source file.

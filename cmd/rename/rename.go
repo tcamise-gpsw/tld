@@ -3,9 +3,10 @@ package rename
 import (
 	"fmt"
 
-	"github.com/mertcikla/tld/internal/cmdutil"
-	"github.com/mertcikla/tld/internal/completion"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/completion"
+	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -30,9 +31,7 @@ func NewRenameCmd(wdir *string) *cobra.Command {
 			if cmdutil.WantsJSON(cmd.Root().PersistentFlags().Lookup("format").Value.String()) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), cmd.Root().PersistentFlags().Lookup("compact").Value.String() == "true", "rename", "rename", fmt.Sprintf("%s -> %s", from, to))
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Renamed element %s to %s in elements.yaml\n", from, to)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Note: References in connectors.yaml and other diagrams were updated automatically.")
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally. Run 'tld apply' to push to cloud.")
+			term.Successf(cmd.OutOrStdout(), "renamed %s → %s", from, to)
 			return nil
 		},
 	}

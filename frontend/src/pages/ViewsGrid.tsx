@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type SetStateAction } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SafeBackground } from '../components/SafeBackground'
 import { Text as HeaderText } from '@chakra-ui/react'
@@ -38,7 +38,7 @@ import {
   useBreakpointValue,
 } from '@chakra-ui/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { SearchIcon, CloseIcon, AddIcon } from '@chakra-ui/icons'
+import { AddIcon, CloseIcon, SearchIcon } from '@chakra-ui/icons'
 import { api } from '../api/client'
 import { toast } from '../utils/toast'
 import type { ViewTreeNode } from '../types'
@@ -60,57 +60,59 @@ function flattenTree(roots: ViewTreeNode[]): ViewTreeNode[] {
   return result
 }
 
+function filterTreeForGrid(nodes: ViewTreeNode[], allowedIds: Set<number> | null): ViewTreeNode[] {
+  if (!allowedIds) return nodes
+
+  const visit = (node: ViewTreeNode): ViewTreeNode | null => {
+    const children = node.children
+      .map(visit)
+      .filter((child): child is ViewTreeNode => child !== null)
+    const include = allowedIds.has(node.id) || (node.parent_view_id === null && children.length > 0)
+    if (!include) return null
+    return { ...node, children }
+  }
+
+  return nodes
+    .map(visit)
+    .filter((node): node is ViewTreeNode => node !== null)
+}
+
 // ── Layout algorithm ──────────────────────────────────────────────────────────
 
 const CELL_W = 260
 const CELL_H = 150
 const GAP_H = 80
 const GAP_V = 120
+const COMPACT_WORKSPACE_THRESHOLD = 32
+const LAYOUT_TRANSITION = 'transform 560ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms ease, filter 260ms ease'
 
-function subtreeWidth(node: ViewTreeNode): number {
-  if (node.children.length === 0) return 1
-  return node.children.reduce((sum, c) => sum + subtreeWidth(c), 0)
+interface GridDisplayNode {
+  id: string
+  kind: 'view' | 'cluster'
+  view: ViewTreeNode
+  parentId: string | null
+  depth: number
+  children: GridDisplayNode[]
+  collapsedCount?: number
+  dimmed?: boolean
 }
 
-function buildDescendantSets(roots: ViewTreeNode[]): Map<number, Set<number>> {
-  const map = new Map<number, Set<number>>()
-
-  function visit(node: ViewTreeNode): Set<number> {
-    const set = new Set([node.id])
-    node.children.forEach((child) => {
-      const childSet = visit(child)
-      childSet.forEach((id) => set.add(id))
-    })
-    map.set(node.id, set)
-    return set
-  }
-
-  roots.forEach(visit)
-  return map
+function displaySubtreeWidth(node: GridDisplayNode): number {
+  if (node.children.length === 0) return 1
+  return node.children.reduce((sum, child) => sum + displaySubtreeWidth(child), 0)
 }
 
 /**
- * Compute layout positions.
- *
- * Y-axis: node.depth (= node.level) - honours manual level overrides so a
- *         diagram at L2 is always rendered in the L2 row even if its parent
- *         is at L0.
- *
- * X-axis: column derived from the tree-walk (pre-order rank within each
- *         level band), then a de-overlap pass shifts any colliding nodes and
- *         their subtrees rightward so nothing overlaps on the same row.
+ * Compute layout positions for real cards plus collapsed cluster cards.
+ * Y follows view depth so manual level overrides still read as horizontal bands.
  */
-function computeLayout(roots: ViewTreeNode[]): Map<number, { x: number; y: number }> {
-  const positions = new Map<number, { x: number; y: number }>()
-  const flat: ViewTreeNode[] = []
-  const visit = (n: ViewTreeNode) => { flat.push(n); n.children.forEach(visit) }
-  roots.forEach(visit)
+function computeDisplayLayout(roots: GridDisplayNode[]): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>()
+  if (roots.length === 0) return positions
+  const flat = flattenDisplayTree(roots)
 
-  if (flat.length === 0) return positions
-
-  // ── Step 1: initial column assignment via tree walk ─────────────────────────
-  function layoutNode(node: ViewTreeNode, startCol: number) {
-    const w = subtreeWidth(node)
+  function layoutNode(node: GridDisplayNode, startCol: number) {
+    const w = displaySubtreeWidth(node)
     const centerCol = startCol + (w - 1) / 2
     positions.set(node.id, {
       x: centerCol * (CELL_W + GAP_H),
@@ -119,41 +121,44 @@ function computeLayout(roots: ViewTreeNode[]): Map<number, { x: number; y: numbe
     let childStart = startCol
     for (const child of node.children) {
       layoutNode(child, childStart)
-      childStart += subtreeWidth(child)
+      childStart += displaySubtreeWidth(child)
     }
   }
+
   let col = 0
   for (const root of roots) {
     layoutNode(root, col)
-    col += subtreeWidth(root)
+    col += displaySubtreeWidth(root)
   }
-  // ── Step 2: build descendant sets so we can shift whole subtrees ────────────
-  const descendants = buildDescendantSets(roots)
 
-  // ── Step 3: de-overlap pass - per Y row (top-down), fix X collisions ────────
-  const STEP = CELL_W + GAP_H
-  const byY = new Map<number, number[]>()
-  flat.forEach((n) => {
-    const y = n.depth * (CELL_H + GAP_V)
+  const descendants = new Map<string, Set<string>>()
+  const collectDescendants = (node: GridDisplayNode): Set<string> => {
+    const set = new Set([node.id])
+    node.children.forEach((child) => {
+      collectDescendants(child).forEach((id) => set.add(id))
+    })
+    descendants.set(node.id, set)
+    return set
+  }
+  roots.forEach(collectDescendants)
+
+  const byY = new Map<number, string[]>()
+  flat.forEach((node) => {
+    const y = node.depth * (CELL_H + GAP_V)
     if (!byY.has(y)) byY.set(y, [])
-    byY.get(y)!.push(n.id)
+    byY.get(y)!.push(node.id)
   })
 
-  // Process rows top-down (ascending Y) so parent shifts propagate downward first
   const sortedYRows = Array.from(byY.entries()).sort(([ya], [yb]) => ya - yb)
-
+  const step = CELL_W + GAP_H
   for (const [rowY, ids] of sortedYRows) {
-    // Snapshot original X values before any mutations in this row -
-    // this prevents a just-shifted node's new position from cascading
-    // into the next comparison and wrongly pushing correct neighbors right.
-    const origX = new Map<number, number>(ids.map((id) => [id, positions.get(id)?.x ?? 0]))
+    const origX = new Map<string, number>(ids.map((id) => [id, positions.get(id)?.x ?? 0]))
     ids.sort((a, b) => (origX.get(a) ?? 0) - (origX.get(b) ?? 0))
-
     let rightmostX = origX.get(ids[0]) ?? 0
 
     for (let i = 1; i < ids.length; i++) {
       const originalX = origX.get(ids[i]) ?? 0
-      const placedX = Math.max(originalX, rightmostX + STEP)
+      const placedX = Math.max(originalX, rightmostX + step)
 
       if (placedX > originalX) {
         const delta = placedX - originalX
@@ -171,6 +176,150 @@ function computeLayout(roots: ViewTreeNode[]): Map<number, { x: number; y: numbe
   }
 
   return positions
+}
+
+function countDescendantViews(node: ViewTreeNode): number {
+  return node.children.reduce((sum, child) => sum + 1 + countDescendantViews(child), 0)
+}
+
+function flattenDisplayTree(roots: GridDisplayNode[]): GridDisplayNode[] {
+  const result: GridDisplayNode[] = []
+  const visit = (node: GridDisplayNode) => {
+    result.push(node)
+    node.children.forEach(visit)
+  }
+  roots.forEach(visit)
+  return result
+}
+
+function sumContentCounts(
+  nodes: ViewTreeNode[],
+  countsByView: Record<number, { nodes: number; edges: number }>
+): { nodes: number; edges: number } {
+  let nodesCount = 0
+  let edgesCount = 0
+
+  const visit = (node: ViewTreeNode) => {
+    const counts = countsByView[node.id]
+    nodesCount += counts?.nodes ?? 0
+    edgesCount += counts?.edges ?? 0
+    node.children.forEach(visit)
+  }
+
+  nodes.forEach(visit)
+  return { nodes: nodesCount, edges: edgesCount }
+}
+
+function buildDisplayTree(roots: ViewTreeNode[], focusedId: number | null): GridDisplayNode[] {
+  const flat = flattenTree(roots)
+  if (flat.length <= COMPACT_WORKSPACE_THRESHOLD) {
+    const convert = (node: ViewTreeNode, parentId: string | null): GridDisplayNode => ({
+      id: String(node.id),
+      kind: 'view',
+      view: node,
+      parentId,
+      depth: node.depth,
+      children: node.children.map((child) => convert(child, String(node.id))),
+    })
+    return roots.map((root) => convert(root, null))
+  }
+
+  const byId = new Map(flat.map((node) => [node.id, node]))
+  const focusedNode = focusedId ? byId.get(focusedId) ?? null : null
+  const visible = new Set<number>()
+  const emphasis = new Set<number>()
+
+  if (!focusedNode) {
+    flat.forEach((node) => {
+      if (node.parent_view_id === null || node.depth <= 1) visible.add(node.id)
+    })
+  } else {
+    let cursor: ViewTreeNode | undefined = focusedNode
+    while (cursor) {
+      visible.add(cursor.id)
+      emphasis.add(cursor.id)
+      cursor = cursor.parent_view_id ? byId.get(cursor.parent_view_id) : undefined
+    }
+
+    roots.forEach((root) => visible.add(root.id))
+
+    const parent = focusedNode.parent_view_id ? byId.get(focusedNode.parent_view_id) : null
+    const siblings = flat.filter((node) => node.parent_view_id === focusedNode.parent_view_id)
+    siblings.forEach((node) => {
+      visible.add(node.id)
+      emphasis.add(node.id)
+    })
+
+    focusedNode.children.forEach((child) => {
+      visible.add(child.id)
+      emphasis.add(child.id)
+    })
+
+    parent?.children.forEach((child) => visible.add(child.id))
+  }
+
+  const makeNode = (node: ViewTreeNode, parentId: string | null): GridDisplayNode | null => {
+    if (!visible.has(node.id)) return null
+
+    const displayId = String(node.id)
+    const visibleChildren = node.children
+      .map((child) => makeNode(child, displayId))
+      .filter((child): child is GridDisplayNode => child !== null)
+
+    const hiddenChildren = node.children.filter((child) => !visible.has(child.id))
+    const hiddenCount = hiddenChildren.reduce((sum, child) => sum + 1 + countDescendantViews(child), 0)
+    const cluster: GridDisplayNode[] = hiddenCount > 0 ? [{
+      id: `${node.id}:cluster`,
+      kind: 'cluster',
+      view: node,
+      parentId: displayId,
+      depth: node.depth + 1,
+      children: [],
+      collapsedCount: hiddenCount,
+      dimmed: focusedNode ? !emphasis.has(node.id) : false,
+    }] : []
+
+    return {
+      id: displayId,
+      kind: 'view',
+      view: node,
+      parentId,
+      depth: node.depth,
+      children: [...visibleChildren, ...cluster],
+      dimmed: focusedNode ? !emphasis.has(node.id) : false,
+    }
+  }
+
+  return roots
+    .map((root) => makeNode(root, null))
+    .filter((node): node is GridDisplayNode => node !== null)
+}
+
+function buildStableLayoutIds(flat: ViewTreeNode[], focusedId: number | null): Set<string> {
+  const stable = new Set<string>()
+  const byId = new Map(flat.map((node) => [node.id, node]))
+
+  if (focusedId === null) {
+    flat.forEach((node) => {
+      if (node.parent_view_id === null || node.depth <= 1) stable.add(String(node.id))
+    })
+    return stable
+  }
+
+  const focused = byId.get(focusedId)
+  if (!focused) return stable
+
+  let cursor: ViewTreeNode | undefined = focused
+  while (cursor) {
+    stable.add(String(cursor.id))
+    cursor = cursor.parent_view_id ? byId.get(cursor.parent_view_id) : undefined
+  }
+
+  flat.forEach((node) => {
+    if (node.parent_view_id === focused.parent_view_id) stable.add(String(node.id))
+  })
+
+  return stable
 }
 
 
@@ -323,21 +472,27 @@ const HIERARCHY_EDGE_COLOR = 'rgba(255,255,255,0.2)'
 
 interface Props {
   onShare?: (viewId: number) => void
+  treeData: ViewTreeNode[]
+  loading: boolean
+  focusedId: number | null
+  onFocusChange: (viewId: number | null) => void
+  setTreeData: Dispatch<SetStateAction<ViewTreeNode[]>>
+  refreshTree: () => Promise<void>
 }
 
 // ── Root component - provides ReactFlow context ───────────────────────────────
 
-export default function ViewsGrid({ onShare }: Props) {
+export default function ViewsGrid(props: Props) {
   return (
     <ReactFlowProvider>
-      <ViewGridInner onShare={onShare} />
+      <ViewGridInner {...props} />
     </ReactFlowProvider>
   )
 }
 
 // ── Inner component - has access to useReactFlow() ────────────────────────────
 
-function ViewGridInner({ onShare }: Props) {
+function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, setTreeData, refreshTree }: Props) {
   const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
   const navigate = useNavigate()
   const { accent } = useAccentColor()
@@ -386,20 +541,17 @@ function ViewGridInner({ onShare }: Props) {
     return () => el.removeEventListener('wheel', onWheel, { capture: true })
   }, [zoomIn, zoomOut])
 
-  // ── Core state ──────────────────────────────────────────────────────────────
-  const [treeData, setTreeData] = useState<ViewTreeNode[]>([])
-  const [loading, setLoading] = useState(true)
-
   // ── Derived tree structures ─────────────────────────────────────────────────
-  const roots = useMemo(() => treeData, [treeData])
+  const [gridViewIds, setGridViewIds] = useState<Set<number> | null>(null)
+  const roots = useMemo(() => filterTreeForGrid(treeData, gridViewIds), [treeData, gridViewIds])
   const flatTree = useMemo(() => flattenTree(roots), [roots])
 
-  const [focusedId, setFocusedId] = useState<number | null>(null)
+  // Jump search
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<ViewTreeNode[]>([])
   const [activeSearchIndex, setActiveSearchIndex] = useState(-1)
 
-  const handleSearch = (term: string) => {
+  const handleSearch = useCallback((term: string) => {
     setSearchTerm(term)
     if (term.trim().length < 3) {
       setSearchResults([])
@@ -407,41 +559,40 @@ function ViewGridInner({ onShare }: Props) {
       return
     }
 
+    const normalizedTerm = term.toLowerCase()
     const matches = flatTree
-      .filter(n => n.name.toLowerCase().includes(term.toLowerCase()))
+      .filter((node) => node.name.toLowerCase().includes(normalizedTerm))
       .slice(0, 5)
 
     setSearchResults(matches)
     if (matches.length > 0) {
       setActiveSearchIndex(0)
-      setFocusedId(matches[0].id)
+      onFocusChange(matches[0].id)
     } else {
       setActiveSearchIndex(-1)
     }
-  }
+  }, [flatTree, onFocusChange])
 
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+  const handleSearchKeyDown = useCallback((e: ReactKeyboardEvent) => {
     if (searchResults.length === 0) return
 
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       const nextIndex = (activeSearchIndex + 1) % searchResults.length
       setActiveSearchIndex(nextIndex)
-      setFocusedId(searchResults[nextIndex].id)
+      onFocusChange(searchResults[nextIndex].id)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       const nextIndex = (activeSearchIndex - 1 + searchResults.length) % searchResults.length
       setActiveSearchIndex(nextIndex)
-      setFocusedId(searchResults[nextIndex].id)
-    } else if (e.key === 'Enter') {
-      if (activeSearchIndex >= 0) {
-        navigate(`/views/${searchResults[activeSearchIndex].id}`)
-      }
+      onFocusChange(searchResults[nextIndex].id)
+    } else if (e.key === 'Enter' && activeSearchIndex >= 0) {
+      navigate(`/views/${searchResults[activeSearchIndex].id}`)
     } else if (e.key === 'Escape') {
       setSearchResults([])
       setActiveSearchIndex(-1)
     }
-  }
+  }, [activeSearchIndex, navigate, onFocusChange, searchResults])
 
   // Rename
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -467,16 +618,21 @@ function ViewGridInner({ onShare }: Props) {
   const [isCreating, setIsCreating] = useState(false)
 
   const handleCreate = async () => {
-    if (!newName.trim()) return
+    const name = newName.trim()
+    if (!name) return
     setIsCreating(true)
     try {
-      const d = await api.workspace.views.create({ name: newName.trim() })
-      await refresh()
-      navigate(`/views/${d.id}`)
+      const view = await api.workspace.views.create({ name })
+      await refreshTree()
+      navigate(`/views/${view.id}`)
       onCreateClose()
       setNewName('')
     } catch (err: unknown) {
-      toast({ title: 'Failed to create diagram', description: err instanceof Error ? err.message : 'An unexpected error occurred', status: 'error' })
+      toast({
+        title: 'Failed to create diagram',
+        description: err instanceof Error ? err.message : 'An unexpected error occurred',
+        status: 'error',
+      })
     } finally {
       setIsCreating(false)
     }
@@ -489,44 +645,48 @@ function ViewGridInner({ onShare }: Props) {
   // Level change mode
   const [levelEditingNodeId, setLevelEditingNodeId] = useState<number | null>(null)
 
-  // Share modal
-  // ── Data fetching ───────────────────────────────────────────────────────────
-  const refresh = useCallback(async () => {
-    const tree = await api.workspace.views.tree().catch(() => null)
-    if (tree) {
-      setTreeData(tree)
-      if (tree.length === 0 && !localStorage.getItem('onboarding_shown')) {
-        localStorage.setItem('onboarding_shown', '1')
-        setOnboardingStep(1)
-      }
+  useEffect(() => {
+    if (treeData.length === 0 && !loading && !localStorage.getItem('onboarding_shown')) {
+      localStorage.setItem('onboarding_shown', '1')
+      setOnboardingStep(1)
     }
-    setLoading(false)
-  }, [])
+  }, [loading, treeData.length])
 
-  useEffect(() => { refresh() }, [refresh])
-
-  // Fetch node/edge counts
+  // Fetch visible grid cards and node/edge counts in one workspace roundtrip.
   useEffect(() => {
     let cancelled = false
-    const ids = flatTree.map((n) => n.id)
-    if (ids.length === 0) { setCountsByDiagram({}); return }
+    if (treeData.length === 0) {
+      setGridViewIds(new Set())
+      setCountsByDiagram({})
+      return
+    }
     ; (async () => {
-      const next: Record<number, { nodes: number; edges: number }> = {}
-      await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const [objs, edges] = await Promise.all([
-              api.workspace.views.placements.list(id),
-              api.workspace.connectors.list(id),
-            ])
-            next[id] = { nodes: objs.length, edges: edges.length }
-          } catch { /* ignore per-diagram failure */ }
+      try {
+        const workspace = await api.workspace.views.gridData()
+        if (cancelled) return
+
+        const visibleIds = new Set(flattenTree(workspace.views).map((view) => view.id))
+        const next: Record<number, { nodes: number; edges: number }> = {}
+
+        visibleIds.forEach((id) => {
+          const content = workspace.content[id]
+          next[id] = {
+            nodes: content?.placements.length ?? 0,
+            edges: content?.connectors.length ?? 0,
+          }
         })
-      )
-      if (!cancelled) setCountsByDiagram((prev) => ({ ...prev, ...next }))
+
+        setGridViewIds(visibleIds)
+        setCountsByDiagram(next)
+      } catch {
+        if (!cancelled) {
+          setGridViewIds(null)
+          setCountsByDiagram({})
+        }
+      }
     })()
     return () => { cancelled = true }
-  }, [flatTree])
+  }, [treeData])
 
   // ── Rename ──────────────────────────────────────────────────────────────────
   const startEdit = useCallback((id: number, name: string) => {
@@ -545,7 +705,7 @@ function ViewGridInner({ onShare }: Props) {
     await api.workspace.views.rename(id, name).catch(() =>
       setTreeData((d) => d.map((n) => (n.id === id ? { ...n, name: prev.name } : n)))
     )
-  }, [editingId, editName, treeData])
+  }, [editingId, editName, setTreeData, treeData])
 
   const cancelEdit = useCallback(() => setEditingId(null), [])
 
@@ -569,7 +729,7 @@ function ViewGridInner({ onShare }: Props) {
           : n
       )
     )
-  }, [])
+  }, [setTreeData])
 
   // ── Delete ──────────────────────────────────────────────────────────────────
   const handleDeleteConfirm = async () => {
@@ -612,15 +772,15 @@ function ViewGridInner({ onShare }: Props) {
     } catch {
       // global error toast will show
     }
-    await refresh()
-  }, [levelEditingNodeId, treeData, refresh])
+    await refreshTree()
+  }, [levelEditingNodeId, treeData, refreshTree, setTreeData])
 
   const handleOnboardingCreate = async () => {
     setOnboardingCreating(true)
     try {
       const d = await api.workspace.views.create({ name: onboardingName.trim() || 'My First Diagram' })
       setOnboardingDiagramId(d.id)
-      await refresh()
+      await refreshTree()
       setOnboardingStep(2)
     } catch { /* ignore */ } finally {
       setOnboardingCreating(false)
@@ -628,7 +788,49 @@ function ViewGridInner({ onShare }: Props) {
   }
 
   // ── RF nodes - pure derivation, no useState/useEffect ───────────────────────
-  const layoutPositions = useMemo(() => computeLayout(roots), [roots])
+  const displayTree = useMemo(
+    () => buildDisplayTree(roots, focusedId),
+    [roots, focusedId]
+  )
+  const displayFlat = useMemo(() => flattenDisplayTree(displayTree), [displayTree])
+  const rawLayoutPositions = useMemo(() => computeDisplayLayout(displayTree), [displayTree])
+  const stableLayoutIds = useMemo(() => buildStableLayoutIds(flatTree, focusedId), [flatTree, focusedId])
+  const previousLayoutRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+
+  const layoutPositions = useMemo(() => {
+    const next = new Map(rawLayoutPositions)
+    const previousLayout = previousLayoutRef.current
+
+    if (focusedId !== null) {
+      const focusedKey = String(focusedId)
+      const previousFocusedPosition = previousLayout.get(focusedKey)
+      const nextFocusedPosition = next.get(focusedKey)
+
+      if (previousFocusedPosition && nextFocusedPosition) {
+        const dx = previousFocusedPosition.x - nextFocusedPosition.x
+        const dy = previousFocusedPosition.y - nextFocusedPosition.y
+
+        if (dx !== 0 || dy !== 0) {
+          next.forEach((position, id) => {
+            next.set(id, { x: position.x + dx, y: position.y + dy })
+          })
+        }
+      }
+    }
+
+    stableLayoutIds.forEach((id) => {
+      const previousPosition = previousLayout.get(id)
+      if (previousPosition && next.has(id)) {
+        next.set(id, previousPosition)
+      }
+    })
+
+    return next
+  }, [rawLayoutPositions, focusedId, stableLayoutIds])
+
+  useEffect(() => {
+    previousLayoutRef.current = layoutPositions
+  }, [layoutPositions])
 
   // Stable during drag (layoutPositions only changes after treeData refresh, never on mouse moves)
   const computedMinZoom = useMemo(() => {
@@ -682,35 +884,50 @@ function ViewGridInner({ onShare }: Props) {
   }, [focusedId, flatTree])
 
   const rfNodes = useMemo((): RFNode[] =>
-    flatTree.map((n): RFNode => ({
-      id: String(n.id),
-      type: 'diagramGrid',
-      position: layoutPositions.get(n.id) ?? { x: 0, y: 0 },
-      data: {
-        id: n.id,
-        name: n.name,
-        level_label: n.level_label,
-        counts: countsByView[n.id],
-        focused: focusedId === n.id,
-        canEdit,
-        isEditing: editingId === n.id,
-        editName,
-        onFocus: () => setFocusedId(n.id),
-        onOpen: () => navigate(`/views/${n.id}`),
-        onStartRename: () => startEdit(n.id, n.name),
-        onDetails: () => handleDetailsOpen(n.id),
-        onDelete: () => { setDeleteTargetId(n.id); onDeleteOpen() },
-        onShare: onShare ? () => onShare(n.id) : () => {},
-        onEditNameChange: setEditName,
-        onEditCommit: commitEdit,
-        onEditCancel: cancelEdit,
-        isMobile: isMobileLayout,
-        wasdKey: wasdTargets[n.id],
-      } satisfies ViewGridNodeData,
-      draggable: false,
-    })),
+    displayFlat.map((displayNode): RFNode => {
+      const n = displayNode.view
+      const isCluster = displayNode.kind === 'cluster'
+      const hiddenChildren = isCluster
+        ? n.children.filter((child) => !displayFlat.some((visibleNode) => visibleNode.kind === 'view' && visibleNode.view.id === child.id))
+        : []
+
+      return {
+        id: displayNode.id,
+        type: 'diagramGrid',
+        position: layoutPositions.get(displayNode.id) ?? { x: 0, y: 0 },
+        data: {
+          id: n.id,
+          name: isCluster ? `${n.name} descendants` : n.name,
+          level_label: isCluster ? 'Collapsed stack' : n.level_label,
+          counts: isCluster ? sumContentCounts(hiddenChildren, countsByView) : countsByView[n.id],
+          kind: displayNode.kind,
+          collapsedCount: displayNode.collapsedCount,
+          dimmed: displayNode.dimmed,
+          focused: !isCluster && focusedId === n.id,
+          canEdit: !isCluster && canEdit,
+          isEditing: !isCluster && editingId === n.id,
+          editName,
+          onFocus: () => onFocusChange(n.id),
+          onOpen: () => isCluster ? onFocusChange(n.id) : navigate(`/views/${n.id}`),
+          onStartRename: () => startEdit(n.id, n.name),
+          onDetails: () => handleDetailsOpen(n.id),
+          onDelete: () => { setDeleteTargetId(n.id); onDeleteOpen() },
+          onShare: onShare ? () => onShare(n.id) : () => { },
+          onEditNameChange: setEditName,
+          onEditCommit: commitEdit,
+          onEditCancel: cancelEdit,
+          isMobile: isMobileLayout,
+          wasdKey: isCluster ? undefined : wasdTargets[n.id],
+        } satisfies ViewGridNodeData,
+        draggable: false,
+        style: {
+          transition: LAYOUT_TRANSITION,
+          zIndex: displayNode.kind === 'cluster' ? 1 : focusedId === n.id ? 3 : 2,
+        },
+      }
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [flatTree, layoutPositions, focusedId, countsByView,
+    [displayFlat, layoutPositions, focusedId, countsByView,
       editingId, editName, canEdit, navigate, startEdit, handleDetailsOpen,
       commitEdit, cancelEdit, onDeleteOpen,
       wasdTargets, levelEditingNodeId]
@@ -757,17 +974,17 @@ function ViewGridInner({ onShare }: Props) {
 
   // ── RF edges ────────────────────────────────────────────────────────────────
   const rfEdges = useMemo((): RFEdge[] =>
-    flatTree
-      .filter((n) => n.parent_view_id)
+    displayFlat
+      .filter((n) => n.parentId)
       .map((n) => ({
-        id: `${n.parent_view_id}-${n.id}`,
-        source: String(n.parent_view_id!),
-        target: String(n.id),
+        id: `${n.parentId}-${n.id}`,
+        source: n.parentId!,
+        target: n.id,
         type: 'floating',
         animated: false,
-        data: { color: HIERARCHY_EDGE_COLOR, dashed: false },
+        data: { color: n.kind === 'cluster' ? hexToRgba(accent, 0.28) : HIERARCHY_EDGE_COLOR, dashed: n.kind === 'cluster' },
       })),
-    [flatTree]
+    [displayFlat, accent]
   )
 
   const allRfEdges = rfEdges
@@ -782,7 +999,7 @@ function ViewGridInner({ onShare }: Props) {
         if (levelEditingNodeId !== null) {
           setLevelEditingNodeId(null)
         } else {
-          setFocusedId(null)
+          onFocusChange(null)
         }
         return
       }
@@ -794,7 +1011,7 @@ function ViewGridInner({ onShare }: Props) {
 
       // Auto-select first card if nothing is focused yet
       if (!focusedId) {
-        if (flatTree.length > 0) setFocusedId(flatTree[0].id)
+        if (flatTree.length > 0) onFocusChange(flatTree[0].id)
         return
       }
 
@@ -816,17 +1033,17 @@ function ViewGridInner({ onShare }: Props) {
         nextId = idx < siblings.length - 1 ? siblings[idx + 1].id : null
       }
 
-      if (nextId) setFocusedId(nextId)
+      if (nextId) onFocusChange(nextId)
     }
 
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [focusedId, flatTree, navigate, levelEditingNodeId])
+  }, [focusedId, flatTree, navigate, levelEditingNodeId, onFocusChange])
 
   // ── Camera: pan to focused node only when it's out of view ──────────────────
   useEffect(() => {
     if (!focusedId) return
-    const pos = layoutPositions.get(focusedId)
+    const pos = layoutPositions.get(String(focusedId))
     if (!pos) return
     const t = setTimeout(() => {
       const { x: vpX, y: vpY, zoom } = getViewport()
@@ -911,7 +1128,7 @@ function ViewGridInner({ onShare }: Props) {
                         bg={idx === activeSearchIndex ? 'whiteAlpha.100' : 'transparent'}
                         _hover={{ bg: 'whiteAlpha.50' }}
                         onClick={() => {
-                          setFocusedId(result.id)
+                          onFocusChange(result.id)
                           navigate(`/views/${result.id}`)
                           setSearchResults([])
                         }}
@@ -1097,11 +1314,10 @@ function ViewGridInner({ onShare }: Props) {
             nodesDraggable={false}
             nodesConnectable={false}
             onPaneClick={() => {
-              setFocusedId(null)
+              onFocusChange(null)
             }}
             style={{
-              background: 'var(--bg-canvas)',
-              boxShadow: 'inset 0 0 100px rgba(0,0,0,0.6)'
+              background: 'var(--bg-canvas)'
             }}
           >
             {/* Micro dots for high precision technical feel */}
@@ -1123,7 +1339,7 @@ function ViewGridInner({ onShare }: Props) {
               <Text color="gray.600" fontSize="sm" mb={1}>No views yet.</Text>
               {canEdit && (
                 <>
-                  <Text color="gray.700" fontSize="xs" mb={4}>Click "New Diagram" to get started.</Text>
+                  <Text color="gray.700" fontSize="xs" mb={4}>Click "+ New" to get started.</Text>
 
                 </>
               )}

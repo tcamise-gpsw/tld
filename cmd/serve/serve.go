@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,10 +13,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mertcikla/tld/internal/cmdutil"
-	"github.com/mertcikla/tld/internal/localserver"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/localserver"
+	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
+)
+
+const (
+	backgroundReadyTimeout = 30 * time.Second
+	readyRequestTimeout    = 10 * time.Second
 )
 
 func defaultServeRunE(cmd *cobra.Command, args []string) error {
@@ -26,7 +34,10 @@ func defaultServeRunE(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetString("port")
 	dataDirFlag, _ := cmd.Flags().GetString("data-dir")
 
-	cfg, _ := workspace.LoadGlobalConfig()
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
 	dataDir, err := workspace.ResolveDataDir(cfg, dataDirFlag)
 	if err != nil {
 		return err
@@ -39,16 +50,41 @@ func defaultServeRunE(cmd *cobra.Command, args []string) error {
 }
 
 func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser bool) error {
-	opts := resolveServeOptions(host, port)
+	started := time.Now()
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	opts := resolveServeOptions(cfg, host, port)
 
 	app, err := localserver.Bootstrap(dataDir, opts)
 	if err != nil {
 		return err
 	}
+	if err := localserver.RegisterProcess(localserver.ProcessRecord{
+		Kind:    localserver.ProcessKindServer,
+		PID:     os.Getpid(),
+		DataDir: dataDir,
+		Addr:    app.Addr,
+	}); err != nil {
+		return err
+	}
+	defer func() { _ = localserver.RemoveProcess(os.Getpid()) }()
 
-	PrintLogo(cmd.OutOrStdout())
+	updateStatus, updateNote := StartupUpdateStatus(cmd.Context(), cfg)
+	PrintLogoWithUpdate(cmd.OutOrStdout(), updateStatus)
+	if updateNote != "" {
+		term.Hint(cmd.OutOrStdout(), updateNote)
+	}
 	url := "http://" + app.Addr
-	printServeInfo(cmd.OutOrStdout(), url, dataDir)
+	printServeInfo(cmd.OutOrStdout(), url, serveStatus{
+		Mode:            "foreground",
+		InitializedData: app.InitializedData,
+		Resources:       app.Resources,
+		BindAddr:        app.Addr,
+		Startup:         time.Since(started),
+		DBPath:          app.DBPath,
+	})
 
 	if openBrowser {
 		_ = cmdutil.OpenBrowser(url)
@@ -72,15 +108,37 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 }
 
 func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser bool) error {
-	pidPath := localserver.PIDPath(dataDir)
-	opts := resolveServeOptions(host, port)
+	started := time.Now()
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	opts := resolveServeOptions(cfg, host, port)
 	addr := localserver.ResolveAddr(opts)
 	url := "http://" + addr
+	initializedData := databaseWillBeInitialized(dataDir)
 
-	if pid, err := localserver.ReadPID(pidPath); err == nil && localserver.IsRunning(pid) {
-		PrintLogo(cmd.OutOrStdout())
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Server already running (pid %d)\n", pid)
-		printServeInfo(cmd.OutOrStdout(), url, dataDir)
+	if existing, ok := findRunningServerProcess(dataDir, addr); ok {
+		updateStatus, updateNote := StartupUpdateStatus(cmd.Context(), cfg)
+		PrintLogoWithUpdate(cmd.OutOrStdout(), updateStatus)
+		if updateNote != "" {
+			term.Hint(cmd.OutOrStdout(), updateNote)
+		}
+		if existing.Addr != "" {
+			addr = existing.Addr
+			url = "http://" + addr
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Server already running (pid %d)\n", existing.PID)
+		ready, _ := getReady(url + "/api/ready")
+		printServeInfo(cmd.OutOrStdout(), url, serveStatus{
+			Mode:            "background",
+			InitializedData: initializedData,
+			Resources:       readyResources(ready),
+			PID:             new(existing.PID),
+			BindAddr:        addr,
+			Startup:         0,
+			DBPath:          localserver.DatabasePath(dataDir),
+		})
 		if openBrowser {
 			_ = cmdutil.OpenBrowser(url)
 		}
@@ -97,11 +155,11 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	}
 
 	fwdArgs := []string{"serve", "--foreground"}
-	if host != "" {
-		fwdArgs = append(fwdArgs, "--host", host)
+	if opts.Host != "" {
+		fwdArgs = append(fwdArgs, "--host", opts.Host)
 	}
-	if port != "" {
-		fwdArgs = append(fwdArgs, "--port", port)
+	if opts.Port != "" {
+		fwdArgs = append(fwdArgs, "--port", opts.Port)
 	}
 	// Always pass resolved dataDir to foreground child
 	fwdArgs = append(fwdArgs, "--data-dir", dataDir)
@@ -121,24 +179,32 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		return fmt.Errorf("start server process: %w", err)
 	}
 
-	if err := localserver.WritePID(pidPath, child.Process.Pid); err != nil {
+	ready, err := waitReady(url+"/api/ready", backgroundReadyTimeout)
+	if err != nil {
 		_ = child.Process.Kill()
-		return fmt.Errorf("write pid file: %w", err)
-	}
-
-	if err := waitReady(url+"/api/ready", 10*time.Second); err != nil {
-		_ = child.Process.Kill()
-		_ = os.Remove(pidPath)
+		_ = localserver.RemoveProcess(child.Process.Pid)
 		return fmt.Errorf("server did not become ready: %w\nCheck logs: %s", err, localserver.LogPath(dataDir))
 	}
 
 	if !localserver.IsRunning(child.Process.Pid) {
-		_ = os.Remove(pidPath)
+		_ = localserver.RemoveProcess(child.Process.Pid)
 		return fmt.Errorf("server process exited immediately; check logs: %s", localserver.LogPath(dataDir))
 	}
 
-	PrintLogo(cmd.OutOrStdout())
-	printServeInfo(cmd.OutOrStdout(), url, dataDir)
+	updateStatus, updateNote := StartupUpdateStatus(cmd.Context(), cfg)
+	PrintLogoWithUpdate(cmd.OutOrStdout(), updateStatus)
+	if updateNote != "" {
+		term.Hint(cmd.OutOrStdout(), updateNote)
+	}
+	printServeInfo(cmd.OutOrStdout(), url, serveStatus{
+		Mode:            "background",
+		InitializedData: initializedData,
+		Resources:       readyResources(ready),
+		PID:             new(child.Process.Pid),
+		BindAddr:        addr,
+		Startup:         time.Since(started),
+		DBPath:          localserver.DatabasePath(dataDir),
+	})
 
 	if openBrowser {
 		_ = cmdutil.OpenBrowser(url)
@@ -146,41 +212,156 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	return nil
 }
 
-func printServeInfo(out io.Writer, url, dataDir string) {
-	cfgPath, _ := workspace.ConfigPath()
-	_, _ = fmt.Fprintf(out, "Webapp available at: %s\n", url)
-	_, _ = fmt.Fprintf(out, "Config path:         %s\n", cfgPath)
-	_, _ = fmt.Fprintf(out, "Data path:           %s\n", dataDir)
-	_, _ = fmt.Fprintln(out, "Run 'tld stop' to shut down the server")
+func findRunningServerProcess(dataDir, addr string) (localserver.ProcessRecord, bool) {
+	reg, err := localserver.PruneProcessRegistry()
+	if err != nil {
+		return localserver.ProcessRecord{}, false
+	}
+	for _, proc := range reg.Processes {
+		if proc.Addr == addr {
+			return proc, true
+		}
+		if proc.Kind == localserver.ProcessKindServer && proc.DataDir == dataDir {
+			return proc, true
+		}
+	}
+	return localserver.ProcessRecord{}, false
 }
 
-func waitReady(url string, timeout time.Duration) error {
-	client := &http.Client{Timeout: 2 * time.Second}
+type serveStatus struct {
+	Mode            string
+	PID             *int
+	BindAddr        string
+	InitializedData bool
+	Resources       localserver.ResourceCounts
+	Startup         time.Duration
+	DBPath          string
+}
+
+func printServeInfo(out io.Writer, url string, status serveStatus) {
+	cfgPath, _ := workspace.ConfigPath()
+	term.Label(out, 20, "Mode", printableMode(status.Mode))
+	if status.PID != nil {
+		term.Label(out, 20, "PID", fmt.Sprintf("%d", *status.PID))
+	}
+	term.Label(out, 20, "Server status", dataStatus(status.InitializedData))
+	term.Label(out, 20, "Bind address", status.BindAddr)
+	if !status.InitializedData {
+		term.Label(out, 20, "Resource counts", fmt.Sprintf("%d views, %d elements, %d connectors", status.Resources.Views, status.Resources.Elements, status.Resources.Connectors))
+	}
+	if status.Startup > 0 {
+		term.Label(out, 20, "Ready in", status.Startup.Round(time.Millisecond).String())
+	}
+	term.Label(out, 20, "DB", term.Path(out, status.DBPath))
+	if info, err := os.Stat(status.DBPath); err == nil {
+		term.Label(out, 20, "DB size", humanBytes(info.Size()))
+		term.Label(out, 20, "DB last modified", info.ModTime().Format(time.RFC3339))
+	}
+	term.Label(out, 20, "Config path", term.Path(out, cfgPath))
+	term.Separator(out)
+	_, _ = fmt.Fprintf(out, "  tlDiagram available at: %s\n", term.URL(out, url))
+	term.Separator(out)
+	term.Hint(out, "Run 'tld stop' to shut down the server")
+}
+
+func databaseWillBeInitialized(dataDir string) bool {
+	_, err := os.Stat(localserver.DatabasePath(dataDir))
+	return errors.Is(err, os.ErrNotExist)
+}
+
+func dataStatus(initialized bool) string {
+	if initialized {
+		return "initialized new local data"
+	}
+	return "using existing local data"
+}
+
+func printableMode(mode string) string {
+	if mode == "" {
+		return "unknown"
+	}
+	return mode
+}
+
+func formatLocalPath(path string, colorEnabled bool) string {
+	if !colorEnabled {
+		return path
+	}
+	return term.ColorBlue + path + term.ColorReset
+}
+
+func formatWebappURL(url string, colorEnabled bool) string {
+	if !colorEnabled {
+		return url
+	}
+	return term.ColorGreen + term.ColorUnderline + url + term.ColorReset
+}
+
+func humanBytes(size int64) string {
+	const unit = 1024
+	if size < unit {
+		return fmt.Sprintf("%d B", size)
+	}
+	div, exp := int64(unit), 0
+	for n := size / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
+}
+
+type readyInfo struct {
+	OK        bool `json:"ok"`
+	Resources struct {
+		Views      int `json:"views"`
+		Elements   int `json:"elements"`
+		Connectors int `json:"connectors"`
+	} `json:"resources"`
+}
+
+func readyResources(info *readyInfo) localserver.ResourceCounts {
+	if info == nil {
+		return localserver.ResourceCounts{}
+	}
+	return localserver.ResourceCounts{
+		Views:      info.Resources.Views,
+		Elements:   info.Resources.Elements,
+		Connectors: info.Resources.Connectors,
+	}
+}
+
+func waitReady(url string, timeout time.Duration) (*readyInfo, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
+		ready, err := getReady(url)
+		if err == nil && ready.OK {
+			return ready, nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out after %s", timeout)
+	return nil, fmt.Errorf("timed out after %s", timeout)
 }
 
-func resolveServeOptions(flagHost, flagPort string) localserver.ServeOptions {
-	cfg, _ := workspace.LoadGlobalConfig()
-	host := cfg.Serve.Host
-	port := cfg.Serve.Port
-	if flagHost != "" {
-		host = flagHost
+func getReady(url string) (*readyInfo, error) {
+	client := &http.Client{Timeout: readyRequestTimeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
 	}
-	if flagPort != "" {
-		port = flagPort
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ready status %d", resp.StatusCode)
 	}
-	return localserver.ServeOptions{Host: host, Port: port}
+	var ready readyInfo
+	if err := json.NewDecoder(resp.Body).Decode(&ready); err != nil {
+		return nil, err
+	}
+	return &ready, nil
+}
+
+func resolveServeOptions(cfg *workspace.Config, flagHost, flagPort string) localserver.ServeOptions {
+	serve := workspace.ResolveServeOptions(cfg, flagHost, flagPort)
+	return localserver.ServeOptions{Host: serve.Host, Port: serve.Port}
 }
 
 func NewServeCmd(runE func(*cobra.Command, []string) error) *cobra.Command {

@@ -19,6 +19,11 @@ export function resolveWithBase(urlOrPath: string): string {
   if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://') || urlOrPath.startsWith('data:')) {
     return urlOrPath
   }
+  const vscodeServerUrl = typeof window !== 'undefined' ? window.__TLD_SERVER_URL__?.replace(/\/+$/, '') : undefined
+  if (window.__TLD_VSCODE__ && vscodeServerUrl) {
+    const normalizedPath = urlOrPath.startsWith('/') ? urlOrPath : `/${urlOrPath}`
+    return `${vscodeServerUrl}${normalizedPath}`
+  }
 
   // When running inside the native mobile app (Capacitor), or inside an embedded webview
   // that serves content from localhost, avoid prefixing the app BASE_URL. Mobile builds and

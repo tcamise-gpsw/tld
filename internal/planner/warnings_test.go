@@ -3,8 +3,8 @@ package planner_test
 import (
 	"testing"
 
-	"github.com/mertcikla/tld/internal/planner"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/planner"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestAnalyzePlan_TechnologyValidation(t *testing.T) {
@@ -91,7 +91,7 @@ func TestAnalyzePlan_TechnologyValidation(t *testing.T) {
 					},
 				},
 				Config: workspace.Config{
-					Validation: &workspace.ValidationConfig{
+					Validation: workspace.ValidationConfig{
 						Level:        tt.level,
 						IncludeRules: tt.includeRules,
 						ExcludeRules: tt.excludeRules,
@@ -130,7 +130,7 @@ func TestAnalyzePlan_DeadEndDrilldownUsesOwnedViews(t *testing.T) {
 			},
 		},
 		Config: workspace.Config{
-			Validation: &workspace.ValidationConfig{Level: 1},
+			Validation: workspace.ValidationConfig{Level: 1},
 		},
 	}
 

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mertcikla/tld/internal/analyzer"
+	"github.com/mertcikla/tld/v2/internal/analyzer"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -148,6 +148,20 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 
 func (s *Session) ServerInfo() *protocol.ServerInfo {
 	return s.serverInfo
+}
+
+func (s *Session) PID() int {
+	if s == nil || s.process == nil || s.process.Process == nil {
+		return 0
+	}
+	return s.process.Process.Pid
+}
+
+func (s *Session) Command() ResolvedCommand {
+	if s == nil {
+		return ResolvedCommand{}
+	}
+	return ResolvedCommand{Path: s.command.Path, Args: append([]string{}, s.command.Args...)}
 }
 
 func (s *Session) SupportsDefinition() bool {

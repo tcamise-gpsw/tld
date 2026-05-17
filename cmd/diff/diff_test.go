@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"

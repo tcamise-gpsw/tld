@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -111,8 +111,15 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 		if element.FilePath != "" {
 			planElement.FilePath = &element.FilePath
 		}
+		if len(element.Tags) > 0 {
+			planElement.Tags = append([]string(nil), element.Tags...)
+		}
 		if element.ViewLabel != "" {
 			planElement.ViewLabel = &element.ViewLabel
+		}
+		if element.DensityLevel != 0 {
+			level := int32(element.DensityLevel)
+			planElement.ViewDensityLevel = &level
 		}
 		for _, placement := range element.Placements {
 			parentRef := placement.ParentRef
@@ -125,6 +132,10 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 			}
 			if placement.PositionY != 0 {
 				planPlacement.PositionY = &placement.PositionY
+			}
+			if placement.VisibilityDelta != 0 {
+				delta := int32(placement.VisibilityDelta)
+				planPlacement.VisibilityDelta = &delta
 			}
 			planElement.Placements = append(planElement.Placements, planPlacement)
 		}
@@ -187,6 +198,10 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 		}
 		if connector.TargetHandle != "" {
 			planConnector.TargetHandle = &connector.TargetHandle
+		}
+		if connector.VisibilityDelta != 0 {
+			delta := int32(connector.VisibilityDelta)
+			planConnector.VisibilityDelta = &delta
 		}
 
 		if !recreateIDs && ws.Meta != nil {

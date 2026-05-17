@@ -1,8 +1,9 @@
 // src/pages/InfiniteZoom.tsx Explore page holds the ZUI feature
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Box,
+  Badge,
   Button,
   Center,
   HStack,
@@ -20,13 +21,24 @@ import {
 } from '@chakra-ui/react'
 import { api } from '../api/client'
 import type { ExploreData, ViewLayer } from '../types'
-import { FitViewIcon as FitViewSvg, TagsIcon, EyeIcon, EyeOffIcon, FocusIcon as FocusSvg } from '../components/Icons'
+import { FitViewIcon as FitViewSvg, TagsIcon, EyeIcon, EyeOffIcon } from '../components/Icons'
 import ExploreOnboarding from '../components/ExploreOnboarding'
 import ExplorePageOnboarding from '../components/ExplorePageOnboarding'
 import MiniZoomOnboarding from '../components/MiniZoomOnboarding'
-import { ZUICanvas, type ZUICanvasHandle } from '../components/ZUI'
+import { ZUICanvas, type ZUICameraFrame, type ZUICanvasHandle } from '../components/ZUI'
 import { useCrossBranchContextSettings } from '../crossBranch/settings'
+import CrossBranchControls from '../components/CrossBranchControls'
 import { primeWorkspaceGraphSnapshot } from '../crossBranch/store'
+import { WATCH_REPRESENTATION_UPDATED_EVENT } from '../components/WorkspacePanel'
+import { useWorkspaceVersionPreview } from '../context/WorkspaceVersionContext'
+import {
+  buildExploreDiffLens,
+  type ExploreDiffDetail,
+  type ExploreDiffLens,
+  type ExploreDiffTarget,
+} from '../utils/exploreDiffLens'
+import { getSourceEditor } from '../utils/sourceEditor'
+import { toast } from '../utils/toast'
 
 // ── Types ──────────────────────────────────────────────────────────
 interface Props {
@@ -34,16 +46,24 @@ interface Props {
   shareSlot?: React.ReactNode
 }
 
+export interface InfiniteZoomHandle {
+  focusDiagram(viewId: number): boolean
+  focusElement(viewId: number, elementId: number): boolean
+  setCameraFrame(frame: ZUICameraFrame): boolean
+}
+
 const MINI_ONBOARDING_KEY = 'shared_zoom_onboarding_dismissed'
 
 // ── Inner component ────────────────────────────────────────────────
-function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
+function InfiniteZoomInner({ sharedToken, shareSlot }: Props, ref?: React.Ref<InfiniteZoomHandle>) {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [data, setData] = useState<ExploreData | null>(null)
   const [loading, setLoading] = useState(true)
   const [canvasReady, setCanvasReady] = useState(false)
   const [showMiniOnboarding, setShowMiniOnboarding] = useState(false)
+  const [miniOnboardingInteractionSeen, setMiniOnboardingInteractionSeen] = useState(false)
   const [tagColors] = useState<Record<string, import('../types').Tag>>({})
   const [layers, setLayers] = useState<ViewLayer[]>([])
   const [highlightedTags, setHighlightedTags] = useState<string[]>([])
@@ -52,7 +72,42 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
   const { isOpen: isTagsOpen, onClose: onTagsClose, onToggle: onTagsToggle } = useDisclosure()
   const zuiRef = useRef<ZUICanvasHandle>(null)
   const crossBranchSurface = sharedToken ? 'zui-shared' : 'zui'
-  const { settings: crossBranchSettings, setEnabled: setCrossBranchEnabled } = useCrossBranchContextSettings(crossBranchSurface)
+  const {
+    settings: crossBranchSettings,
+    setEnabled: setCrossBranchEnabled,
+    setConnectorBudget: setCrossBranchConnectorBudget,
+    setConnectorPriority: setCrossBranchConnectorPriority,
+  } = useCrossBranchContextSettings(crossBranchSurface)
+  const { preview: versionPreview, followTarget: versionFollowTarget } = useWorkspaceVersionPreview()
+
+  const diffVersionId = useMemo(() => {
+    if (sharedToken) return 0
+    const value = Number(new URLSearchParams(location.search).get('diffVersion') ?? 0)
+    return Number.isFinite(value) && value > 0 ? value : 0
+  }, [location.search, sharedToken])
+  const cameraProfile = useMemo(() => new URLSearchParams(location.search).get('profile'), [location.search])
+  const isDetailToOverviewProfile = sharedToken && cameraProfile === 'detail-to-overview'
+  const [diffLens, setDiffLens] = useState<ExploreDiffLens | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+  const [activeDiffTargetIndex, setActiveDiffTargetIndex] = useState(0)
+
+  const initialCameraFrame = useMemo<ZUICameraFrame | undefined>(() => {
+    return isDetailToOverviewProfile
+      ? { profile: 'detail-to-overview', progress: 0 }
+      : undefined
+  }, [isDetailToOverviewProfile])
+
+  useImperativeHandle(ref, () => ({
+    focusDiagram(viewId: number) {
+      return zuiRef.current?.focusDiagram(viewId) ?? false
+    },
+    focusElement(viewId: number, elementId: number) {
+      return zuiRef.current?.focusElement(viewId, elementId) ?? false
+    },
+    setCameraFrame(frame: ZUICameraFrame) {
+      return zuiRef.current?.setCameraFrame(frame) ?? false
+    },
+  }), [])
 
   // ── No data or No content ────────────────────────────────────────
   const hasPlacements = useMemo(() => {
@@ -110,20 +165,35 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
   }, [])
 
   useEffect(() => {
+    if (isDetailToOverviewProfile) return
     if (sharedToken && canvasReady && !localStorage.getItem(MINI_ONBOARDING_KEY)) {
       setShowMiniOnboarding(true)
     }
-  }, [sharedToken, canvasReady])
+  }, [sharedToken, canvasReady, isDetailToOverviewProfile])
 
-  const handleInteraction = useCallback(() => {
+  const dismissMiniOnboarding = useCallback(() => {
     if (showMiniOnboarding) {
       setShowMiniOnboarding(false)
-      localStorage.setItem(MINI_ONBOARDING_KEY, 'true')
+      if (!isDetailToOverviewProfile) {
+        localStorage.setItem(MINI_ONBOARDING_KEY, 'true')
+      }
     }
-  }, [showMiniOnboarding])
-  useEffect(() => {
-    const loader = api.explore.load()
-    loader.then((d) => {
+  }, [isDetailToOverviewProfile, showMiniOnboarding])
+
+  const showMiniOnboardingAfterCanvasInteraction = useCallback(() => {
+    if (!isDetailToOverviewProfile || miniOnboardingInteractionSeen) return
+    setMiniOnboardingInteractionSeen(true)
+    setShowMiniOnboarding(true)
+  }, [isDetailToOverviewProfile, miniOnboardingInteractionSeen])
+
+  const handleCanvasZoom = useCallback(() => {
+    setMiniOnboardingInteractionSeen(true)
+    dismissMiniOnboarding()
+  }, [dismissMiniOnboarding])
+
+  const loadExploreData = useCallback(() => {
+    const loader = sharedToken ? api.explore.loadShared(sharedToken) : api.explore.load()
+    return loader.then((d) => {
       if (d.password_required) {
         setLoading(false)
       } else {
@@ -134,29 +204,144 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
     }).catch(() => setLoading(false))
   }, [sharedToken])
 
+  useEffect(() => {
+    void loadExploreData()
+  }, [loadExploreData])
+
+  useEffect(() => {
+    if (sharedToken) return
+    const refresh = () => {
+      setLoading(true)
+      void loadExploreData()
+    }
+    window.addEventListener(WATCH_REPRESENTATION_UPDATED_EVENT, refresh)
+    return () => window.removeEventListener(WATCH_REPRESENTATION_UPDATED_EVENT, refresh)
+  }, [loadExploreData, sharedToken])
+
   // Fetch tag colors and layers once data is loaded (authenticated users only).
   // Only fetch from root tree nodes child/nested diagrams would duplicate the same layers.
   useEffect(() => {
-    if (!data) return
+    if (!data || sharedToken) return
     let cancelled = false
     const rootIds = (data.tree ?? []).map(n => n.id)
     const fetchTagData = async () => {
-      const diagramLayers = await Promise.all(
-        rootIds.map(id => api.workspace.views.layers.list(id)),
-      )
-      if (!cancelled) {
-        // Deduplicate by layer ID in case of any API overlap
-        const seen = new Set<number>()
-        const unique = diagramLayers.flat().filter(l => seen.has(l.id) ? false : (seen.add(l.id), true))
-        setLayers(unique)
+      try {
+        const diagramLayers = await Promise.all(
+          rootIds.map(id => api.workspace.views.layers.list(id)),
+        )
+        if (!cancelled) {
+          // Deduplicate by layer ID in case of any API overlap
+          const seen = new Set<number>()
+          const unique = diagramLayers.flat().filter(l => seen.has(l.id) ? false : (seen.add(l.id), true))
+          setLayers(unique)
+        }
+      } catch {
+        // intentionally empty: layers are not available for public shared pages
       }
     }
     void fetchTagData()
     return () => { cancelled = true }
-  }, [data])
+  }, [data, sharedToken])
 
   const handleCanvasReady = useCallback(() => {
     setCanvasReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (!sharedToken) return
+
+    const handleMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: unknown; progress?: unknown; profile?: unknown } | null
+      if (!data || data.type !== 'tldiagram-zui-camera') return
+      if (data.profile !== 'detail-to-overview') return
+
+      const progress = Number(data.progress)
+      if (!Number.isFinite(progress)) return
+
+      zuiRef.current?.setCameraFrame({ profile: 'detail-to-overview', progress })
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [sharedToken])
+
+  useEffect(() => {
+    if (!data || !diffVersionId) {
+      setDiffLens(null)
+      setDiffLoading(false)
+      setActiveDiffTargetIndex(0)
+      return
+    }
+    let cancelled = false
+    setDiffLoading(true)
+    api.watch.diffs(diffVersionId)
+      .then((diffs) => {
+        if (cancelled) return
+        setDiffLens(buildExploreDiffLens(data, diffs, diffVersionId))
+        setActiveDiffTargetIndex(0)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setDiffLens(null)
+        toast({
+          title: 'Could not load diff map',
+          description: error instanceof Error ? error.message : 'The selected watch diff could not be loaded.',
+          status: 'error',
+        })
+      })
+      .finally(() => {
+        if (!cancelled) setDiffLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [data, diffVersionId])
+
+  const activeDiffTarget = diffLens?.orderedTargets[activeDiffTargetIndex] ?? null
+
+  const focusDiffTarget = useCallback((target: ExploreDiffTarget | null | undefined) => {
+    if (!target?.viewId) return false
+    if (target.resourceType === 'element' && target.resourceId) {
+      return zuiRef.current?.focusElement(target.viewId, target.resourceId) ?? false
+    }
+    return zuiRef.current?.focusDiagram(target.viewId) ?? false
+  }, [])
+
+  useEffect(() => {
+    if (!canvasReady || !activeDiffTarget) return
+    const timer = window.setTimeout(() => {
+      focusDiffTarget(activeDiffTarget)
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [activeDiffTarget, canvasReady, focusDiffTarget])
+
+  const navigateDiffTarget = useCallback((offset: number) => {
+    const count = diffLens?.orderedTargets.length ?? 0
+    if (count === 0) return
+    setActiveDiffTargetIndex((index) => (index + offset + count) % count)
+  }, [diffLens])
+
+  const exitDiffMode = useCallback(() => {
+    const params = new URLSearchParams(location.search)
+    params.set('view', 'explore')
+    params.delete('diffVersion')
+    params.delete('focus')
+    params.delete('element')
+    const suffix = params.toString()
+    navigate(`${location.pathname}${suffix ? `?${suffix}` : ''}`, { replace: true })
+  }, [location.pathname, location.search, navigate])
+
+  const openDiffSource = useCallback((detail: ExploreDiffDetail) => {
+    if (!detail.sourcePath) return
+    api.editor.open({
+      editor: getSourceEditor(),
+      file_path: detail.sourcePath,
+      line: detail.line ?? null,
+    }).catch((error: unknown) => {
+      toast({
+        title: 'Could not open source',
+        description: error instanceof Error ? error.message : 'The source editor command failed.',
+        status: 'error',
+      })
+    })
   }, [])
 
   if (!loading && (!data || (data.tree ?? []).length === 0 || !hasPlacements)) {
@@ -168,18 +353,18 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
             {noDiagrams ? 'No diagrams to explore yet' : 'Your diagrams are empty'}
           </Text>
           <Text color="gray.500" fontSize="sm" maxW="400px">
-            {noDiagrams 
-              ? 'Start by creating your first diagram in the workspace.' 
+            {noDiagrams
+              ? 'Start by creating your first diagram in the workspace.'
               : 'Add elements to your diagrams in the editor to see them rendered on this infinite canvas.'}
           </Text>
         </VStack>
-        
+
         {!sharedToken && (
           <Button size="sm" colorScheme="blue" onClick={() => navigate('/views')} borderRadius="full" px={6}>
             {noDiagrams ? 'Create First Diagram' : 'Go to Editor'}
           </Button>
         )}
-        {!noDiagrams && <ExplorePageOnboarding hasDiagrams={!noDiagrams} />}
+        {!noDiagrams && !sharedToken && <ExplorePageOnboarding hasDiagrams={!noDiagrams} />}
       </Center>
     )
   }
@@ -207,18 +392,135 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
             ref={zuiRef}
             data={data}
             onReady={handleCanvasReady}
-            onZoom={handleInteraction}
-            onPan={handleInteraction}
+            onZoom={handleCanvasZoom}
+            onPan={showMiniOnboardingAfterCanvasInteraction}
+            initialCameraFrame={initialCameraFrame}
             highlightedTags={highlightedTags}
             highlightColor={highlightColor}
             hiddenTags={hiddenTags}
+            versionPreview={versionPreview}
+            versionFollowTarget={versionFollowTarget}
+            diffLens={diffLens}
             crossBranchSettings={crossBranchSettings}
             hoverLocked={isTagsOpen}
           />
 
           {/* Onboarding overlay */}
-          {data && <ExploreOnboarding hasLinkedNodes={!!(data.navigations?.length > 0)} />}
-          <MiniZoomOnboarding isVisible={showMiniOnboarding} />
+          {data && !sharedToken && <ExploreOnboarding hasLinkedNodes={!!(data.navigations?.length > 0)} />}
+          <MiniZoomOnboarding isVisible={showMiniOnboarding} onClose={dismissMiniOnboarding} />
+
+          {diffVersionId > 0 && (
+            <Box
+              position="absolute"
+              top={4}
+              right={4}
+              zIndex={14}
+              className="glass"
+              borderRadius="lg"
+              px={3}
+              py={2.5}
+              w={{ base: 'calc(100vw - 32px)', md: '340px' }}
+              maxW="calc(100vw - 32px)"
+              pointerEvents="auto"
+              opacity={showContent ? 1 : 0}
+              transition="opacity 0.3s"
+            >
+              <VStack align="stretch" spacing={2}>
+                <HStack justify="space-between" spacing={3}>
+                  <HStack spacing={2} minW={0}>
+                    <Badge colorScheme="blue" variant="subtle">Diff map</Badge>
+                    <Text fontSize="xs" color="gray.400" fontFamily="mono" flexShrink={0}>
+                      +{diffLens?.totalAddedLines ?? 0} -{diffLens?.totalRemovedLines ?? 0}
+                    </Text>
+                  </HStack>
+                  <Button size="xs" variant="ghost" color="gray.300" onClick={exitDiffMode}>
+                    Exit
+                  </Button>
+                </HStack>
+                <Text fontSize="xs" color="gray.200" noOfLines={1} minH="18px">
+                  {diffLoading
+                    ? 'Loading changed resources...'
+                    : activeDiffTarget
+                      ? `${activeDiffTargetIndex + 1} of ${diffLens?.orderedTargets.length ?? 0}: ${activeDiffTarget.label}`
+                      : 'No placed changed resources'}
+                </Text>
+                <HStack spacing={2}>
+                  <Button
+                    size="xs"
+                    variant="solid"
+                    bg="whiteAlpha.200"
+                    _hover={{ bg: 'whiteAlpha.300' }}
+                    flex={1}
+                    isDisabled={!diffLens?.orderedTargets.length}
+                    onClick={() => navigateDiffTarget(-1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="solid"
+                    bg="whiteAlpha.200"
+                    _hover={{ bg: 'whiteAlpha.300' }}
+                    flex={1}
+                    isDisabled={!diffLens?.orderedTargets.length}
+                    onClick={() => navigateDiffTarget(1)}
+                  >
+                    Next
+                  </Button>
+                </HStack>
+              </VStack>
+            </Box>
+          )}
+
+          {diffLens && diffLens.unplacedTargets.length > 0 && (
+            <Box
+              position="absolute"
+              top={{ base: '150px', md: '132px' }}
+              right={4}
+              zIndex={13}
+              className="glass"
+              borderRadius="lg"
+              px={3}
+              py={3}
+              w={{ base: 'calc(100vw - 32px)', md: '340px' }}
+              maxH="260px"
+              overflowY="auto"
+              pointerEvents="auto"
+              data-zui-native-wheel="true"
+              sx={{ overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+            >
+              <VStack align="stretch" spacing={2}>
+                <Text fontSize="11px" color="gray.400" fontWeight="700" textTransform="uppercase">
+                  Deleted or unplaced
+                </Text>
+                {diffLens.unplacedTargets.slice(0, 8).map((target) => (
+                  <Box key={target.key} borderTop="1px solid" borderColor="whiteAlpha.100" pt={2}>
+                    <HStack spacing={2} align="start">
+                      <Badge colorScheme={target.changeType === 'deleted' ? 'red' : 'yellow'} variant="subtle" fontSize="9px">
+                        {target.changeType}
+                      </Badge>
+                      <Box minW={0} flex={1}>
+                        <Text fontSize="xs" color="gray.100" noOfLines={1}>{target.label}</Text>
+                        {target.sourcePath && (
+                          <Text fontSize="10px" color="gray.500" fontFamily="mono" noOfLines={1}>{target.sourcePath}</Text>
+                        )}
+                      </Box>
+                      {target.sourcePath && (
+                        <Button size="xs" variant="ghost" color="var(--accent)" onClick={() => openDiffSource(target)}>
+                          Open
+                        </Button>
+                      )}
+                    </HStack>
+                  </Box>
+                ))}
+                {diffLens.unplacedTargets.length > 8 && (
+                  <Text fontSize="xs" color="gray.500">
+                    +{diffLens.unplacedTargets.length - 8} more
+                  </Text>
+                )}
+              </VStack>
+            </Box>
+          )}
 
           {/* Bottom toolbar */}
           <Box
@@ -252,21 +554,13 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
               {shareSlot}
 
               <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
-              <Tooltip label={!crossBranchSettings.enabled ? 'Show branches' : 'Focus on this view'} placement="top" openDelay={200}>
-                <Button
-                  variant="ghost" h="28px" px={2.5}
-                  color={!crossBranchSettings.enabled ? 'var(--accent)' : 'gray.300'}
-                  bg={!crossBranchSettings.enabled ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent'}
-                  _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
-                  onClick={() => setCrossBranchEnabled(!crossBranchSettings.enabled)}
-                >
-                  <HStack spacing={1.5}>
-                    <FocusSvg />
-                    <Text fontSize="11px" fontWeight="normal">Focus View</Text>
-                    <Box w="6px" h="6px" rounded="full" bg={!crossBranchSettings.enabled ? 'var(--accent)' : 'gray.500'} />
-                  </HStack>
-                </Button>
-              </Tooltip>
+              <CrossBranchControls
+                settings={crossBranchSettings}
+                onEnabledChange={setCrossBranchEnabled}
+                onBudgetChange={setCrossBranchConnectorBudget}
+                onPriorityChange={setCrossBranchConnectorPriority}
+                label="Filters"
+              />
 
               {(allTags.length > 0 || layers.length > 0) && (
                 <>
@@ -293,6 +587,7 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
                     </PopoverTrigger>
                     <Portal>
                       <PopoverContent
+                        data-zui-native-wheel="true"
                         bg="glass.bg"
                         backdropFilter="blur(16px)"
                         borderColor="glass.border"
@@ -387,11 +682,11 @@ function InfiniteZoomInner({ sharedToken, shareSlot }: Props) {
 
 // ── Exports ───────────────────────────────────────────────────────
 
-export default function InfiniteZoom(props: Props) {
-  return <InfiniteZoomInner {...props} />
-}
+const InfiniteZoom = forwardRef<InfiniteZoomHandle, Props>(InfiniteZoomInner)
+export default InfiniteZoom
 
-export function SharedInfiniteZoom(props: Props) {
+export const SharedInfiniteZoom = forwardRef<InfiniteZoomHandle, Props>((props, ref) => {
   const { token } = useParams()
-  return <InfiniteZoomInner {...props} sharedToken={token} />
-}
+  const effectiveToken = props.sharedToken ?? token
+  return <InfiniteZoom {...props} ref={ref} sharedToken={effectiveToken} />
+})

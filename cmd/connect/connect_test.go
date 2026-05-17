@@ -3,11 +3,12 @@ package connect_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,9 +25,12 @@ func TestConnectCmd_AppendsConnector(t *testing.T) {
 	dir := t.TempDir()
 	setupWorkspaceForLinks(t, dir)
 
-	_, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
+	stdout, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
+	}
+	if !strings.Contains(stdout, "connector view: platform") {
+		t.Fatalf("missing inferred view output:\n%s", stdout)
 	}
 
 	ws, err := workspace.Load(dir)
@@ -49,9 +53,12 @@ func TestConnectCmd_RootElementsInferRootView(t *testing.T) {
 	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "service")
 	cmd.MustRunCmd(t, dir, "add", "DB", "--ref", "db", "--kind", "database")
 
-	_, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
+	stdout, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
+	}
+	if !strings.Contains(stdout, "connector view: root") {
+		t.Fatalf("missing root view output:\n%s", stdout)
 	}
 
 	ws, err := workspace.Load(dir)
@@ -100,9 +107,12 @@ func TestConnectCmd_ElementsInDifferentViewsSucceeds(t *testing.T) {
 	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--parent", "parent1", "--kind", "service")
 	cmd.MustRunCmd(t, dir, "add", "DB", "--ref", "db", "--parent", "parent2", "--kind", "database")
 
-	_, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
+	stdout, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
+	}
+	if !strings.Contains(stdout, "connector view: root") || !strings.Contains(stdout, "No shared parent found") {
+		t.Fatalf("missing root fallback feedback:\n%s", stdout)
 	}
 
 	ws, err := workspace.Load(dir)
@@ -121,6 +131,10 @@ func TestConnectCmd_ElementsWithMultiplePlacementsSucceeds(t *testing.T) {
 	cmd.MustInitWorkspace(t, dir)
 	// Create an element with 2 placements manually in elements.yaml
 	elements := map[string]*workspace.Element{
+		"other": {
+			Name: "Other", Kind: "workspace", HasView: true,
+			Placements: []workspace.ViewPlacement{{ParentRef: "root"}},
+		},
 		"api": {
 			Name: "API", Kind: "service",
 			Placements: []workspace.ViewPlacement{

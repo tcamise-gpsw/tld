@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mertcikla/tld/internal/ignore"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,21 +19,11 @@ func Load(dir string) (*Workspace, error) {
 	}
 
 	// Load config
-	cfgPath, err := ConfigPath()
+	cfg, err := LoadGlobalConfig()
 	if err != nil {
-		return nil, fmt.Errorf("get config path: %w", err)
+		return nil, fmt.Errorf("load global config: %w", err)
 	}
-	cfgData, err := os.ReadFile(cfgPath)
-	if err != nil {
-		return nil, fmt.Errorf("read tld.yaml: %w", err)
-	}
-	if err := yaml.Unmarshal(cfgData, &ws.Config); err != nil {
-		return nil, fmt.Errorf("parse tld.yaml: %w", err)
-	}
-	// Fallback: TLD_API_KEY env var
-	if ws.Config.APIKey == "" {
-		ws.Config.APIKey = os.Getenv("TLD_API_KEY")
-	}
+	ws.Config = *cfg
 
 	// Load workspace-local configuration from .tld.yaml if present.
 	workspaceConfigPath := WorkspaceConfigPath(dir)

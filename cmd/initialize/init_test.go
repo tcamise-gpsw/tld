@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 )
 
 func TestInitCmd_CreatesWorkspace(t *testing.T) {
@@ -19,8 +19,8 @@ func TestInitCmd_CreatesWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if !strings.Contains(stdout, "Initialized workspace") {
-		t.Errorf("stdout %q does not contain 'Initialized workspace'", stdout)
+	if !strings.Contains(stdout, "Workspace initialized at") {
+		t.Errorf("stdout %q does not contain 'Workspace initialized at'", stdout)
 	}
 
 	workspaceCfgPath := filepath.Join(dir, ".tld.yaml")
@@ -99,7 +99,7 @@ func TestInitCmd_AlreadyInitialized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second init: %v", err)
 	}
-	if !strings.Contains(stdout, "Initialized workspace at") || !strings.Contains(stdout, "config already exists") {
+	if !strings.Contains(stdout, "Workspace initialized at") || !strings.Contains(stdout, "config already exists") {
 		t.Errorf("stdout %q does not contain 'Initialized' or 'config already exists'", stdout)
 	}
 }

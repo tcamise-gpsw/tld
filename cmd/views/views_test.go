@@ -5,10 +5,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/mertcikla/tld/cmd"
+	"github.com/mertcikla/tld/v2/cmd"
 
-	"github.com/mertcikla/tld/internal/planner"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/planner"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestViewsCmd_OutputsDerivedViewSummary(t *testing.T) {

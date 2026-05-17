@@ -2,19 +2,24 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"buf.build/gen/go/tldiagramcom/diagram/connectrpc/go/diag/v1/diagv1connect"
+	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
+	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/mertcikla/tld/internal/store"
-	"github.com/mertcikla/tld/pkg/api"
+	"github.com/mertcikla/tld/v2/internal/store"
+	"github.com/mertcikla/tld/v2/internal/watch"
+	"github.com/mertcikla/tld/v2/pkg/api"
 )
 
 type Server struct {
@@ -23,17 +28,39 @@ type Server struct {
 
 func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID) (*Server, error) {
 	apiStore := store.NewAPIAdapter(sqliteStore)
-	wsSvc := &api.WorkspaceService{Store: apiStore}
+	watchStore := watch.NewStore(sqliteStore.DB())
+	lockHooks := watchLockHooks{store: watchStore}
+	wsSvc := &api.WorkspaceService{Store: apiStore, Hooks: lockHooks}
+	orgSvc := &api.OrgService{Store: apiStore, Hooks: lockHooks}
 	depSvc := &api.DependencyService{Store: apiStore}
 	importSvc := &api.ImportService{Store: apiStore}
-	versionSvc := &api.WorkspaceVersionService{Store: apiStore}
+	versionSvc := &api.WorkspaceVersionService{Store: apiStore, Hooks: lockHooks}
 
 	mux := http.NewServeMux()
+	watch.NewHandler(watchStore).Register(mux)
+	registerEditorHandlers(mux, watchStore)
+	registerDensityHandlers(mux, sqliteStore)
+	registerMergeHandlers(mux, sqliteStore)
 
-	mux.HandleFunc("GET /api/ready", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/ready", func(w http.ResponseWriter, r *http.Request) {
+		views, elements, connectors, err := apiStore.GetWorkspaceResourceCounts(r.Context(), workspaceID)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":    false,
+				"error": "resource counts unavailable",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"resources": map[string]int{
+				"views":      views,
+				"elements":   elements,
+				"connectors": connectors,
+			},
+		})
 	})
 
 	mux.HandleFunc("GET /api/views/{id}/thumbnail.svg", func(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +84,9 @@ func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID) (*
 	wsPath, wsHandler := diagv1connect.NewWorkspaceServiceHandler(wsSvc)
 	mux.Handle("/api"+wsPath, http.StripPrefix("/api", wsHandler))
 
+	orgPath, orgHandler := diagv1connect.NewOrgServiceHandler(orgSvc)
+	mux.Handle("/api"+orgPath, http.StripPrefix("/api", orgHandler))
+
 	depPath, depHandler := diagv1connect.NewDependencyServiceHandler(depSvc)
 	mux.Handle("/api"+depPath, http.StripPrefix("/api", depHandler))
 
@@ -74,7 +104,27 @@ func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID) (*
 		mux.ServeHTTP(w, r.WithContext(api.WithWorkspaceID(r.Context(), workspaceID)))
 	})
 
-	return &Server{handler: handler}, nil
+	return &Server{handler: localCORSMiddleware(handler)}, nil
+}
+
+type watchLockHooks struct {
+	api.NopWorkspaceHooks
+	store *watch.Store
+}
+
+func (h watchLockHooks) CheckWrite(ctx context.Context, _ uuid.UUID, resourceType string) error {
+	if h.store == nil {
+		return nil
+	}
+	applying, err := h.store.ActiveApplyLock(ctx, watch.LockHeartbeatTimeout)
+	if err != nil || !applying {
+		return err
+	}
+	return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("workspace is being updated by tld watch; retry editing %s shortly", resourceType))
+}
+
+func (h watchLockHooks) CheckApplyPlan(ctx context.Context, workspaceID uuid.UUID, _ *diagv1.ApplyPlanRequest) error {
+	return h.CheckWrite(ctx, workspaceID, "workspace")
 }
 
 func (s *Server) Routes() http.Handler {
@@ -83,6 +133,50 @@ func (s *Server) Routes() http.Handler {
 
 func (s *Server) Shutdown(context.Context) error {
 	return nil
+}
+
+func localCORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); isAllowedLocalOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			if requestedHeaders := r.Header.Get("Access-Control-Request-Headers"); requestedHeaders != "" {
+				w.Header().Set("Access-Control-Allow-Headers", requestedHeaders)
+			} else {
+				w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type, X-CSRF-Token, X-Requested-With")
+			}
+			if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+				w.Header().Set("Access-Control-Allow-Private-Network", "true")
+			}
+			w.Header().Set("Access-Control-Expose-Headers", "Connect-Protocol-Version, Grpc-Status, Grpc-Message")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isAllowedLocalOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "vscode-webview", "vscode-webview-resource", "vscode-file", "vscode-resource":
+		return true
+	case "http", "https":
+		host := u.Hostname()
+		return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	default:
+		return false
+	}
 }
 
 func serveStatic(static fs.FS, w http.ResponseWriter, r *http.Request) {

@@ -10,14 +10,13 @@ package completion
 
 import (
 	"context"
-	"os"
 	"sort"
 	"time"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
-	"github.com/mertcikla/tld/internal/client"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/client"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +38,11 @@ func loadWS(wdir *string) *workspace.Workspace {
 }
 
 func remoteEnabled() bool {
-	return os.Getenv(remoteEnvVar) == "1"
+	state, err := workspace.LoadGlobalConfigStateNoRepair()
+	if err != nil {
+		return false
+	}
+	return state.Config.Completion.Remote
 }
 
 // remoteElements fetches elements from the API with a short deadline. Any
@@ -183,12 +186,12 @@ func ParentRefs(wdir *string) (out []string, dir cobra.ShellCompDirective) {
 
 // ElementFields is the static set of fields accepted by `update element`.
 func ElementFields() []string {
-	return []string{"name", "kind", "description", "technology", "url", "owner", "logo_url", "repo", "branch", "language", "file_path", "view_label"}
+	return workspace.ElementFieldNames()
 }
 
 // ConnectorFields is the static set of fields accepted by `update connector`.
 func ConnectorFields() []string {
-	return []string{"label", "description", "relationship", "direction", "url", "source_handle", "target_handle"}
+	return workspace.ConnectorFieldNames()
 }
 
 // ElementKinds are the built-in element kinds offered for --kind.

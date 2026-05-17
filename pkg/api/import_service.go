@@ -6,7 +6,7 @@ import (
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
-	"github.com/mertcikla/tld/internal/importer"
+	"github.com/mertcikla/tld/v2/internal/importer"
 )
 
 // ImportService implements import-related RPCs.

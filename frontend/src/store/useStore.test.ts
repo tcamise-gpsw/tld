@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Connector, LibraryElement, PlacedElement, ViewTreeNode } from '../types'
 import {
   buildViewContentLinks,
+  buildElementLibraryItems,
   canvasSelectors,
   emptyViewEditorUiState,
   findViewByOwner,
@@ -9,6 +10,7 @@ import {
   mergeSavedElementIntoPlacements,
   removeConnectorFromList,
   removePlacedElement,
+  resolveElementForUpdate,
   selectConnectorById,
   selectElementById,
   selectExistingElementIds,
@@ -111,7 +113,6 @@ beforeEach(() => {
     incomingLinks: [],
     treeData: [],
     allElements: [],
-    libraryRefresh: 0,
   })
 })
 
@@ -149,6 +150,28 @@ describe('pure view helpers', () => {
     const merged = mergeSavedElementIntoPlacements(elements, libraryElement(10))
     expect(merged[0]).toMatchObject({ name: 'Saved', kind: 'service', repo: 'repo', tags: ['api'] })
     expect(merged[1]).toBe(elements[1])
+  })
+
+  it('keeps library items available after removing their canvas placement', () => {
+    const onCanvas = element(10)
+    const libraryItems = buildElementLibraryItems([libraryElement(10), libraryElement(20)], [onCanvas])
+
+    expect(libraryItems.map((item) => item.id)).toEqual([10, 20])
+    expect(libraryItems[0]).toMatchObject({ id: 10, name: onCanvas.name, created_at: '2024-01-01' })
+
+    const afterRemoval = buildElementLibraryItems([libraryElement(10), libraryElement(20)], removePlacedElement([onCanvas], 10))
+    expect(afterRemoval.map((item) => item.id)).toEqual([10, 20])
+    expect(afterRemoval[0]).toMatchObject({ id: 10, name: 'Saved' })
+  })
+
+  it('resolves update payloads from placed elements when the library store is empty', () => {
+    const placed = { ...element(10), tags: ['current'] }
+    const resolved = resolveElementForUpdate(10, null, [], [placed])
+
+    expect(resolved).toMatchObject({ id: 10, name: 'Element 10', tags: ['current'] })
+    expect(resolveElementForUpdate(20, libraryElement(20), [], [placed])?.id).toBe(20)
+    expect(resolveElementForUpdate(30, null, [libraryElement(30)], [placed])?.id).toBe(30)
+    expect(resolveElementForUpdate(40, null, [], [placed])).toBeNull()
   })
 
   it('upserts and removes connectors', () => {
@@ -208,7 +231,6 @@ describe('zustand canvas store', () => {
     useStore.getState().setIncomingLinks([{ id: 1, element_id: 10, element_name: 'E', from_view_id: 1, from_view_name: 'Root', to_view_id: 2 }])
     useStore.getState().setTreeData(tree)
     useStore.getState().setAllElements([libraryElement(10)])
-    useStore.getState().setLibraryRefresh((previous) => previous + 1)
 
     const state = useStore.getState()
     expect(state.view?.id).toBe(1)
@@ -221,7 +243,6 @@ describe('zustand canvas store', () => {
     expect(state.incomingLinks).toHaveLength(1)
     expect(state.treeData).toBe(tree)
     expect(state.allElements).toHaveLength(1)
-    expect(state.libraryRefresh).toBe(1)
   })
 
   it('hydrates and resets canvas data', () => {
@@ -256,13 +277,14 @@ describe('zustand canvas store', () => {
     expect(useStore.getState().viewElements.map((item) => item.element_id)).toEqual([20])
 
     useStore.getState().setViewElements([element(10)])
+    useStore.getState().setAllElements([libraryElement(10)])
     useStore.getState().mergeSavedElement(libraryElement(10))
     expect(useStore.getState().viewElements[0].name).toBe('Saved')
-    expect(useStore.getState().libraryRefresh).toBe(1)
+    expect(useStore.getState().allElements[0].name).toBe('Saved')
 
     useStore.getState().removeElementEverywhere(10)
     expect(useStore.getState().viewElements).toEqual([])
-    expect(useStore.getState().libraryRefresh).toBe(2)
+    expect(useStore.getState().allElements).toEqual([])
 
     useStore.getState().upsertConnector(connector(2))
     useStore.getState().replaceConnector({ ...connector(2), label: 'updated' })

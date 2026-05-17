@@ -2,15 +2,19 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/mertcikla/tld/internal/app"
-	"github.com/mertcikla/tld/pkg/api"
+	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/internal/layout"
+	"github.com/mertcikla/tld/v2/internal/workspace"
+	"github.com/mertcikla/tld/v2/pkg/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -39,19 +43,30 @@ func (a *APIAdapter) ListViews(ctx context.Context, _ uuid.UUID) ([]*diagv1.View
 	return out, nil
 }
 
-func (a *APIAdapter) GetViews(ctx context.Context, _ uuid.UUID, ownerElementID *int32, isRoot *bool, search string, limit, offset int) ([]*diagv1.View, int, error) {
-	nodes, err := a.Store.ViewTree(ctx)
-	if err != nil {
-		return nil, 0, err
+func (a *APIAdapter) GetViews(ctx context.Context, _ uuid.UUID, parentViewID *int32, isRoot *bool, search string, limit, offset int) ([]*diagv1.View, int, error) {
+	var flat []app.ViewTreeNode
+	switch {
+	case parentViewID != nil:
+		nodes, err := a.Store.legacy.ChildViews(ctx, int64(*parentViewID))
+		if err != nil {
+			return nil, 0, err
+		}
+		flat = nodes
+	case isRoot != nil && *isRoot:
+		nodes, err := a.Store.legacy.RootViews(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		flat = nodes
+	default:
+		nodes, err := a.Store.ViewTree(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		flat = flattenViewTreeNodes(nodes)
 	}
-	flat := flattenViewTreeNodes(nodes)
 	filtered := make([]app.ViewTreeNode, 0, len(flat))
 	for _, node := range flat {
-		if ownerElementID != nil {
-			if node.OwnerElementID == nil || int32(*node.OwnerElementID) != *ownerElementID {
-				continue
-			}
-		}
 		if isRoot != nil {
 			nodeIsRoot := node.ParentViewID == nil
 			if nodeIsRoot != *isRoot {
@@ -114,17 +129,17 @@ func (a *APIAdapter) DeleteView(ctx context.Context, id int32, _ uuid.UUID) erro
 	return a.Store.legacy.DeleteView(ctx, int64(id))
 }
 
-func (a *APIAdapter) ListElements(ctx context.Context, _ uuid.UUID, limit, offset int32, search string) ([]*diagv1.Element, error) {
-	elements, err := a.Store.legacy.Elements(ctx, int(limit), int(offset), search)
+func (a *APIAdapter) ListElements(ctx context.Context, _ uuid.UUID, limit, offset int32, search string) ([]*diagv1.Element, int, error) {
+	elements, total, err := a.Store.legacy.Elements(ctx, int(limit), int(offset), search)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]*diagv1.Element, 0, len(elements))
 	workspaceID := api.WorkspaceIDFromCtx(ctx)
 	for _, element := range elements {
 		out = append(out, elementToProto(element, workspaceID))
 	}
-	return out, nil
+	return out, total, nil
 }
 
 func (a *APIAdapter) GetElement(ctx context.Context, id int32, _ uuid.UUID) (*diagv1.Element, error) {
@@ -182,33 +197,32 @@ func (a *APIAdapter) UpdateElement(ctx context.Context, id int32, _ uuid.UUID, i
 }
 
 func (a *APIAdapter) DeleteElement(ctx context.Context, id int32, _ uuid.UUID) error {
+	if err := a.Store.DeleteResourceVisibilityOverrides(ctx, "element", int64(id)); err != nil {
+		return err
+	}
 	return a.Store.legacy.DeleteElement(ctx, int64(id))
 }
 
 func (a *APIAdapter) ListPlacements(ctx context.Context, viewID int32) ([]*diagv1.PlacedElement, error) {
-	placements, err := a.Store.legacy.Placements(ctx, int64(viewID))
+	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID), nil)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*diagv1.PlacedElement, 0, len(placements))
-	for _, placement := range placements {
+	out := make([]*diagv1.PlacedElement, 0, len(content.Placements))
+	for _, placement := range content.Placements {
 		out = append(out, placedElementToProto(placement))
 	}
 	return out, nil
 }
 
 func (a *APIAdapter) ListAllPlacements(ctx context.Context, _ uuid.UUID) ([]*diagv1.PlacedElement, error) {
-	nodes, err := a.Store.ViewTree(ctx)
+	placements, err := a.Store.legacy.AllPlacements(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var out []*diagv1.PlacedElement
-	for _, node := range flattenViewTreeNodes(nodes) {
-		items, err := a.ListPlacements(ctx, int32(node.ID))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, items...)
+	out := make([]*diagv1.PlacedElement, 0, len(placements))
+	for _, placement := range placements {
+		out = append(out, placedElementToProto(placement))
 	}
 	return out, nil
 }
@@ -249,29 +263,48 @@ func (a *APIAdapter) RemovePlacement(ctx context.Context, viewID, elementID int3
 }
 
 func (a *APIAdapter) ListConnectors(ctx context.Context, viewID int32, _ uuid.UUID) ([]*diagv1.Connector, error) {
-	connectors, err := a.Store.legacy.Connectors(ctx, int64(viewID))
+	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID), nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*diagv1.Connector, 0, len(content.Connectors))
+	for _, connector := range content.Connectors {
+		out = append(out, connectorToProto(connector))
+	}
+	return out, nil
+}
+
+func (a *APIAdapter) GetProjectedViewContent(ctx context.Context, viewID int32, _ uuid.UUID, densityOverride *int32) (*diagv1.ViewContent, error) {
+	var override *int
+	if densityOverride != nil {
+		value := int(*densityOverride)
+		override = &value
+	}
+	content, err := a.Store.ProjectedViewContent(ctx, int64(viewID), override)
+	if err != nil {
+		return nil, err
+	}
+	out := &diagv1.ViewContent{
+		Placements: make([]*diagv1.PlacedElement, 0, len(content.Placements)),
+		Connectors: make([]*diagv1.Connector, 0, len(content.Connectors)),
+	}
+	for _, placement := range content.Placements {
+		out.Placements = append(out.Placements, placedElementToProto(placement))
+	}
+	for _, connector := range content.Connectors {
+		out.Connectors = append(out.Connectors, connectorToProto(connector))
+	}
+	return out, nil
+}
+
+func (a *APIAdapter) ListAllConnectors(ctx context.Context, _ uuid.UUID) ([]*diagv1.Connector, error) {
+	connectors, err := a.Store.legacy.AllConnectors(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*diagv1.Connector, 0, len(connectors))
 	for _, connector := range connectors {
 		out = append(out, connectorToProto(connector))
-	}
-	return out, nil
-}
-
-func (a *APIAdapter) ListAllConnectors(ctx context.Context, _ uuid.UUID) ([]*diagv1.Connector, error) {
-	nodes, err := a.Store.ViewTree(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out []*diagv1.Connector
-	for _, node := range flattenViewTreeNodes(nodes) {
-		items, err := a.ListConnectors(ctx, int32(node.ID), uuid.Nil)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, items...)
 	}
 	return out, nil
 }
@@ -326,6 +359,9 @@ func (a *APIAdapter) UpdateConnector(ctx context.Context, id int32, _ uuid.UUID,
 }
 
 func (a *APIAdapter) DeleteConnector(ctx context.Context, id int32, _ uuid.UUID) error {
+	if err := a.Store.DeleteResourceVisibilityOverrides(ctx, "connector", int64(id)); err != nil {
+		return err
+	}
 	return a.Store.legacy.DeleteConnector(ctx, int64(id))
 }
 
@@ -421,6 +457,25 @@ func (a *APIAdapter) DeleteViewLayer(ctx context.Context, id int32) error {
 	return a.Store.legacy.DeleteLayer(ctx, int64(id))
 }
 
+func (a *APIAdapter) Tags(ctx context.Context, _ uuid.UUID) (map[string]*diagv1.Tag, error) {
+	tags, err := a.Store.Tags(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]*diagv1.Tag, len(tags))
+	for name, tag := range tags {
+		out[name] = &diagv1.Tag{
+			Color:       tag.Color,
+			Description: tag.Description,
+		}
+	}
+	return out, nil
+}
+
+func (a *APIAdapter) UpdateTag(ctx context.Context, _ uuid.UUID, name, color string, description *string) error {
+	return a.Store.UpdateTag(ctx, name, color, description)
+}
+
 func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
 	if req.GetDryRun() {
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("dry_run is not supported by the local sqlite adapter"))
@@ -444,6 +499,7 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 
 	elementIDs := make(map[string]int32, len(req.GetElements()))
 	viewIDs := map[string]int32{"root": rootViewID}
+	autoLayoutTargets := map[int64]map[int64]struct{}{}
 
 	for _, planned := range req.GetElements() {
 		if planned.GetRef() == "" {
@@ -470,6 +526,9 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 		var element *diagv1.Element
 		if planned.GetId() != 0 {
 			element, err = a.UpdateElement(ctx, planned.GetId(), uuid.Nil, input)
+			if errors.Is(err, sql.ErrNoRows) {
+				element, err = a.CreateElement(ctx, uuid.Nil, input)
+			}
 		} else {
 			element, err = a.CreateElement(ctx, uuid.Nil, input)
 		}
@@ -499,12 +558,21 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 			var view *diagv1.View
 			if planned.GetViewId() != 0 {
 				view, err = a.UpdateView(ctx, planned.GetViewId(), uuid.Nil, viewName, planned.ViewLabel)
+				if errors.Is(err, sql.ErrNoRows) {
+					ownerID := element.GetId()
+					view, err = a.CreateView(ctx, uuid.Nil, &ownerID, viewName, planned.ViewLabel, false)
+				}
 			} else {
 				ownerID := element.GetId()
 				view, err = a.CreateView(ctx, uuid.Nil, &ownerID, viewName, planned.ViewLabel, false)
 			}
 			if err != nil {
 				return nil, err
+			}
+			if planned.ViewDensityLevel != nil {
+				if err := a.Store.SetViewDensityLevel(ctx, int64(view.GetId()), int(planned.GetViewDensityLevel())); err != nil {
+					return nil, err
+				}
 			}
 			viewIDs[planned.GetRef()] = view.GetId()
 			resp.CreatedViews = append(resp.CreatedViews, &diagv1.ViewSummary{
@@ -539,6 +607,17 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 			item, err := a.AddPlacement(ctx, viewID, elementID, placement.GetPositionX(), placement.GetPositionY())
 			if err != nil {
 				return nil, err
+			}
+			if placement.PositionX == nil && placement.PositionY == nil {
+				if autoLayoutTargets[int64(viewID)] == nil {
+					autoLayoutTargets[int64(viewID)] = map[int64]struct{}{}
+				}
+				autoLayoutTargets[int64(viewID)][int64(elementID)] = struct{}{}
+			}
+			if placement.VisibilityDelta != nil {
+				if _, err := a.Store.SetVisibilityOverride(ctx, int64(viewID), "element", int64(elementID), int(placement.GetVisibilityDelta())); err != nil {
+					return nil, err
+				}
 			}
 			resp.CreatedPlacements = append(resp.CreatedPlacements, &diagv1.ElementPlacement{
 				Id:        item.GetId(),
@@ -585,11 +664,19 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 		var connector *diagv1.Connector
 		if planned.GetId() != 0 {
 			connector, err = a.UpdateConnector(ctx, planned.GetId(), uuid.Nil, input)
+			if errors.Is(err, sql.ErrNoRows) {
+				connector, err = a.CreateConnector(ctx, uuid.Nil, input)
+			}
 		} else {
 			connector, err = a.CreateConnector(ctx, uuid.Nil, input)
 		}
 		if err != nil {
 			return nil, err
+		}
+		if planned.VisibilityDelta != nil {
+			if _, err := a.Store.SetVisibilityOverride(ctx, int64(viewID), "connector", int64(connector.GetId()), int(planned.GetVisibilityDelta())); err != nil {
+				return nil, err
+			}
 		}
 
 		resp.CreatedConnectors = append(resp.CreatedConnectors, connector)
@@ -608,43 +695,237 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 		}
 	}
 
+	layoutPositions, err := a.layoutPlanPlacements(ctx, autoLayoutTargets)
+	if err != nil {
+		return nil, err
+	}
+	for _, placement := range resp.CreatedPlacements {
+		if byElement, ok := layoutPositions[int64(placement.GetViewId())]; ok {
+			if pos, ok := byElement[int64(placement.GetElementId())]; ok {
+				placement.PositionX = pos.X
+				placement.PositionY = pos.Y
+			}
+		}
+	}
+
 	return resp, nil
 }
 
-func (a *APIAdapter) ListVersions(context.Context, uuid.UUID, int) ([]*diagv1.WorkspaceVersionInfo, error) {
-	return nil, api.ErrUnimplemented
+func (a *APIAdapter) layoutPlanPlacements(ctx context.Context, targets map[int64]map[int64]struct{}) (map[int64]map[int64]layout.Placement, error) {
+	out := map[int64]map[int64]layout.Placement{}
+	for viewID, elementIDs := range targets {
+		if len(elementIDs) == 0 {
+			continue
+		}
+		positions, err := a.layoutPlanView(ctx, viewID, elementIDs)
+		if err != nil {
+			return nil, err
+		}
+		out[viewID] = positions
+	}
+	return out, nil
 }
 
-func (a *APIAdapter) GetLatestVersion(context.Context, uuid.UUID) (*diagv1.WorkspaceVersionInfo, error) {
-	return nil, api.ErrUnimplemented
+func (a *APIAdapter) layoutPlanView(ctx context.Context, viewID int64, targets map[int64]struct{}) (map[int64]layout.Placement, error) {
+	placements, err := a.planViewPlacementNodes(ctx, viewID)
+	if err != nil {
+		return nil, err
+	}
+	connectors, err := a.planViewLayoutConnectors(ctx, viewID)
+	if err != nil {
+		return nil, err
+	}
+	next := layout.LayoutPlacements(placements, targets, connectors, false)
+	for elementID, pos := range next {
+		if err := a.Store.legacy.UpdatePlacement(ctx, viewID, elementID, pos.X, pos.Y); err != nil {
+			return nil, err
+		}
+	}
+	return next, nil
 }
 
-func (a *APIAdapter) CreateVersion(context.Context, uuid.UUID, string, string, *int32, int, int, int, *string, *string) (*diagv1.WorkspaceVersionInfo, error) {
-	return nil, api.ErrUnimplemented
+func (a *APIAdapter) planViewPlacementNodes(ctx context.Context, viewID int64) ([]layout.Placement, error) {
+	rows, err := a.Store.legacy.DB().QueryContext(ctx, `SELECT element_id, position_x, position_y FROM placements WHERE view_id = ? ORDER BY id`, viewID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []layout.Placement
+	for rows.Next() {
+		var p layout.Placement
+		if err := rows.Scan(&p.ElementID, &p.X, &p.Y); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
-func (a *APIAdapter) GetVersioningEnabled(context.Context, uuid.UUID) (bool, error) {
-	return false, api.ErrUnimplemented
+func (a *APIAdapter) planViewLayoutConnectors(ctx context.Context, viewID int64) ([]layout.Connector, error) {
+	rows, err := a.Store.legacy.DB().QueryContext(ctx, `SELECT source_element_id, target_element_id FROM connectors WHERE view_id = ? ORDER BY id`, viewID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []layout.Connector
+	for rows.Next() {
+		var c layout.Connector
+		if err := rows.Scan(&c.Source, &c.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
-func (a *APIAdapter) SetVersioningEnabled(context.Context, uuid.UUID, bool) error {
-	return api.ErrUnimplemented
+// PruneMissingCLIResources removes resources previously owned by CLI metadata
+// when they no longer appear in the current plan. It deliberately only acts on
+// IDs from the prior metadata snapshot so watch/imported resources are left
+// alone.
+func (a *APIAdapter) PruneMissingCLIResources(ctx context.Context, workspaceID uuid.UUID, previous *workspace.Meta, req *diagv1.ApplyPlanRequest) error {
+	if previous == nil {
+		return nil
+	}
+
+	plannedElements := map[workspace.ResourceID]bool{}
+	plannedViews := map[workspace.ResourceID]bool{}
+	plannedConnectors := map[workspace.ResourceID]bool{}
+	for _, element := range req.GetElements() {
+		if element.GetId() != 0 {
+			plannedElements[workspace.ResourceID(element.GetId())] = true
+		}
+		if element.GetHasView() && element.GetViewId() != 0 {
+			plannedViews[workspace.ResourceID(element.GetViewId())] = true
+		}
+	}
+	for _, connector := range req.GetConnectors() {
+		if connector.GetId() != 0 {
+			plannedConnectors[workspace.ResourceID(connector.GetId())] = true
+		}
+	}
+
+	for _, metadata := range previous.Connectors {
+		if metadata == nil || metadata.ID == 0 || plannedConnectors[metadata.ID] {
+			continue
+		}
+		if err := a.DeleteConnector(ctx, int32(metadata.ID), workspaceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	for _, metadata := range previous.Views {
+		if metadata == nil || metadata.ID == 0 || plannedViews[metadata.ID] {
+			continue
+		}
+		if err := a.DeleteView(ctx, int32(metadata.ID), workspaceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	for _, metadata := range previous.Elements {
+		if metadata == nil || metadata.ID == 0 || plannedElements[metadata.ID] {
+			continue
+		}
+		if err := a.DeleteElement(ctx, int32(metadata.ID), workspaceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *APIAdapter) ListVersions(ctx context.Context, workspaceID uuid.UUID, limit int) ([]*diagv1.WorkspaceVersionInfo, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := a.Store.DB().QueryContext(ctx, `
+		SELECT id, version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at
+		FROM workspace_versions
+		ORDER BY id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*diagv1.WorkspaceVersionInfo
+	for rows.Next() {
+		version, err := scanWorkspaceVersion(rows, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, version)
+	}
+	return out, rows.Err()
+}
+
+func (a *APIAdapter) GetLatestVersion(ctx context.Context, workspaceID uuid.UUID) (*diagv1.WorkspaceVersionInfo, error) {
+	row := a.Store.DB().QueryRowContext(ctx, `
+		SELECT id, version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at
+		FROM workspace_versions
+		ORDER BY id DESC
+		LIMIT 1`)
+	version, err := scanWorkspaceVersion(row, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, api.ErrUnimplemented
+	}
+	return version, err
+}
+
+func (a *APIAdapter) CreateVersion(ctx context.Context, workspaceID uuid.UUID, versionID, source string, parentID *int32, viewCount, elementCount, connectorCount int, description, workspaceHash *string) (*diagv1.WorkspaceVersionInfo, error) {
+	var parent any
+	if parentID != nil {
+		parent = *parentID
+	}
+	res, err := a.Store.DB().ExecContext(ctx, `
+		INSERT INTO workspace_versions(version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		versionID, source, parent, viewCount, elementCount, connectorCount, description, workspaceHash, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	row := a.Store.DB().QueryRowContext(ctx, `
+		SELECT id, version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at
+		FROM workspace_versions
+		WHERE id = ?`, id)
+	return scanWorkspaceVersion(row, workspaceID)
+}
+
+func (a *APIAdapter) GetVersioningEnabled(ctx context.Context, _ uuid.UUID) (bool, error) {
+	var enabled int
+	err := a.Store.DB().QueryRowContext(ctx, `SELECT cli_versioning_enabled FROM workspace_version_settings WHERE id = 1`).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return enabled != 0, err
+}
+
+func (a *APIAdapter) SetVersioningEnabled(ctx context.Context, _ uuid.UUID, enabled bool) error {
+	value := 0
+	if enabled {
+		value = 1
+	}
+	_, err := a.Store.DB().ExecContext(ctx, `
+		INSERT INTO workspace_version_settings(id, cli_versioning_enabled)
+		VALUES (1, ?)
+		ON CONFLICT(id) DO UPDATE SET cli_versioning_enabled = excluded.cli_versioning_enabled`, value)
+	return err
 }
 
 func (a *APIAdapter) GetWorkspaceResourceCounts(ctx context.Context, _ uuid.UUID) (views, elements, connectors int, err error) {
-	allViews, err := a.Store.ViewTree(ctx)
-	if err != nil {
-		return 0, 0, 0, err
+	for _, item := range []struct {
+		query string
+		dest  *int
+	}{
+		{query: `SELECT COUNT(*) FROM views`, dest: &views},
+		{query: `SELECT COUNT(*) FROM elements`, dest: &elements},
+		{query: `SELECT COUNT(*) FROM connectors`, dest: &connectors},
+	} {
+		if err := a.Store.DB().QueryRowContext(ctx, item.query).Scan(item.dest); err != nil {
+			return 0, 0, 0, err
+		}
 	}
-	allElements, err := a.Store.legacy.Elements(ctx, 0, 0, "")
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	allConnectors, err := a.ListAllConnectors(ctx, uuid.Nil)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	return len(flattenViewTreeNodes(allViews)), len(allElements), len(allConnectors), nil
+	return views, elements, connectors, nil
 }
 
 func (a *APIAdapter) ensureRootViewID(ctx context.Context) (int32, error) {
@@ -658,6 +939,48 @@ func (a *APIAdapter) ensureRootViewID(ctx context.Context) (int32, error) {
 		}
 	}
 	return 0, fmt.Errorf("root view not found")
+}
+
+type sqlRowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanWorkspaceVersion(row sqlRowScanner, workspaceID uuid.UUID) (*diagv1.WorkspaceVersionInfo, error) {
+	var (
+		id, viewCount, elementCount, connectorCount int64
+		versionID, source, createdAtRaw             string
+		parentID                                    sql.NullInt64
+		description                                 sql.NullString
+		workspaceHash                               sql.NullString
+	)
+	if err := row.Scan(&id, &versionID, &source, &parentID, &viewCount, &elementCount, &connectorCount, &description, &workspaceHash, &createdAtRaw); err != nil {
+		return nil, err
+	}
+	createdAt, err := time.Parse(time.RFC3339, createdAtRaw)
+	if err != nil {
+		createdAt = time.Now().UTC()
+	}
+	info := &diagv1.WorkspaceVersionInfo{
+		Id:             strconv.FormatInt(id, 10),
+		OrgId:          workspaceID.String(),
+		VersionId:      versionID,
+		Source:         source,
+		ViewCount:      int32(viewCount),
+		ElementCount:   int32(elementCount),
+		ConnectorCount: int32(connectorCount),
+		CreatedAt:      timestamppb.New(createdAt),
+	}
+	if parentID.Valid {
+		parent := strconv.FormatInt(parentID.Int64, 10)
+		info.ParentVersionId = &parent
+	}
+	if description.Valid {
+		info.Description = &description.String
+	}
+	if workspaceHash.Valid {
+		info.WorkspaceHash = &workspaceHash.String
+	}
+	return info, nil
 }
 
 func (a *APIAdapter) findPlacedElement(ctx context.Context, viewID, elementID int64) (*diagv1.PlacedElement, error) {
@@ -776,6 +1099,8 @@ func placedElementToProto(item app.PlacedElement) *diagv1.PlacedElement {
 		Name:      item.Name,
 		Kind:      item.Kind,
 		Tags:      cloneStrings(item.Tags),
+		HasView:   item.HasView,
+		ViewLabel: item.ViewLabel,
 	}
 	if item.Description != nil {
 		p.Description = item.Description
@@ -867,8 +1192,11 @@ func layerToProto(layer app.ViewLayer) *diagv1.ViewLayer {
 }
 
 func technologyLinksFromProto(links []*diagv1.TechnologyLink) []app.TechnologyConnector {
-	if len(links) == 0 {
+	if links == nil {
 		return nil
+	}
+	if len(links) == 0 {
+		return []app.TechnologyConnector{}
 	}
 	out := make([]app.TechnologyConnector, 0, len(links))
 	for _, link := range links {

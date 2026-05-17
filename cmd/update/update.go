@@ -1,11 +1,17 @@
 package update
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
+	"time"
 
-	"github.com/mertcikla/tld/internal/cmdutil"
-	"github.com/mertcikla/tld/internal/completion"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/cmd/version"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/completion"
+	"github.com/mertcikla/tld/v2/internal/selfupdate"
+	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -23,8 +29,49 @@ func NewUpdateCmd(wdir, format *string, compact *bool) *cobra.Command {
 
 	c.AddCommand(newElementCmd(wdir, format, compact))
 	c.AddCommand(newConnectorCmd(wdir, format, compact))
+	c.AddCommand(newSelfCmd())
 
 	return c
+}
+
+func newSelfCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "self",
+		Short: "Update the tld CLI binary from GitHub releases",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := workspace.LoadGlobalConfig()
+			if err != nil {
+				return err
+			}
+			interval, err := time.ParseDuration(cfg.Updates.CheckInterval)
+			if err != nil || interval <= 0 {
+				interval = selfupdate.DefaultCheckInterval
+			}
+			statePath := ""
+			if dir, err := workspace.ConfigDir(); err == nil {
+				statePath = filepath.Join(dir, "update-check.json")
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+			defer cancel()
+			status, err := selfupdate.Install(ctx, selfupdate.Options{
+				Current:       version.Version,
+				CheckInterval: interval,
+				StatePath:     statePath,
+				Force:         true,
+			})
+			if err != nil {
+				return fmt.Errorf("update tld: %w", err)
+			}
+			if !status.UpdateAvailable {
+				term.Successf(cmd.OutOrStdout(), "tld %s is already up to date.", version.Version)
+				return nil
+			}
+			term.Successf(cmd.OutOrStdout(), "Updated tld from %s to %s.", version.Version, status.Latest)
+			term.Hint(cmd.OutOrStdout(), "Restart any running tld server to use the new version.")
+			return nil
+		},
+	}
 }
 
 func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
@@ -53,8 +100,7 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update element", "update", ref)
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated element %q: %s=%q\n", ref, field, value)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to push to cloud.")
+			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
 			return nil
 		},
 	}
@@ -91,8 +137,7 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "update connector", "update", ref)
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated connector %q: %s=%q\n", ref, field, value)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally in connectors.yaml. Run 'tld apply' to push to cloud.")
+			term.Successf(cmd.OutOrStdout(), "updated %q: %s=%q", ref, field, value)
 			return nil
 		},
 	}

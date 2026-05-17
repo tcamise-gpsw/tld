@@ -9,9 +9,10 @@ import (
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
-	"github.com/mertcikla/tld/internal/client"
-	"github.com/mertcikla/tld/internal/cmdutil"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/client"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -53,15 +54,15 @@ you before overwriting them. Use --force to skip the prompt.`,
 					return fmt.Errorf("calculate hash: %w", err)
 				}
 				if currentHash != lockFile.WorkspaceHash {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Warning: local workspace has uncommitted changes.\n")
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Pull will overwrite them. Continue? [yes/no]: ")
+					term.Warn(cmd.OutOrStdout(), "Local workspace has uncommitted changes. Pull will overwrite them.")
+					_, _ = fmt.Fprint(cmd.OutOrStdout(), "  Continue? [yes/no]: ")
 					scanner := bufio.NewScanner(cmd.InOrStdin())
 					if !scanner.Scan() {
 						return errors.New("aborted")
 					}
 					answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
 					if answer != "yes" && answer != "y" {
-						_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull cancelled.")
+						term.Infof(cmd.OutOrStdout(), "Pull cancelled.")
 						return nil
 					}
 				}
@@ -78,8 +79,8 @@ you before overwriting them. Use --force to skip the prompt.`,
 			newWS := cmdutil.ConvertExportResponse(ws, resp.Msg)
 
 			if dryRun {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would pull: %d elements, %d diagrams, %d connectors\n",
-					len(newWS.Elements), cmdutil.CountElementDiagrams(newWS), len(newWS.Connectors))
+				term.Infof(cmd.OutOrStdout(), "Would pull: %d elements, %d diagrams, %d connectors",
+					len(newWS.Elements), cmdutil.CountViews(newWS), len(newWS.Connectors))
 				return nil
 			}
 
@@ -113,18 +114,18 @@ you before overwriting them. Use --force to skip the prompt.`,
 			versionID := fmt.Sprintf("pull-%s", time.Now().UTC().Format(time.RFC3339))
 			workspace.UpdateLockFile(lockFile, versionID, "pull", &workspace.ResourceCounts{
 				Elements:   len(newWS.Elements),
-				Views:      cmdutil.CountElementDiagrams(newWS),
+				Views:      cmdutil.CountViews(newWS),
 				Connectors: len(newWS.Connectors),
 			}, hash, nil, newWS.Meta)
 			lockFile.Resources.Elements = len(newWS.Elements)
-			lockFile.Resources.Views = cmdutil.CountElementDiagrams(newWS)
+			lockFile.Resources.Views = cmdutil.CountViews(newWS)
 			lockFile.Resources.Connectors = len(newWS.Connectors)
 			if err := workspace.WriteLockFile(*wdir, lockFile); err != nil {
 				return fmt.Errorf("write lock file: %w", err)
 			}
 
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Pulled %d elements, %d diagrams, %d connectors\n",
-				len(newWS.Elements), cmdutil.CountElementDiagrams(newWS), len(newWS.Connectors))
+			term.Successf(cmd.OutOrStdout(), "Pulled %d elements, %d diagrams, %d connectors",
+				len(newWS.Elements), cmdutil.CountViews(newWS), len(newWS.Connectors))
 
 			return nil
 		},

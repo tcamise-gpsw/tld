@@ -9,6 +9,13 @@ export function resolveIconPath(path: string | null | undefined): string {
 
   // Absolute URLs and data URIs are returned as-is
   if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path
+  const vscodeServerUrl = typeof window !== 'undefined' ? window.__TLD_SERVER_URL__?.replace(/\/+$/, '') : undefined
+  const isVsCode = typeof window !== 'undefined' && !!window.__TLD_VSCODE__
+  if (isVsCode && vscodeServerUrl) {
+    const stripped = path.startsWith('/app/') ? path.slice('/app'.length) : path
+    const normalizedPath = stripped.startsWith('/') ? stripped : `/${stripped}`
+    return `${vscodeServerUrl}${normalizedPath}`
+  }
 
   // If running inside the native mobile app (Capacitor) OR inside an embedded
   // webview that serves content from localhost (e.g. Capacitor production webview),

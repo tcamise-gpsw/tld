@@ -1,10 +1,18 @@
 ---
 name: create-diagram
-description: Create architecture diagrams from a codebase using the tld CLI. Use this skill whenever the user asks to diagram, map, or document their codebase or system architecture even if they don't mention "tld" or "diagram" explicitly. Trigger on phrases like "map my services", "document my architecture", "create a system diagram", "diagram this repo", "show how my code is structured", or any request to visually represent how a system's components fit together.
+description: Create architecture diagrams from a codebase using the tld CLI. Use this skill whenever the user asks to diagram, or map their codebase or system architecture. Trigger on phrases like "map my services", "document my architecture", "create a system diagram", "diagram this repo", "show how my code is structured", or any request to visually represent how a system's components fit together.
 allowed-tools: Bash(tld *), Write
 ---
-
-> **Reference:** When you need exact command syntax, flags, or a full walkthrough example, read `references/tld-docs.md`.
+# Prerequisite: Install tld
+Check if tld is already installed:
+```bash
+tld --version
+```
+If not installed, run:
+```bash
+curl -LsSf https://tldiagram.com/install.sh | sh && tld --version
+```
+If you have any issues with installation, refer the user to https://github.com/Mertcikla/tld 
 
 ## How tld thinks about architecture
 
@@ -14,7 +22,9 @@ In tld, everything is an **element** a service, a database, a person, a class, a
 
 **Roles** (service, database, external system, person, etc.) are expressed as tags not as distinct types. All elements share a single kind.
 
-This is not traditional architecture diagramming. It is a **navigatable atlas of the entire system** like a hyperlinked wiki where you can zoom into anything. At the top you see services talking to each other. Drill into a service and you see its modules. Drill into a module and you see its classes. Drill into a class and you see its methods, parameters, what each method calls, its parent classes, its subclasses.
+The aim is a **navigatable atlas of the entire system** like a hyperlinked wiki where you can zoom into anything. At the top you see services talking to each other. Drill into a service and you see its modules. Drill into a module and you see its classes. Drill into a class and you see its methods, parameters, what each method calls, its parent classes, its subclasses.
+
+Endpoint have connectors wired up to external APIs they call, to databases they read/write, to other services they talk to. 
 
 **The goal at full detail: a reader can start at the root view and follow drill-downs until they understand any piece of the system without ever opening a file.**
 
@@ -30,7 +40,8 @@ A view is only useful if it tells you something you couldn't immediately see fro
 
 ## Working surface: diagram.sh
 
-All tld commands go into a single bash script, `diagram.sh`, in the workspace directory. The script is your notes and your execution log comments explain what you found, commands record what you built.
+All tld commands go into multiple bash scripts, inside the workspace directory ./.tld/ . The script is your notes and your execution log comments explain what you found, commands record what you built. Organize the script into batches of related commands and abstraction levels, with comments describing the purpose of each batch. Run each batch immediately after writing it, then do a checkpoint before moving to the next batch. 
+
 
 **Create the script once at the beginning of Step 3:**
 
@@ -44,8 +55,6 @@ set -e
 1. Append a labeled block of commands (with a `# ===` comment header) to `diagram.sh`
 2. Run only that new block
 3. Do a **batch checkpoint** before continuing to the next batch
-
-The script is the complete, replayable record of every diagram decision. Never run a tld command outside it.
 
 ---
 
@@ -103,7 +112,7 @@ Copy this checklist and check off items as you complete them:
 Before exploring, ask the user two questions:
 
 > 1. **How many views do you expect?** (rough target is fine e.g. "around 20", "as many as needed", "keep it under 10")
-> 2. **How deeply nested do you want the drill-downs?** (e.g. "just top-level", "2–3 levels", "go as deep as possible")
+> 2. **How deeply nested do you want the drill-downs?** (e.g. "high-level overview", "2–3 levels", "go as deep as possible")
 
 Use their answers to calibrate the rest of the work. If they don't know, suggest options based on the codebase size once you've done a quick directory scan.
 
@@ -144,26 +153,26 @@ Create `diagram.sh`, then append and run the root elements as the first batch. R
 
 ```bash
 # === Root elements ===
-tld add "Domain & Business Logic" --ref domain --diagram-label "System"
-tld add "Data & Persistence" --ref data --diagram-label "System"
-tld add "Interfaces & Integrations" --ref interfaces --diagram-label "System"
-tld add "Platform & Infrastructure" --ref deployment --diagram-label "System"
+tld add "Domain & Business Logic" --ref domain --diagram-label "System" && \
+    tld add "Data & Persistence" --ref data --diagram-label "System" && \
+    tld add "Interfaces & Integrations" --ref interfaces --diagram-label "System" && \
+    tld add "Platform & Infrastructure" --ref deployment --diagram-label "System"
 ```
 
 Append and run the next level as a second batch:
 
 ```bash
 # === Level 2: major subsystems ===
-tld add "Backend" --ref backend --parent domain
-tld add "Frontend" --ref frontend --parent interfaces
-tld add "Storage" --ref storage --parent data
+tld add "Backend" --ref backend --parent domain && \
+    tld add "Frontend" --ref frontend --parent interfaces && \
+    tld add "Storage" --ref storage --parent data
 ```
 
 **Batch checkpoint:** Are there connectors between root elements suggested by your inventory? Add them now:
 
 ```bash
-tld connect --from domain --to data --label "reads/writes"
-tld connect --from interfaces --to domain --label "calls"
+tld connect --from domain --to data --label "reads/writes" && \
+    tld connect --from interfaces --to domain --label "calls"
 ```
 
 ---
@@ -174,9 +183,9 @@ Work one view at a time. For each view (parent element), append its children as 
 
 ```bash
 # === Backend children ===
-tld add "REST API" --parent backend --technology "Go" --ref api
-tld add "Stripe API" --parent backend --technology "Stripe" --ref stripe
-tld add "Job Worker" --parent backend --technology "Go" --ref worker
+tld add "REST API" --parent backend --technology "Go" --ref api && \
+    tld add "Stripe API" --parent backend --technology "Stripe" --ref stripe && \
+    tld add "Job Worker" --parent backend --technology "Go" --ref worker
 ```
 
 **Batch checkpoint after elements:** Do any of these elements also belong in other views? Add those placements now.
@@ -187,9 +196,9 @@ Append and run connectors for the same view immediately after its elements. View
 
 ```bash
 # === Backend connectors ===
-tld connect --from api --to stripe --label "billing"
-tld connect --from api --to db --label "reads/writes"
-tld connect --from worker --to queue --label "consumes jobs"
+tld connect --from api --to stripe --label "billing" && \
+    tld connect --from api --to db --label "reads/writes" && \
+    tld connect --from worker --to queue --label "consumes jobs"
 ```
 
 Labels should describe *what* the interaction does "validates JWT", "publishes events" not just "calls".
@@ -221,11 +230,16 @@ No connectors on a shared element = missing information. Append any missing plac
 Example depth for a typical backend service at full detail:
 ```
 Root (L1)
+  |── Database (L2)
   └── Backend Service (L2)
         └── Auth Module (L3)
               └── AuthService class (L4)
                     └── AuthService: __init__ params, methods, base classes, subclasses (L5)
                           └── validate_token() : params, JWT lib call, DB call, return type (L6)
+Connectors:
+
+validate_token<---calls---> JWT Library
+validate_token<---calls---> Database
 ```
 
 ### What to capture in a code-level view
@@ -254,9 +268,9 @@ No separate link command needed drilling into `api-internals` from the backend v
 Go back to the code don't guess. Apply the 10-element rule here too; cluster if needed.
 
 ```bash
-tld add "Auth Middleware" --parent api-internals --technology "Go" --ref auth-mw
-tld add "User Handler" --parent api-internals --technology "Go" --ref user-handler
-tld add "Database" --parent api-internals --technology "PostgreSQL" --ref db
+tld add "Auth Middleware" --parent api-internals --technology "Go" --ref auth-mw && \
+    tld add "User Handler" --parent api-internals --technology "Go" --ref user-handler && \
+    tld add "Database" --parent api-internals --technology "PostgreSQL" --ref dbb
 ```
 
 > If `db` already exists from a parent view, `tld add` with the same ref but a new `--parent` adds a new *placement* rather than a duplicate. Reused elements don't inherit connectors add them explicitly for this context.
@@ -264,8 +278,8 @@ tld add "Database" --parent api-internals --technology "PostgreSQL" --ref db
 ### 6c. Connect internal elements
 
 ```bash
-tld connect --from auth-mw --to user-handler --label "forwards request"
-tld connect --from user-handler --to db --label "SQL"
+tld connect --from auth-mw --to user-handler --label "forwards request" && \
+    tld connect --from user-handler --to db --label "SQL"
 ```
 
 Before moving to the next subsystem, check every element: at least one incoming connector, at least one outgoing connector, labels specific enough to tell a reader what the interaction does. Missing connectors = go back to the code.
@@ -286,7 +300,7 @@ tld validate
 ```
 Carefully observe its output and its instructions to improve the quality of the diagrams. Don't use scripting to automate this and just to bypass the validation. It needs careful attention and deliberation to improve the diagrams. Work on each issue one by one.
 
-Fix any broken refs or missing fields, append the fixes to `diagram.sh`, and re-run.
+Use `tld validate ARCXXX` to see the violations for a specific rule. For each violation, follow the directions from the output and go back to `diagram.sh` to fix them, then re-run the validation until all violations are resolved. 
 
 ---
 
@@ -298,4 +312,4 @@ Ask the user to run:
 tld plan
 ```
 
-Walk them through the output. If they want changes more elements, deeper drill-downs, better connector labels append the changes to `diagram.sh`, run the new block, and iterate.
+Walk them through the output. If they want changes more elements, deeper drill-downs, append the changes to `diagram.sh`, run the new block, and iterate.

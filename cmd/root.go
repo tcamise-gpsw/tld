@@ -4,28 +4,32 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mertcikla/tld/cmd/add"
-	"github.com/mertcikla/tld/cmd/analyze"
-	"github.com/mertcikla/tld/cmd/apply"
-	"github.com/mertcikla/tld/cmd/check"
-	"github.com/mertcikla/tld/cmd/connect"
-	"github.com/mertcikla/tld/cmd/diff"
-	"github.com/mertcikla/tld/cmd/export"
-	"github.com/mertcikla/tld/cmd/initialize"
-	"github.com/mertcikla/tld/cmd/login"
-	"github.com/mertcikla/tld/cmd/mcp"
-	"github.com/mertcikla/tld/cmd/plan"
-	"github.com/mertcikla/tld/cmd/pull"
-	"github.com/mertcikla/tld/cmd/remove"
-	"github.com/mertcikla/tld/cmd/rename"
-	"github.com/mertcikla/tld/cmd/serve"
-	"github.com/mertcikla/tld/cmd/status"
-	"github.com/mertcikla/tld/cmd/stop"
-	"github.com/mertcikla/tld/cmd/update"
-	"github.com/mertcikla/tld/cmd/validate"
-	"github.com/mertcikla/tld/cmd/version"
-	"github.com/mertcikla/tld/cmd/views"
-	"github.com/mertcikla/tld/internal/completion"
+	"github.com/mertcikla/tld/v2/cmd/add"
+	"github.com/mertcikla/tld/v2/cmd/analyze"
+	"github.com/mertcikla/tld/v2/cmd/apply"
+	"github.com/mertcikla/tld/v2/cmd/check"
+	configcmd "github.com/mertcikla/tld/v2/cmd/config"
+	"github.com/mertcikla/tld/v2/cmd/connect"
+	"github.com/mertcikla/tld/v2/cmd/diff"
+	"github.com/mertcikla/tld/v2/cmd/export"
+	"github.com/mertcikla/tld/v2/cmd/initialize"
+	inspectcmd "github.com/mertcikla/tld/v2/cmd/inspect"
+	"github.com/mertcikla/tld/v2/cmd/login"
+	"github.com/mertcikla/tld/v2/cmd/mcp"
+	"github.com/mertcikla/tld/v2/cmd/plan"
+	"github.com/mertcikla/tld/v2/cmd/pull"
+	"github.com/mertcikla/tld/v2/cmd/remove"
+	"github.com/mertcikla/tld/v2/cmd/rename"
+	"github.com/mertcikla/tld/v2/cmd/serve"
+	"github.com/mertcikla/tld/v2/cmd/status"
+	"github.com/mertcikla/tld/v2/cmd/stop"
+	techcmd "github.com/mertcikla/tld/v2/cmd/tech"
+	"github.com/mertcikla/tld/v2/cmd/update"
+	"github.com/mertcikla/tld/v2/cmd/validate"
+	"github.com/mertcikla/tld/v2/cmd/version"
+	"github.com/mertcikla/tld/v2/cmd/views"
+	watchcmd "github.com/mertcikla/tld/v2/cmd/watch"
+	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/spf13/cobra"
 )
 
@@ -70,7 +74,7 @@ and apply them atomically with 'tld apply'.`,
 	}
 
 	var wdir string
-	defaultWdir := "."
+	defaultWdir := ""
 	if _, err := os.Stat(".tld"); err == nil {
 		defaultWdir = ".tld"
 	} else if _, err := os.Stat("tld"); err == nil {
@@ -138,6 +142,9 @@ and apply them atomically with 'tld apply'.`,
 	diffCmd := diff.NewDiffCmd(&wdir)
 	diffCmd.GroupID = secondaryGroup.ID
 
+	inspectCmd := inspectcmd.NewInspectCmd(&wdir, &outputFormat, &compactJSON)
+	inspectCmd.GroupID = secondaryGroup.ID
+
 	versionCmd := version.NewVersionCmd()
 	versionCmd.GroupID = secondaryGroup.ID
 
@@ -146,6 +153,15 @@ and apply them atomically with 'tld apply'.`,
 
 	checkCmd := check.NewCheckCmd(&wdir)
 	checkCmd.GroupID = secondaryGroup.ID
+
+	configCmd := configcmd.NewConfigCmd()
+	configCmd.GroupID = secondaryGroup.ID
+
+	techCmd := techcmd.NewTechCmd()
+	techCmd.GroupID = secondaryGroup.ID
+
+	watchCmd := watchcmd.NewWatchCmd()
+	watchCmd.GroupID = secondaryGroup.ID
 
 	serveCmd := serve.NewServeCmd(nil)
 	serveCmd.GroupID = secondaryGroup.ID
@@ -167,6 +183,7 @@ and apply them atomically with 'tld apply'.`,
 		statusCmd,
 		viewsCmd,
 		diffCmd,
+		inspectCmd,
 		addCmd,
 		connectCmd,
 		removeCmd,
@@ -174,6 +191,9 @@ and apply them atomically with 'tld apply'.`,
 		renameCmd,
 		analyzeCmd,
 		checkCmd,
+		configCmd,
+		techCmd,
+		watchCmd,
 		serveCmd,
 		mcpCmd,
 		stopCmd,

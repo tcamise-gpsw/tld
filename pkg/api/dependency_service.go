@@ -33,7 +33,7 @@ func (s *DependencyService) ListDependencies(ctx context.Context, req *connect.R
 		return nil, err
 	}
 
-	elements, err := s.Store.ListElements(ctx, workspaceID, 0, 0, "")
+	elements, _, err := s.Store.ListElements(ctx, workspaceID, 0, 0, "")
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list elements: %w", err))
 	}
@@ -82,10 +82,9 @@ func elementToDependencyProto(e *diagv1.Element) *diagv1.DependencyElement {
 		for _, tl := range e.GetTechnologyLinks() {
 			slug := tl.GetSlug()
 			links = append(links, &diagv1.DependencyTechnologyLink{
-				Type:          tl.GetType(),
-				Slug:          slug,
-				Label:         tl.GetLabel(),
-				IsPrimaryIcon: tl.GetIsPrimaryIcon(),
+				Type:  tl.GetType(),
+				Slug:  slug,
+				Label: tl.GetLabel(),
 			})
 		}
 		de.TechnologyLinks = links

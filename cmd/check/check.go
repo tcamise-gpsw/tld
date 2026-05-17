@@ -3,8 +3,9 @@ package check
 import (
 	"fmt"
 
-	"github.com/mertcikla/tld/internal/cmdutil"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -28,24 +29,24 @@ func NewCheckCmd(wdir *string) *cobra.Command {
 			errs := ws.Validate()
 			if len(errs) > 0 {
 				allPassed = false
-				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "FAIL  Validation")
+				term.Fail(cmd.OutOrStdout(), "Validation")
 				for _, e := range errs {
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "      - %s\n", e)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "      - %s\n", e)
 				}
 			} else {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "PASS  Validation")
+				term.Success(cmd.OutOrStdout(), "Validation")
 			}
 
 			// 2. Check Symbols
 			broken := cmdutil.CheckSymbols(cmd.Context(), ws, repoCtx, rules)
 			if len(broken) > 0 {
 				allPassed = false
-				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "FAIL  Symbol Verification")
+				term.Fail(cmd.OutOrStdout(), "Symbol Verification")
 				for _, msg := range broken {
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "      - %s\n", msg)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "      - %s\n", msg)
 				}
 			} else {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "PASS  Symbol Verification")
+				term.Success(cmd.OutOrStdout(), "Symbol Verification")
 			}
 
 			// 2. Check Freshness
@@ -54,19 +55,19 @@ func NewCheckCmd(wdir *string) *cobra.Command {
 				if strict {
 					allPassed = false
 				}
-				label := "WARN "
 				if strict {
-					label = "FAIL "
+					term.Fail(cmd.OutOrStdout(), "Outdated Diagrams")
+				} else {
+					term.Warn(cmd.OutOrStdout(), "Outdated Diagrams")
 				}
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s Outdated Diagrams\n", label)
 				for _, msg := range outdated {
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "      - %s\n", msg)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "      - %s\n", msg)
 				}
 				if strict {
-					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "      (use `tld apply` to sync diagram metadata)")
+					term.Hint(cmd.OutOrStdout(), "use `tld apply` to sync diagram metadata")
 				}
 			} else {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "PASS  Outdated Diagrams")
+				term.Success(cmd.OutOrStdout(), "Outdated Diagrams")
 			}
 
 			if !allPassed {

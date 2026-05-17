@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrganizationResponse) *workspace.Workspace {
@@ -55,6 +55,7 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 			Branch:      e.GetBranch(),
 			Language:    e.GetLanguage(),
 			FilePath:    e.GetFilePath(),
+			Tags:        cloneStrings(e.GetTags()),
 			HasView:     e.GetHasView(),
 			ViewLabel:   strings.TrimSpace(e.GetViewLabel()),
 		}
@@ -139,7 +140,7 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 	return newWS
 }
 
-func CountElementDiagrams(ws *workspace.Workspace) int {
+func CountViews(ws *workspace.Workspace) int {
 	count := 0
 	for _, element := range ws.Elements {
 		if element.HasView {
@@ -158,6 +159,13 @@ func exportedDiagramLabel(diagram *diagv1.View, elementName string) string {
 		return name
 	}
 	return ""
+}
+
+func cloneStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]string(nil), values...)
 }
 
 func buildDiagramOwnerIndex(msg *diagv1.ExportOrganizationResponse, elements map[string]*workspace.Element, objectIDToRef map[int32]string) map[int32]string {

@@ -2,10 +2,13 @@ package add
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/mertcikla/tld/internal/cmdutil"
-	"github.com/mertcikla/tld/internal/completion"
-	"github.com/mertcikla/tld/internal/workspace"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/completion"
+	"github.com/mertcikla/tld/v2/internal/tech"
+	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -40,9 +43,24 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if r == "" {
 				r = workspace.Slugify(name)
 			}
+			if err := workspace.ValidateElementRef(r); err != nil {
+				return err
+			}
 			placementParent := parent
 			if placementParent == "" {
 				placementParent = "root"
+			}
+			if err := workspace.ValidateParentRef(placementParent); err != nil {
+				return err
+			}
+			if placementParent != workspace.RootRef {
+				ws, err := workspace.Load(*wdir)
+				if err != nil {
+					return fmt.Errorf("load workspace: %w", err)
+				}
+				if _, ok := ws.Elements[placementParent]; !ok {
+					return fmt.Errorf("parent ref %q not found", placementParent)
+				}
 			}
 			if diagramLabel == "" {
 				diagramLabel = legacyViewLabel
@@ -54,7 +72,7 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 				Description: description,
 				Technology:  technology,
 				URL:         url,
-				HasView:     true,
+				HasView:     false,
 				ViewLabel:   diagramLabel,
 				Placements: []workspace.ViewPlacement{{
 					ParentRef: placementParent,
@@ -62,6 +80,7 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 					PositionY: positionY,
 				}},
 			}
+			validateAndWarnTechnology(cmd, technology)
 			if err := workspace.UpsertElement(*wdir, r, spec); err != nil {
 				if cmdutil.WantsJSON(*format) {
 					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "add", err)
@@ -71,8 +90,7 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 			if cmdutil.WantsJSON(*format) {
 				return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "add", "add", r)
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated elements.yaml (upserted %s)\n", r)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Change recorded locally in elements.yaml. Run 'tld apply' to push to cloud.")
+			term.Successf(cmd.OutOrStdout(), "add: %s", r)
 			return nil
 		},
 	}
@@ -101,4 +119,33 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 		return completion.ElementKinds(), cobra.ShellCompDirectiveNoFileComp
 	})
 	return c
+}
+
+func validateAndWarnTechnology(cmd *cobra.Command, technology string) {
+	if technology == "" {
+		return
+	}
+	missing := tech.Validate(technology)
+	for _, m := range missing {
+		suggestions := tech.SuggestSimilar(m, 5)
+		if len(suggestions) == 0 {
+			term.Warnf(cmd.OutOrStdout(), "Unknown technology %q", m)
+			continue
+		}
+		term.Warnf(cmd.OutOrStdout(), "Unknown technology %q. similar: %s?", m, joinQuoted(suggestions))
+	}
+}
+
+func joinQuoted(items []string) string {
+	quoted := make([]string, len(items))
+	for i, s := range items {
+		quoted[i] = `"` + s + `"`
+	}
+	if len(quoted) == 0 {
+		return ""
+	}
+	if len(quoted) == 1 {
+		return quoted[0]
+	}
+	return fmt.Sprintf("%s, %s", strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1])
 }
