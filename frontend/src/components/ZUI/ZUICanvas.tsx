@@ -383,6 +383,7 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
     onPan,
     isMobileLayout,
     resolveHoveredProxyItem,
+    hiddenTags,
   )
 
   // Anchor positions are zoom-dependent, but not pan-dependent. Keeping pan out
