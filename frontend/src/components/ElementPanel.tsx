@@ -415,9 +415,9 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
 
   const scheduleAutoSave = () => {
     if (!autoSaveEdit) return
-    requestAnimationFrame(() => {
+    window.setTimeout(() => {
       void saveIfDirtyRef.current?.()
-    })
+    }, 0)
   }
 
   const handleClose = useCallback(async () => {
@@ -874,6 +874,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                         <Popover trigger={isMobile ? 'click' : 'hover'} placement="top" closeOnBlur>
                           <PopoverTrigger>
                             <Tag
+                              data-testid="element-panel-technology-chip"
                               size="sm"
                               variant="subtle"
                               bg={isPrimaryIcon ? 'blue.500' : 'whiteAlpha.100'}
@@ -893,6 +894,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                               </TagLabel>
                               {!isReadOnly && (
                                 <TagCloseButton
+                                  data-testid="element-panel-technology-remove"
                                   onClick={(e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
@@ -952,10 +954,10 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
               <Wrap mt={3}>
                 {tags.map((tag) => (
                   <WrapItem key={tag}>
-                    <Tag size="sm" variant="subtle" bg="whiteAlpha.100" border="1px solid" borderColor="whiteAlpha.200">
+                    <Tag data-testid="element-panel-tag-chip" size="sm" variant="subtle" bg="whiteAlpha.100" border="1px solid" borderColor="whiteAlpha.200">
                       <TagLabel color="white">{tag}</TagLabel>
                       {!isReadOnly && (
-                        <TagCloseButton onClick={() => {
+                        <TagCloseButton data-testid="element-panel-tag-remove" onClick={() => {
                           setTags((prev) => prev.filter((t) => t !== tag))
                           scheduleAutoSave()
                         }} />

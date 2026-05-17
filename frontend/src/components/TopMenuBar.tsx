@@ -164,6 +164,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
                   isDisabled={!isSmallerThan1150}
                 >
                   <Box
+                    data-testid={`topnav-${item.label.toLowerCase()}`}
                     as={RouterLink}
                     to={item.path}
                     h="32px"
@@ -243,6 +244,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
               <Box>
                 <PopoverTrigger>
                   <IconButton
+                    data-testid="topnav-appearance"
                     aria-label="Appearance"
                     icon={<SettingsIcon boxSize={4} />}
                     size="sm"
@@ -350,6 +352,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
             return (
               <Box
                 key={item.path}
+                data-testid={`mobile-topnav-${item.label.toLowerCase()}`}
                 as={RouterLink}
                 to={item.path}
                 flex={1}

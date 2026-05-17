@@ -10,3 +10,5 @@ skills-lock.json
 .DS_Store
 .tld/
 diagram.sh
+frontend/test-results/
+frontend/playwright-report/

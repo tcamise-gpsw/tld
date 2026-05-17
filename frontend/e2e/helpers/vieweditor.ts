@@ -4,6 +4,7 @@ export const onboardingStorage = {
   editor: 'diagrameditor_tutorial_v1_core',
   viewGrid: 'viewgrid_tutorial_v2_core',
   shown: 'onboarding_shown',
+  dependencies: 'dependencies_tutorial_v1_core',
 }
 
 export async function prepareStorage(page: Page) {
@@ -11,6 +12,7 @@ export async function prepareStorage(page: Page) {
     localStorage.setItem(keys.editor, '1')
     localStorage.setItem(keys.viewGrid, '1')
     localStorage.setItem(keys.shown, '1')
+    localStorage.setItem(keys.dependencies, '1')
     localStorage.setItem('diag:libraryOpen', 'true')
     localStorage.setItem('diag:explorerOpen', 'true')
     localStorage.setItem('diag:snapToGrid', 'false')
@@ -137,6 +139,11 @@ export async function createElement(page: Page, data: {
   technology?: string
   url?: string
   tags?: string[]
+  repo?: string
+  branch?: string
+  filePath?: string
+  language?: string
+  technologyLinks?: Array<{ type: string; slug?: string; label: string; isPrimaryIcon?: boolean }>
 }) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/CreateElement', {
     data: {
@@ -146,11 +153,37 @@ export async function createElement(page: Page, data: {
       technology: data.technology ?? '',
       url: data.url ?? '',
       tags: data.tags ?? [],
+      repo: data.repo ?? '',
+      branch: data.branch ?? '',
+      filePath: data.filePath ?? '',
+      language: data.language ?? '',
+      technologyLinks: data.technologyLinks ?? [],
     },
   })
   expect(response.ok()).toBeTruthy()
   const json = await response.json()
   return json.element as { id: number; name: string; kind?: string; tags?: string[] }
+}
+
+export async function updateElement(page: Page, elementId: number, data: {
+  name?: string
+  kind?: string
+  description?: string
+  technology?: string
+  url?: string
+  tags?: string[]
+  repo?: string
+  branch?: string
+  filePath?: string
+  language?: string
+  technologyLinks?: Array<{ type: string; slug?: string; label: string; isPrimaryIcon?: boolean }>
+}) {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/UpdateElement', {
+    data: { elementId, ...data },
+  })
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return json.element as Awaited<ReturnType<typeof getElement>>
 }
 
 export async function getElement(page: Page, elementId: number) {
@@ -168,7 +201,20 @@ export async function getElement(page: Page, elementId: number) {
     url?: string
     tags?: string[]
     technology_connectors?: Array<{ type: string; slug?: string; label: string; is_primary_icon?: boolean }>
+    repo?: string
+    branch?: string
+    file_path?: string
+    language?: string
   }
+}
+
+export async function listElements(page: Page, search = '') {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/ListElements', {
+    data: { search },
+  })
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return (json.elements ?? []) as Array<{ id: number; name: string; kind?: string; technology?: string; tags?: string[] }>
 }
 
 export async function addPlacement(page: Page, viewId: number, elementId: number, x = 120, y = 140) {
@@ -193,6 +239,31 @@ export async function createApiView(page: Page, name = uniqueName('API Diagram')
   expect(response.ok()).toBeTruthy()
   const json = await response.json()
   return json.view as { id: number; name: string; ownerElementId?: number | null }
+}
+
+export async function getView(page: Page, viewId: number) {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/GetView', {
+    data: { viewId },
+  })
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return json.view as { id: number; name: string; levelLabel?: string; level_label?: string; parentViewId?: number | null; parent_view_id?: number | null }
+}
+
+export async function updateView(page: Page, viewId: number, data: { name?: string; levelLabel?: string }) {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/UpdateView', {
+    data: { viewId, ...data },
+  })
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return json.view as { id: number; name: string; levelLabel?: string; level_label?: string }
+}
+
+export async function deleteView(page: Page, viewId: number) {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/DeleteView', {
+    data: { viewId },
+  })
+  expect(response.ok()).toBeTruthy()
 }
 
 export async function gotoView(page: Page, viewId: number) {
@@ -260,6 +331,22 @@ export async function expectConnector(page: Page, matcher: Partial<Awaited<Retur
   }).toBe(visible)
 }
 
+export async function listVisibilityOverrides(page: Page, viewId: number) {
+  const response = await page.request.get(`/api/views/${viewId}/visibility-overrides`)
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return (json.overrides ?? []) as Array<{ view_id: number; resource_type: string; resource_id: number; level_delta: number }>
+}
+
+export async function setVisibilityOverride(page: Page, viewId: number, resourceType: 'element' | 'connector', resourceId: number, levelDelta: number) {
+  const response = await page.request.put(`/api/views/${viewId}/visibility-overrides`, {
+    data: { resource_type: resourceType, resource_id: resourceId, level_delta: levelDelta },
+  })
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return json.override as { view_id: number; resource_type: string; resource_id: number; level_delta: number }
+}
+
 export async function listLayers(page: Page, viewId = currentViewId(page)) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/ListViewLayers', {
     data: { viewId },
@@ -314,4 +401,154 @@ export async function createAndLoadDiagramWithNodes(page: Page, count: number, p
     await expect(nodeByName(page, element.name)).toBeVisible()
   }
   return { diagram, elements }
+}
+
+export async function createDependencyGraph(page: Page, prefix = 'Dependency') {
+  const diagram = await createApiView(page, uniqueName(`${prefix} Diagram`))
+  const center = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Center`), kind: 'service', technology: 'go' }, 480, 260)
+  const incoming = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Incoming`), kind: 'api', technology: 'typescript' }, 180, 260)
+  const outgoing = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Outgoing`), kind: 'database', technology: 'postgres' }, 780, 260)
+  const both = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Both`), kind: 'queue', technology: 'kafka' }, 480, 80)
+  const undirected = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Undirected`), kind: 'external', technology: 's3' }, 480, 480)
+  await createConnector(page, diagram.id, incoming.id, center.id, { label: 'incoming', direction: 'forward' })
+  await createConnector(page, diagram.id, center.id, outgoing.id, { label: 'outgoing', direction: 'forward' })
+  await createConnector(page, diagram.id, center.id, both.id, { label: 'both', direction: 'both' })
+  await createConnector(page, diagram.id, center.id, undirected.id, { label: 'none', direction: 'none' })
+  return { diagram, center, incoming, outgoing, both, undirected }
+}
+
+export async function mockWatchRuntime(page: Page, options: {
+  active?: boolean
+  repositoryId?: number
+  versionId?: number
+  viewId?: number
+  elementId?: number
+  elementName?: string
+} = {}) {
+  const repositoryId = options.repositoryId ?? 1001
+  const versionId = options.versionId ?? 2001
+  const viewId = options.viewId ?? 1
+  const elementId = options.elementId ?? 1
+  const elementName = options.elementName ?? 'Changed element'
+  const active = options.active ?? true
+
+  await page.addInitScript((payload) => {
+    const sent: string[] = []
+    class MockWebSocket extends EventTarget {
+      static CONNECTING = 0
+      static OPEN = 1
+      static CLOSING = 2
+      static CLOSED = 3
+      readyState = MockWebSocket.CONNECTING
+      url: string
+      onopen: ((event: Event) => void) | null = null
+      onclose: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string) {
+        super()
+        this.url = url
+        ;(window as unknown as { __TLD_WATCH_SENT__: string[] }).__TLD_WATCH_SENT__ = sent
+        window.setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN
+          const openEvent = new Event('open')
+          this.dispatchEvent(openEvent)
+          this.onopen?.(openEvent)
+          for (const event of payload.events) {
+            const message = new MessageEvent('message', { data: JSON.stringify(event) })
+            this.dispatchEvent(message)
+            this.onmessage?.(message)
+          }
+        }, 20)
+      }
+
+      send(data: string) {
+        sent.push(data)
+      }
+
+      close() {
+        this.readyState = MockWebSocket.CLOSED
+        const event = new Event('close')
+        this.dispatchEvent(event)
+        this.onclose?.(event)
+      }
+    }
+    ;(window as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = MockWebSocket
+  }, {
+    events: [
+      { type: 'watch.connected', at: new Date().toISOString(), repository_id: repositoryId, watcher_mode: 'mock', languages: ['go'] },
+      { type: 'scan.started', at: new Date().toISOString(), repository_id: repositoryId, changed_files: 2 },
+      { type: 'source.changed', at: new Date().toISOString(), repository_id: repositoryId, data: { change: { path: 'internal/app/service.go', change_type: 'modified' }, representation_changed: true } },
+      { type: 'scan.completed', at: new Date().toISOString(), repository_id: repositoryId },
+    ],
+  })
+
+  const repo = {
+    id: repositoryId,
+    remote_url: null,
+    repo_root: '/tmp/e2e-repo',
+    display_name: 'e2e-repo',
+    branch: 'main',
+    head_commit: 'abcdef0',
+    identity_status: 'associated',
+  }
+  const version = {
+    id: versionId,
+    repository_id: repositoryId,
+    commit_hash: 'abcdef0',
+    commit_message: 'E2E mocked watch version',
+    branch: 'main',
+    representation_hash: 'mock-hash',
+    workspace_version_id: 3001,
+    created_at: new Date().toISOString(),
+  }
+  const diff = {
+    id: 4001,
+    version_id: versionId,
+    owner_type: 'file',
+    owner_key: 'internal/app/service.go',
+    change_type: 'updated',
+    resource_type: 'element',
+    resource_id: elementId,
+    summary: elementName,
+    added_lines: 12,
+    removed_lines: 3,
+  }
+
+  await page.route('**/api/watch/status', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(active
+        ? { active: true, repository: repo, lock: { id: 1, repository_id: repositoryId, pid: 123, started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(), status: 'active' } }
+        : { active: false }),
+    })
+  })
+  await page.route('**/api/watch/repositories', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([repo]) })
+  })
+  await page.route(`**/api/watch/repositories/${repositoryId}/versions`, async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([version]) })
+  })
+  await page.route(`**/api/watch/versions/${versionId}/diffs**`, async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([diff]) })
+  })
+  await page.route('**/api/versions**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        versions: [{
+          id: '3001',
+          version_id: String(versionId),
+          source: 'watch',
+          view_count: 1,
+          element_count: 1,
+          connector_count: 0,
+          description: 'mock',
+          workspace_hash: 'hash',
+          created_at: new Date().toISOString(),
+        }],
+      }),
+    })
+  })
 }

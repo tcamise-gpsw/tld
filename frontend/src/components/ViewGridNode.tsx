@@ -160,6 +160,8 @@ export default function ViewGridNode({ data }: { data: ViewGridNodeData }) {
     // Outer container: sizing + group context, overflow visible for the "New Child" hover button
     // `nopan` class tells ReactFlow's d3-zoom to not start panning on mousedown within this node
     <Box
+      data-testid="views-grid-node"
+      data-view-id={data.id}
       ref={boxRef}
       role="group"
       className="nopan"
@@ -309,6 +311,7 @@ export default function ViewGridNode({ data }: { data: ViewGridNodeData }) {
           <Flex align="flex-start" gap={1.5} flex={1} minH={0}>
             {data.isEditing ? (
               <Input
+                data-testid="views-grid-node-rename-input"
                 ref={inputRef}
                 value={data.editName}
                 size="sm"
@@ -362,6 +365,7 @@ export default function ViewGridNode({ data }: { data: ViewGridNodeData }) {
                     hasArrow
                   >
                     <MenuButton
+                      data-testid="views-grid-node-menu"
                       as={IconButton}
                       aria-label="More actions"
                       icon={
@@ -392,6 +396,7 @@ export default function ViewGridNode({ data }: { data: ViewGridNodeData }) {
                     >
                       {data.canEdit && (
                         <MenuItem
+                          data-testid="views-grid-node-rename"
                           onClick={(e) => { e.stopPropagation(); data.onStartRename(); onMenuClose() }}
                           bg="transparent"
                           color="gray.300"
@@ -402,6 +407,7 @@ export default function ViewGridNode({ data }: { data: ViewGridNodeData }) {
                         </MenuItem>
                       )}
                       <MenuItem
+                        data-testid="views-grid-node-details"
                         onClick={(e) => { e.stopPropagation(); data.onDetails(); onMenuClose() }}
                         bg="transparent"
                         color="gray.300"
@@ -412,6 +418,7 @@ export default function ViewGridNode({ data }: { data: ViewGridNodeData }) {
                       </MenuItem>
                       {data.canEdit && (
                         <MenuItem
+                          data-testid="views-grid-node-delete"
                           onClick={(e) => { e.stopPropagation(); data.onDelete(); onMenuClose() }}
                           bg="transparent"
                           color="red.400"

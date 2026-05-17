@@ -1109,6 +1109,7 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
                   }}
                 >
                   <Box
+                    data-testid="views-search-results"
                     bg="var(--bg-panel)"
                     backdropFilter="blur(24px) saturate(180%)"
                     border="1px solid"
@@ -1119,6 +1120,7 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
                   >
                     {searchResults.map((result, idx) => (
                       <Flex
+                        data-testid="views-search-result"
                         key={result.id}
                         px={4}
                         py={2.5}
@@ -1249,6 +1251,7 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
         {/* Level change overlay banner */}
         {levelEditingNodeId && (
           <Flex
+            data-testid="views-level-edit-banner"
             position="absolute"
             top={6}
             left="50%"
@@ -1275,7 +1278,7 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
               Click an L0-L9 level band to set diagram depth
             </Text>
             <Flex gap={2}>
-              <Button size="xs" variant="ghost" color="gray.400" _hover={{ color: 'white', bg: 'whiteAlpha.200' }} onClick={() => setLevelEditingNodeId(null)}>
+            <Button size="xs" variant="ghost" color="gray.400" _hover={{ color: 'white', bg: 'whiteAlpha.200' }} onClick={() => setLevelEditingNodeId(null)}>
                 Cancel
               </Button>
             </Flex>

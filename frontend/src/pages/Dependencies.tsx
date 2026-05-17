@@ -134,6 +134,8 @@ function ConnectionIndicator({
 
   return (
     <Flex
+      data-testid="dependencies-connection-indicator"
+      data-position={position}
       align="center"
       justify="center"
       direction={orientation === 'horizontal' ? 'row' : 'column'}
@@ -212,6 +214,9 @@ function NeighbourCard({
 
   return (
     <motion.div
+      data-testid="dependencies-neighbour-card"
+      data-element-id={node.element.id}
+      data-position={node.position}
       ref={setRef}
       data-pan-block="true"
       initial={{ opacity: 0, scale: 0.92 }}
@@ -627,7 +632,7 @@ export default function Dependencies() {
   const rangeEnd = page * PAGE_SIZE + elements.length
 
   return (
-    <Box h="100%" display="flex" flexDir="column" bg="var(--bg-canvas)">
+    <Box data-testid="dependencies-page" h="100%" display="flex" flexDir="column" bg="var(--bg-canvas)">
       <Box ref={containerRef} flex={1} display="flex" flexDir="column" overflow="hidden">
 
         {/* ── Top: Listing ──────────────────────────────────────────────────── */}
@@ -654,6 +659,7 @@ export default function Dependencies() {
                 <SearchIcon />
               </InputLeftElement>
               <Input
+                data-testid="dependencies-search"
                 variant="elevated"
                 placeholder="Search by name, type, technology…"
                 value={search}
@@ -664,6 +670,7 @@ export default function Dependencies() {
             </InputGroup>
             <Menu placement="bottom-start">
               <MenuButton
+                data-testid="dependencies-type-filter"
                 as={Button}
                 variant="elevated"
                 size="sm"
@@ -680,11 +687,11 @@ export default function Dependencies() {
                 {typeFilter || 'All types'}
               </MenuButton>
               <MenuList>
-                <MenuItem onClick={() => setTypeFilter('')} fontWeight={!typeFilter ? 'bold' : 'normal'}>
+                <MenuItem data-testid="dependencies-type-option" onClick={() => setTypeFilter('')} fontWeight={!typeFilter ? 'bold' : 'normal'}>
                   All types
                 </MenuItem>
                 {ELEMENT_TYPES.map((t) => (
-                  <MenuItem key={t} onClick={() => setTypeFilter(t)} fontWeight={typeFilter === t ? 'bold' : 'normal'}>
+                  <MenuItem data-testid="dependencies-type-option" key={t} onClick={() => setTypeFilter(t)} fontWeight={typeFilter === t ? 'bold' : 'normal'}>
                     {t}
                   </MenuItem>
                 ))}
@@ -694,23 +701,24 @@ export default function Dependencies() {
 
             <HStack spacing={4} mr={4} display={{ base: 'none', md: 'flex' }}>
               <HStack spacing={1.5}>
-                <Text fontSize="xs" color="whiteAlpha.900" fontWeight="bold">{totalCount}</Text>
+                <Text data-testid="dependencies-element-total" fontSize="xs" color="whiteAlpha.900" fontWeight="bold">{totalCount}</Text>
                 <Text fontSize="xs" color="whiteAlpha.400">elements</Text>
               </HStack>
               <HStack spacing={1.5}>
-                <Text fontSize="xs" color="whiteAlpha.900" fontWeight="bold">{allEdges.length}</Text>
+                <Text data-testid="dependencies-connector-total" fontSize="xs" color="whiteAlpha.900" fontWeight="bold">{allEdges.length}</Text>
                 <Text fontSize="xs" color="whiteAlpha.400">connectors</Text>
               </HStack>
             </HStack>
 
             <Box w="1px" h="12px" bg="whiteAlpha.200" mr={2} display={{ base: 'none', md: 'block' }} />
 
-            <Text fontSize="xs" color="gray.600" fontWeight="medium">
+            <Text data-testid="dependencies-range" fontSize="xs" color="gray.600" fontWeight="medium">
               {rangeStart}-{rangeEnd} <Text as="span" color="gray.700" display={{ base: 'none', sm: 'inline' }}>of {totalCount}</Text>
             </Text>
             {pageLoading && <Spinner size="xs" color="gray.500" />}
             <HStack spacing={1} data-pan-block="true">
               <Button
+                data-testid="dependencies-prev-page"
                 variant="elevated"
                 size="xs"
                 isDisabled={page === 0 || pageLoading}
@@ -718,10 +726,11 @@ export default function Dependencies() {
               >
                 Previous
               </Button>
-              <Text fontSize="xs" color="gray.500" minW="48px" textAlign="center">
+              <Text data-testid="dependencies-page-label" fontSize="xs" color="gray.500" minW="48px" textAlign="center">
                 Page {page + 1}
               </Text>
               <Button
+                data-testid="dependencies-next-page"
                 variant="elevated"
                 size="xs"
                 isDisabled={!hasNextPage || pageLoading}
@@ -756,9 +765,10 @@ export default function Dependencies() {
           {/* Scrollable list */}
           <Box flex={1} overflowY="auto">
             {filteredElements.length === 0 ? (
-              <Flex flexDir="column" align="center" justify="center" py={12} gap={2}>
+              <Flex data-testid="dependencies-empty-state" flexDir="column" align="center" justify="center" py={12} gap={2}>
                 <Text color="gray.600" fontSize="sm">No elements match your filters.</Text>
                 <Button
+                  data-testid="dependencies-clear-filters"
                   variant="link"
                   size="sm"
                   color="blue.400"
@@ -785,6 +795,8 @@ export default function Dependencies() {
 
                 return (
                   <Flex
+                    data-testid="dependencies-row"
+                    data-element-id={obj.id}
                     key={obj.id}
                     px={5}
                     h="42px"
@@ -926,6 +938,7 @@ export default function Dependencies() {
             </VStack>
           ) : (
             <Box
+              data-testid="dependencies-graph"
               ref={graphRef}
               key={selectedId}
               w="full"
@@ -997,6 +1010,7 @@ export default function Dependencies() {
                       {/* Center: selected node */}
                       <Box position="relative" zIndex={10} isolation="isolate" data-pan-block="true">
                         <ElementContainer
+                          data-testid="dependencies-selected-card"
                           isSelected
                           px={8}
                           py={6}
