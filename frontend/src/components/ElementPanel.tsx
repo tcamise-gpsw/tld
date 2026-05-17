@@ -260,6 +260,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
   const [techResultIndex, setTechResultIndex] = useState(-1)
   const confirmPermanentDelete = useDisclosure()
   const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
+  const initializedElementIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     setTechResultIndex(-1)
@@ -268,7 +269,20 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
   useEffect(() => {
     let cancelled = false
 
+    if (!isOpen) {
+      initializedElementIdRef.current = null
+      return () => {
+        cancelled = true
+      }
+    }
+
     if (element) {
+      if (initializedElementIdRef.current === element.id) {
+        return () => {
+          cancelled = true
+        }
+      }
+      initializedElementIdRef.current = element.id
       setName(element.name)
       setDescription(element.description ?? '')
       setType(element.kind ?? '')
@@ -312,6 +326,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
           ))
         })
     } else {
+      initializedElementIdRef.current = null
       setName('')
       setDescription('')
       setType('')
@@ -405,7 +420,9 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
       savingRef.current = false
       if (pendingSaveRef.current) {
         pendingSaveRef.current = false
-        void saveIfDirty()
+        window.setTimeout(() => {
+          void saveIfDirtyRef.current?.()
+        }, 0)
       }
     }
   }, [autoSaveEdit, element, name, buildPayloadAndFingerprint, onSave])
@@ -415,10 +432,18 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
 
   const scheduleAutoSave = () => {
     if (!autoSaveEdit) return
-    requestAnimationFrame(() => {
+    window.setTimeout(() => {
       void saveIfDirtyRef.current?.()
-    })
+    }, 0)
   }
+
+  useEffect(() => {
+    if (!autoSaveEdit || !element) return
+    const timer = window.setTimeout(() => {
+      void saveIfDirtyRef.current?.()
+    }, 150)
+    return () => window.clearTimeout(timer)
+  }, [autoSaveEdit, element, name, description, type, url, tags, technologyLinks, explicitLogoClear])
 
   const handleClose = useCallback(async () => {
     if (autoSaveEdit) {
@@ -657,7 +682,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
 
   return (
     <>
-      <SlidingPanel isOpen={isOpen} onClose={handleClose} panelKey="element" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop}>
+      <SlidingPanel data-testid="element-panel" isOpen={isOpen} onClose={handleClose} panelKey="element" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop}>
         <PanelHeader title={isEdit ? 'Edit Element' : 'New Element'} onClose={handleClose} />
 
         {/* Body */}
@@ -666,6 +691,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
             <FormControl isRequired isDisabled={isReadOnly}>
               <FormLabel>Name</FormLabel>
               <Input
+                data-testid="element-panel-name-input"
                 size="sm"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -679,6 +705,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                 <HStack align="flex-start">
                   <InputGroup>
                     <Input
+                      data-testid="element-panel-type-input"
                       ref={typeInputRef}
                       size="sm"
                       value={typeQuery || type}
@@ -728,6 +755,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                     <VStack spacing={0} align="stretch">
                       {typeResults.map((t) => (
                         <Box
+                          data-testid="element-panel-type-option"
                           key={t}
                           px={2}
                           py={2}
@@ -770,6 +798,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
             <FormControl isDisabled={isReadOnly}>
               <FormLabel>Description</FormLabel>
               <Textarea
+                data-testid="element-panel-description-input"
                 size="sm"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -783,6 +812,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
               <VStack align="stretch" spacing={2}>
                 <HStack align="flex-start">
                   <Input
+                    data-testid="element-panel-technology-input"
                     ref={techInputRef}
                     size="sm"
                     value={technologyQuery}
@@ -814,6 +844,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                     isDisabled={isReadOnly || technologyLinks.length >= 3}
                   />
                   <Button
+                    data-testid="element-panel-technology-add"
                     size="sm"
                     onClick={addCustomTechnology}
                     isDisabled={isReadOnly || technologyLinks.length >= 3 || !technologyQuery.trim()}
@@ -827,6 +858,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                     <VStack spacing={0} align="stretch">
                       {technologyResults.map((item, idx) => (
                         <Box
+                          data-testid="element-panel-technology-option"
                           key={item.defaultSlug}
                           px={2}
                           py={2}
@@ -867,6 +899,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                         <Popover trigger={isMobile ? 'click' : 'hover'} placement="top" closeOnBlur>
                           <PopoverTrigger>
                             <Tag
+                              data-testid="element-panel-technology-chip"
                               size="sm"
                               variant="subtle"
                               bg={isPrimaryIcon ? 'blue.500' : 'whiteAlpha.100'}
@@ -886,6 +919,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                               </TagLabel>
                               {!isReadOnly && (
                                 <TagCloseButton
+                                  data-testid="element-panel-technology-remove"
                                   onClick={(e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
@@ -921,6 +955,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
             <FormControl isDisabled={isReadOnly}>
               <FormLabel>URL</FormLabel>
               <Input
+                data-testid="element-panel-url-input"
                 size="sm"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
@@ -944,10 +979,10 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
               <Wrap mt={3}>
                 {tags.map((tag) => (
                   <WrapItem key={tag}>
-                    <Tag size="sm" variant="subtle" bg="whiteAlpha.100" border="1px solid" borderColor="whiteAlpha.200">
+                    <Tag data-testid="element-panel-tag-chip" size="sm" variant="subtle" bg="whiteAlpha.100" border="1px solid" borderColor="whiteAlpha.200">
                       <TagLabel color="white">{tag}</TagLabel>
                       {!isReadOnly && (
-                        <TagCloseButton onClick={() => {
+                        <TagCloseButton data-testid="element-panel-tag-remove" onClick={() => {
                           setTags((prev) => prev.filter((t) => t !== tag))
                           scheduleAutoSave()
                         }} />
@@ -1097,6 +1132,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
             {isEdit && canEdit && (
               <HStack borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1} spacing={2}>
                 <Button
+                  data-testid="element-panel-remove"
                   variant="ghost"
                   size="sm"
                   color="gray.400"
@@ -1107,6 +1143,7 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
                   Remove
                 </Button>
                 <Button
+                  data-testid="element-panel-delete-permanent"
                   variant="ghost"
                   size="sm"
                   color="red.400"

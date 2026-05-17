@@ -144,7 +144,7 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
   if (!isOpen || !source) return null
 
   return (
-    <Box position="fixed" inset={0} zIndex={1500} display="flex" alignItems="center" justifyContent="center">
+    <Box data-testid="merge-dialog" position="fixed" inset={0} zIndex={1500} display="flex" alignItems="center" justifyContent="center">
       <Box position="absolute" inset={0} bg="blackAlpha.800" onClick={handleClose} />
       <Box position="relative" bg="var(--bg-panel)" border="1px solid" borderColor="whiteAlpha.100" rounded="xl"
         boxShadow="0 8px 32px rgba(0,0,0,0.5)" backdropFilter="blur(20px)" mx={4} w="100%" maxW="440px" maxH="80vh" overflow="hidden">
@@ -169,7 +169,7 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
                 <InputLeftElement pointerEvents="none" color="gray.400" fontSize="xs">
                 <Text>&#x1F50D;</Text>
               </InputLeftElement>
-                <Input ref={searchInputRef} placeholder="Search elements..." value={search} onChange={(e) => setSearch(e.target.value)}
+                <Input data-testid="merge-dialog-search" ref={searchInputRef} placeholder="Search elements..." value={search} onChange={(e) => setSearch(e.target.value)}
                   autoFocus bg="whiteAlpha.50" borderColor="whiteAlpha.100" _hover={{ borderColor: 'whiteAlpha.200' }}
                   _focus={{ borderColor: 'var(--accent)' }} />
               </InputGroup>
@@ -190,7 +190,7 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
               ) : (
                 <VStack spacing={0} align="stretch" px={1} pb={2}>
                   {candidates.map((el) => (
-                    <Button key={el.id} variant="ghost" size="sm" h="auto" py={2.5} px={3} justifyContent="flex-start"
+                    <Button data-testid="merge-dialog-candidate" key={el.id} variant="ghost" size="sm" h="auto" py={2.5} px={3} justifyContent="flex-start"
                       color="clay.text" _hover={{ bg: 'whiteAlpha.100' }} onClick={() => handleSelect(el)}>
                       <VStack spacing={0.5} align="start" w="full">
                         <Text fontWeight="medium" fontSize="sm">{el.name}</Text>
@@ -249,8 +249,8 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
             </Box>
             <Box px={4} pt={2} pb={4} borderTop="1px solid" borderColor="whiteAlpha.100">
               <HStack justify="space-between">
-                <Button variant="ghost" size="sm" onClick={() => setStep('select')}>Back</Button>
-                <Button size="sm" colorScheme="blue" onClick={handleResolve} isLoading={loading}>
+                <Button data-testid="merge-dialog-back" variant="ghost" size="sm" onClick={() => setStep('select')}>Back</Button>
+                <Button data-testid="merge-dialog-submit" size="sm" colorScheme="blue" onClick={handleResolve} isLoading={loading}>
                   Merge
                 </Button>
               </HStack>

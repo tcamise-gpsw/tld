@@ -211,6 +211,7 @@ function LayerButton({
   return (
     <Tooltip label={label} placement="top" openDelay={300} isDisabled={isDisabled}>
       <Box
+        data-testid={variant === 'in' ? 'vieweditor-node-zoom-in' : 'vieweditor-node-zoom-out'}
         as="button"
         w="22px"
         h="22px"
@@ -472,6 +473,9 @@ function ElementNode({ data, selected }: Props) {
 
   return (
     <ElementContainer
+      data-testid="vieweditor-node"
+      data-element-id={data.element_id}
+      data-node-name={data.name}
       isSelected={selected}
       isSource={isSource}
       isTarget={isTarget}
@@ -877,6 +881,7 @@ function ElementNode({ data, selected }: Props) {
             >
               <VStack spacing={0} align="stretch">
                 <Button
+                  data-testid="vieweditor-node-menu-delete"
                   size="sm"
                   variant="ghost"
                   h="30px"

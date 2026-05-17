@@ -238,6 +238,7 @@ function ViewExplorer({
 
   return (
     <SlidingPanel
+      data-testid="view-explorer-panel"
       isOpen={isOpen && !suppressed}
       onClose={onToggle}
       panelKey="view-explorer"
@@ -279,6 +280,7 @@ function ViewExplorer({
 
         {/* --- Drag handle --- */}
         <Box
+          data-testid="view-explorer-resize"
           h="14px" 
           flexShrink={0} 
           cursor="row-resize" 

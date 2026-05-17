@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type SetStateAction } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SafeBackground } from '../components/SafeBackground'
 import { Text as HeaderText } from '@chakra-ui/react'
@@ -21,7 +21,11 @@ import {
   FormLabel,
   Heading,
   HStack,
+  IconButton,
   Input,
+  InputGroup,
+  InputLeftElement,
+  InputRightElement,
   Modal,
   ModalBody,
   ModalContent,
@@ -33,6 +37,8 @@ import {
   useDisclosure,
   useBreakpointValue,
 } from '@chakra-ui/react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { AddIcon, CloseIcon, SearchIcon } from '@chakra-ui/icons'
 import { api } from '../api/client'
 import { toast } from '../utils/toast'
 import type { ViewTreeNode } from '../types'
@@ -540,6 +546,54 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
   const roots = useMemo(() => filterTreeForGrid(treeData, gridViewIds), [treeData, gridViewIds])
   const flatTree = useMemo(() => flattenTree(roots), [roots])
 
+  // Jump search
+  const [searchTerm, setSearchTerm] = useState('')
+  const [searchResults, setSearchResults] = useState<ViewTreeNode[]>([])
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1)
+
+  const handleSearch = useCallback((term: string) => {
+    setSearchTerm(term)
+    if (term.trim().length < 3) {
+      setSearchResults([])
+      setActiveSearchIndex(-1)
+      return
+    }
+
+    const normalizedTerm = term.toLowerCase()
+    const matches = flatTree
+      .filter((node) => node.name.toLowerCase().includes(normalizedTerm))
+      .slice(0, 5)
+
+    setSearchResults(matches)
+    if (matches.length > 0) {
+      setActiveSearchIndex(0)
+      onFocusChange(matches[0].id)
+    } else {
+      setActiveSearchIndex(-1)
+    }
+  }, [flatTree, onFocusChange])
+
+  const handleSearchKeyDown = useCallback((e: ReactKeyboardEvent) => {
+    if (searchResults.length === 0) return
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const nextIndex = (activeSearchIndex + 1) % searchResults.length
+      setActiveSearchIndex(nextIndex)
+      onFocusChange(searchResults[nextIndex].id)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const nextIndex = (activeSearchIndex - 1 + searchResults.length) % searchResults.length
+      setActiveSearchIndex(nextIndex)
+      onFocusChange(searchResults[nextIndex].id)
+    } else if (e.key === 'Enter' && activeSearchIndex >= 0) {
+      navigate(`/views/${searchResults[activeSearchIndex].id}`)
+    } else if (e.key === 'Escape') {
+      setSearchResults([])
+      setActiveSearchIndex(-1)
+    }
+  }, [activeSearchIndex, navigate, onFocusChange, searchResults])
+
   // Rename
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
@@ -557,6 +611,32 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
   const [detailsView, setDetailsDiagram] = useState<ViewTreeNode | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
   const { isOpen: isDetailsOpen, onOpen: onDetailsOpen, onClose: onDetailsClose } = useDisclosure()
+
+  // New diagram creation
+  const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure()
+  const [newName, setNewName] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+
+  const handleCreate = async () => {
+    const name = newName.trim()
+    if (!name) return
+    setIsCreating(true)
+    try {
+      const view = await api.workspace.views.create({ name })
+      await refreshTree()
+      navigate(`/views/${view.id}`)
+      onCreateClose()
+      setNewName('')
+    } catch (err: unknown) {
+      toast({
+        title: 'Failed to create diagram',
+        description: err instanceof Error ? err.message : 'An unexpected error occurred',
+        status: 'error',
+      })
+    } finally {
+      setIsCreating(false)
+    }
+  }
 
   // Delete dialog
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null)
@@ -995,9 +1075,183 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
     <Box h="full" display="flex" flexDir="column" position="relative">
       {/* Canvas */}
       <Box flex={1} position="relative">
+        {/* Floating Search Menu - bottom on desktop, top on mobile */}
+        <Box
+          position="absolute"
+          {...(isMobileLayout
+            ? { top: "66px", left: "50%", transform: "translateX(-50%)" }
+            : { bottom: "calc(env(safe-area-inset-bottom, 0px) + var(--topbar-h-total) + 60px)", left: "50%", transform: "translateX(-50%)" }
+          )}
+          zIndex={100}
+          pointerEvents="auto"
+        >
+          <motion.div
+            initial={{ y: isMobileLayout ? -20 : 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <AnimatePresence>
+              {searchResults.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  style={{
+                    position: 'absolute',
+                    ...(isMobileLayout
+                      ? { top: '100%', marginTop: '8px' }
+                      : { bottom: '100%', marginBottom: '12px' }
+                    ),
+                    left: 0,
+                    right: 0,
+                    zIndex: 110,
+                  }}
+                >
+                  <Box
+                    data-testid="views-search-results"
+                    bg="var(--bg-panel)"
+                    backdropFilter="blur(24px) saturate(180%)"
+                    border="1px solid"
+                    borderColor="var(--border-main)"
+                    borderRadius="10px"
+                    overflow="hidden"
+                    boxShadow="0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)"
+                  >
+                    {searchResults.map((result, idx) => (
+                      <Flex
+                        data-testid="views-search-result"
+                        key={result.id}
+                        px={4}
+                        py={2.5}
+                        align="center"
+                        gap={3}
+                        cursor="pointer"
+                        bg={idx === activeSearchIndex ? 'whiteAlpha.100' : 'transparent'}
+                        _hover={{ bg: 'whiteAlpha.50' }}
+                        onClick={() => {
+                          onFocusChange(result.id)
+                          navigate(`/views/${result.id}`)
+                          setSearchResults([])
+                        }}
+                        transition="all 0.15s ease"
+                      >
+                        <Box
+                          w="6px"
+                          h="6px"
+                          borderRadius="full"
+                          bg={idx === activeSearchIndex ? 'var(--accent)' : 'whiteAlpha.300'}
+                          boxShadow={idx === activeSearchIndex ? `0 0 10px var(--accent)` : 'none'}
+                          transition="all 0.2s"
+                        />
+                        <Box flex={1} minW={0}>
+                          <Text color="white" fontSize="xs" fontWeight="600" isTruncated>
+                            {result.name}
+                          </Text>
+                          <Text color="whiteAlpha.500" fontSize="10px" textTransform="uppercase" letterSpacing="0.05em">
+                            Level {result.level} • {result.level_label || 'Diagram'}
+                          </Text>
+                        </Box>
+                        {idx === activeSearchIndex && (
+                          <HStack spacing={1} opacity={0.8}>
+                            <Text color="var(--accent)" fontSize="9px" fontWeight="800" letterSpacing="0.1em">
+                              OPEN
+                            </Text>
+                            <Text color="whiteAlpha.400" fontSize="9px">↵</Text>
+                          </HStack>
+                        )}
+                      </Flex>
+                    ))}
+                  </Box>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <Flex
+              bg="var(--bg-header)"
+              backdropFilter="blur(24px) saturate(180%)"
+              border="1px solid"
+              borderColor="var(--border-main)"
+              borderRadius="10px"
+              pl={4}
+              pr={1.5}
+              py={1.5}
+              gap={3}
+              boxShadow="0 10px 30px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)"
+              align="center"
+              minW={isMobileLayout ? "280px" : "380px"}
+              w={isMobileLayout ? "calc(100vw - 48px)" : undefined}
+            >
+              <InputGroup size="sm" flex={1}>
+                <InputLeftElement pointerEvents="none" h="full">
+                  <SearchIcon color="whiteAlpha.400" fontSize="10px" />
+                </InputLeftElement>
+                <Input
+                  data-testid="views-search-input"
+                  placeholder="Jump to diagram..."
+                  value={searchTerm}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  variant="unstyled"
+                  fontSize="xs"
+                  color="white"
+                  h="32px"
+                  _placeholder={{ color: 'whiteAlpha.300' }}
+                />
+                {searchTerm && (
+                  <InputRightElement h="full">
+                    <IconButton
+                      aria-label="Clear search"
+                      icon={<CloseIcon fontSize="8px" />}
+                      size="xs"
+                      variant="ghost"
+                      color="whiteAlpha.400"
+                      _hover={{ color: 'white', bg: 'transparent' }}
+                      onClick={() => handleSearch('')}
+                    />
+                  </InputRightElement>
+                )}
+              </InputGroup>
+
+              {canEdit && (
+                <Button
+                  data-testid="views-new-diagram-button"
+                  size="sm"
+                  h="32px"
+                  leftIcon={<AddIcon fontSize="9px" />}
+                  bg="var(--accent)"
+                  color="white"
+                  _hover={{
+                    bg: "var(--accent)",
+                    filter: "brightness(1.1)",
+                    transform: 'translateY(-1px)',
+                    boxShadow: `0 0 20px ${hexToRgba(accent, 0.4)}`
+                  }}
+                  _active={{ transform: 'translateY(0)', filter: "brightness(0.9)" }}
+                  variant="solid"
+                  borderRadius="lg"
+                  px={4}
+                  fontSize="xs"
+                  fontWeight="bold"
+                  letterSpacing="0.02em"
+                  onClick={() => {
+                    setNewName('')
+                    onCreateOpen()
+                  }}
+                  boxShadow={`0 4px 12px ${hexToRgba(accent, 0.2)}`}
+                  transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+                >
+                  NEW
+                </Button>
+              )}
+            </Flex>
+          </motion.div>
+        </Box>
+
         {/* Level change overlay banner */}
         {levelEditingNodeId && (
           <Flex
+            data-testid="views-level-edit-banner"
             position="absolute"
             top={6}
             left="50%"
@@ -1024,7 +1278,7 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
               Click an L0-L9 level band to set diagram depth
             </Text>
             <Flex gap={2}>
-              <Button size="xs" variant="ghost" color="gray.400" _hover={{ color: 'white', bg: 'whiteAlpha.200' }} onClick={() => setLevelEditingNodeId(null)}>
+            <Button size="xs" variant="ghost" color="gray.400" _hover={{ color: 'white', bg: 'whiteAlpha.200' }} onClick={() => setLevelEditingNodeId(null)}>
                 Cancel
               </Button>
             </Flex>
@@ -1130,6 +1384,67 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
         confirmLabel="Delete"
         confirmColorScheme="red"
       />
+
+      {/* Create Diagram Modal */}
+      <Modal
+        isOpen={isCreateOpen}
+        onClose={onCreateClose}
+        isCentered
+        size="sm"
+      >
+        <ModalOverlay bg="blackAlpha.700" backdropFilter="blur(4px)" />
+        <ModalContent
+          bg="var(--bg-panel)"
+          border="1px solid"
+          borderColor="var(--border-main)"
+          borderRadius="xl"
+          boxShadow="0 24px 64px rgba(0,0,0,0.8)"
+        >
+          <ModalHeader color="gray.100" pb={1} fontSize="md">Create New Diagram</ModalHeader>
+          <ModalBody>
+            <FormControl id="new-view-name">
+              <FormLabel fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="0.05em">
+                Diagram Name
+              </FormLabel>
+              <Input
+                data-testid="views-new-diagram-name-input"
+                name="name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                size="sm"
+                bg="whiteAlpha.50"
+                border="1px solid"
+                borderColor="whiteAlpha.100"
+                _hover={{ borderColor: 'whiteAlpha.300' }}
+                _focus={{ borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' }}
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                placeholder="My New Architecture"
+              />
+            </FormControl>
+          </ModalBody>
+          <ModalFooter gap={2} pt={6}>
+            <Button size="sm" variant="ghost" color="gray.500" _hover={{ color: 'white', bg: 'whiteAlpha.100' }} onClick={onCreateClose}>
+              Cancel
+            </Button>
+            <Button
+              data-testid="views-create-diagram-submit"
+              size="sm"
+              bg="var(--accent)"
+              color="white"
+              _hover={{ bg: "var(--accent)", filter: "brightness(1.1)" }}
+              _active={{ bg: "var(--accent)", filter: "brightness(0.9)" }}
+              isLoading={isCreating}
+              isDisabled={!newName.trim()}
+              onClick={handleCreate}
+              borderRadius="lg"
+              px={6}
+            >
+              Create
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       {/* Details Drawer */}
       <ViewPanel

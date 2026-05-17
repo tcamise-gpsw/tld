@@ -1622,6 +1622,7 @@ function ViewEditorInner({
             {!isMobileLayout && (
               <Tooltip label={libraryOpen ? 'Close element library' : 'Open element library'} placement="right" openDelay={300}>
                 <IconButton
+                  data-testid="vieweditor-toggle-library"
                   aria-label={libraryOpen ? 'Close element library' : 'Open element library'}
                   icon={libraryOpen ? <ChevronLeftIcon size={16} strokeWidth={3.5} /> : <ChevronRightIcon size={16} strokeWidth={3.5} />}
                   size="md" position="absolute" top="50%"
@@ -1641,6 +1642,7 @@ function ViewEditorInner({
             {!isMobileLayout && !elementPanel.isOpen && !connectorPanel.isOpen && !viewDetails.isOpen && (
               <Tooltip label={isExplorerOpen ? 'Close view explorer' : 'Open view explorer'} placement="left" openDelay={300}>
                 <IconButton
+                  data-testid="vieweditor-toggle-explorer"
                   aria-label={isExplorerOpen ? 'Close view explorer' : 'Open view explorer'}
                   icon={isExplorerOpen ? <ChevronRightIcon size={16} strokeWidth={3.5} /> : <ChevronLeftIcon size={16} strokeWidth={3.5} />}
                   size="md" position="absolute" top="50%"
@@ -1677,6 +1679,7 @@ function ViewEditorInner({
             )}
 
             <Box
+              data-testid="vieweditor-canvas"
               position="relative"
               w="full"
               h="full"

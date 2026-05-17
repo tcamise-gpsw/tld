@@ -53,6 +53,7 @@ export const ViewNavigator: React.FC<Props> = ({
         openDelay={400}
       >
         <Box
+          data-testid={isOut ? 'view-explorer-zoom-out' : 'view-explorer-zoom-in'}
           as="button"
           role="group"
           className={`panel-action-button ${isActive ? 'is-active' : ''}`}

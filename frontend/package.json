@@ -34,7 +34,10 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run src",
+    "test:e2e": "playwright test -c playwright.config.ts",
+    "test:e2e:headed": "playwright test -c playwright.config.ts --headed",
+    "test:e2e:debug": "playwright test -c playwright.config.ts --debug"
   },
   "dependencies": {
     "@buf/tldiagramcom_diagram.bufbuild_es": "^2.12.0-20260516210401-05aeb295f766.1",
@@ -128,6 +131,7 @@
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
     "@eslint/js": "^9.0.0",
+    "@playwright/test": "^1.59.1",
     "@tanstack/react-query": "^5.100.1",
     "@types/dagre": "^0.7.54",
     "@types/react": "^18.3.12",

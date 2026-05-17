@@ -83,7 +83,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
   }
 
   return (
-    <SlidingPanel isOpen={isOpen} onClose={onClose} panelKey="view" side={isMobile ? 'left' : 'right'} width="320px" hasBackdrop={hasBackdrop}>
+    <SlidingPanel data-testid="view-panel" isOpen={isOpen} onClose={onClose} panelKey="view" side={isMobile ? 'left' : 'right'} width="320px" hasBackdrop={hasBackdrop}>
       <PanelHeader title="View Details" onClose={onClose} />
 
       {/* Body */}
@@ -92,6 +92,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
           <FormControl isRequired>
             <FormLabel>Name</FormLabel>
             <Input
+              data-testid="view-panel-name-input"
               size="sm"
               value={name}
               isDisabled={isReadOnly}
@@ -101,6 +102,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
           <FormControl>
             <FormLabel>Level Label</FormLabel>
             <Input
+              data-testid="view-panel-label-input"
               size="sm"
               value={levelLabel}
               isDisabled={isReadOnly}
@@ -111,6 +113,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
           <FormControl>
             <FormLabel>Description</FormLabel>
             <Textarea
+              data-testid="view-panel-description-input"
               size="sm"
               value={description}
               isDisabled={isReadOnly}
@@ -139,11 +142,12 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
       {/* Footer */}
       <HStack px={4} py={3} justify="flex-end" flexShrink={0}>
         <HStack>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button data-testid="view-panel-cancel" variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
           {canEdit && (
             <Button
+              data-testid="view-panel-save"
               size="sm"
               px={5}
               colorScheme="blue"

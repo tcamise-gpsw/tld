@@ -578,6 +578,7 @@ export default function WorkspacePanel() {
           <PopoverTrigger>
             {watchActive ? (
               <Button
+                data-testid="workspace-watch-trigger"
                 aria-label="Workspace watch panel"
                 size="sm"
                 h="34px"
@@ -619,6 +620,7 @@ export default function WorkspacePanel() {
               </Button>
             ) : (
               <IconButton
+                data-testid="workspace-versions-trigger"
                 aria-label="Workspace versions"
                 icon={<TimeIcon boxSize={4} />}
                 size="sm"
@@ -635,6 +637,7 @@ export default function WorkspacePanel() {
       </Tooltip>
       <Portal>
         <PopoverContent
+          data-testid="workspace-panel"
           data-zui-native-wheel="true"
           w={{ base: 'calc(100vw - 24px)', md: watchActive ? '460px' : '420px' }}
           maxW="calc(100vw - 24px)"
@@ -682,6 +685,7 @@ export default function WorkspacePanel() {
               {activeVersion && (
                 <Tooltip label={diffVisible ? 'Hide diff' : 'Show diff'} placement="top">
                   <IconButton
+                    data-testid="workspace-toggle-diff"
                     aria-label="Toggle diff"
                     icon={diffVisible ? <ViewOffIcon boxSize={3.5} /> : <ViewIcon boxSize={3.5} />}
                     size="sm"
@@ -693,6 +697,7 @@ export default function WorkspacePanel() {
               )}
               <Tooltip label={versionsOpen ? 'Collapse list' : 'Expand list'} placement="top">
                 <IconButton
+                  data-testid="workspace-toggle-list"
                   aria-label="Toggle list"
                   icon={versionsOpen ? <ChevronDownIcon boxSize={4} /> : <ChevronUpIcon boxSize={4} />}
                   size="sm"
@@ -730,6 +735,7 @@ export default function WorkspacePanel() {
             <HStack spacing={1} flexShrink={0}>
               <Tooltip label="Open diff map" placement="top">
                 <Button
+                  data-testid="workspace-diff-map"
                   size="sm"
                   h="32px"
                   px={3}
@@ -748,6 +754,7 @@ export default function WorkspacePanel() {
               </Tooltip>
               <Tooltip label="Previous element" placement="top">
                 <IconButton
+                  data-testid="workspace-diff-previous"
                   aria-label="Previous"
                   icon={<ChevronLeftIcon boxSize={5} />}
                   size="sm"
@@ -763,6 +770,7 @@ export default function WorkspacePanel() {
               </Tooltip>
               <Tooltip label="Next element" placement="top">
                 <IconButton
+                  data-testid="workspace-diff-next"
                   aria-label="Next"
                   icon={<ChevronRightIcon boxSize={5} />}
                   size="sm"
@@ -821,6 +829,7 @@ export default function WorkspacePanel() {
               >
                 {displayedDiffLocations.map((target) => (
                   <Button
+                    data-testid="workspace-diff-location"
                     key={target.key}
                     variant="ghost"
                     size="sm"
@@ -891,6 +900,7 @@ export default function WorkspacePanel() {
                   <>
                     <Tooltip label={watchPaused ? 'Resume watch' : 'Pause watch'} placement="top">
                       <IconButton
+                        data-testid={watchPaused ? 'workspace-watch-resume' : 'workspace-watch-pause'}
                         aria-label={watchPaused ? 'Resume watch' : 'Pause watch'}
                         icon={watchPaused ? <RepeatIcon boxSize={3.5} /> : <PauseGlyph />}
                         size="sm"
@@ -902,6 +912,7 @@ export default function WorkspacePanel() {
                     </Tooltip>
                     <Tooltip label="Stop watch" placement="top">
                       <IconButton
+                        data-testid="workspace-watch-stop"
                         aria-label="Stop watch"
                         icon={<CloseIcon boxSize={2.5} />}
                         size="sm"

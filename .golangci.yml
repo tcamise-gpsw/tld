@@ -7,6 +7,9 @@ linters:
     - unused
     - ineffassign
     - revive
+  exclusions:
+    paths:
+      - frontend/
   settings:
     revive:
       rules:

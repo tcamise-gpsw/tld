@@ -184,6 +184,7 @@ export const TagManager: React.FC<Props> = ({
         <Popover isOpen={isTagOpen} onClose={onTagClose} placement="bottom-end">
           <PopoverTrigger>
             <IconButton
+              data-testid="tag-manager-add-tag"
               aria-label="Add Tag"
               icon={<AddIcon boxSize="8px" />}
               size="xs"
@@ -218,6 +219,7 @@ export const TagManager: React.FC<Props> = ({
                   </Popover>
                   <VStack spacing={2} flex={1}>
                     <Input
+                      data-testid="tag-manager-new-tag-name"
                       size="xs"
                       placeholder="Tag name..."
                       value={newTagName}
@@ -229,6 +231,7 @@ export const TagManager: React.FC<Props> = ({
                       _focus={{ borderColor: 'var(--accent)' }}
                     />
                     <Input
+                      data-testid="tag-manager-new-tag-description"
                       size="xs"
                       placeholder="Optional description..."
                       value={newTagDescription}
@@ -239,7 +242,7 @@ export const TagManager: React.FC<Props> = ({
                       _focus={{ borderColor: 'var(--accent)' }}
                     />
                   </VStack>
-                  <Button size="xs" colorScheme="blue" h="auto" py={4} onClick={() => { void handleAddTag() }}>Add</Button>
+                  <Button data-testid="tag-manager-new-tag-submit" size="xs" colorScheme="blue" h="auto" py={4} onClick={() => { void handleAddTag() }}>Add</Button>
                 </HStack>
               </VStack>
             </PopoverBody>
