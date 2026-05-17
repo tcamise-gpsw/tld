@@ -261,32 +261,122 @@ func (s *Store) Explore(ctx context.Context) (ExploreData, error) {
 		return ExploreData{}, err
 	}
 	flat := flattenTree(tree)
-	views := map[string]ExploreViewData{}
-	navs := make([]ViewConnector, 0)
+	placements, err := s.AllPlacements(ctx)
+	if err != nil {
+		return ExploreData{}, err
+	}
+	connectors, err := s.AllConnectors(ctx)
+	if err != nil {
+		return ExploreData{}, err
+	}
+	placementsByView := groupPlacementsByView(placements)
+	connectorsByView := groupConnectorsByView(connectors)
+	navs := exploreNavigations(flat, placementsByView)
+	views := make(map[string]ExploreViewData, len(flat))
 	for _, view := range flat {
-		placements, err := s.Placements(ctx, view.ID)
-		if err != nil {
-			return ExploreData{}, err
+		viewPlacements := placementsByView[view.ID]
+		if viewPlacements == nil {
+			viewPlacements = []PlacedElement{}
 		}
-		connectors, err := s.Connectors(ctx, view.ID)
-		if err != nil {
-			return ExploreData{}, err
+		viewConnectors := connectorsByView[view.ID]
+		if viewConnectors == nil {
+			viewConnectors = []Connector{}
 		}
 		views[fmt.Sprint(view.ID)] = ExploreViewData{
-			Placements: placements,
-			Connectors: connectors,
-		}
-		for _, placement := range placements {
-			if placement.HasView {
-				child, err := s.ListElementNavigations(ctx, placement.ElementID, &view.ID, nil)
-				if err != nil {
-					return ExploreData{}, err
-				}
-				navs = append(navs, child...)
-			}
+			Placements: viewPlacements,
+			Connectors: viewConnectors,
 		}
 	}
 	return ExploreData{Tree: tree, Views: views, Navigations: navs}, nil
+}
+
+func groupPlacementsByView(items []PlacedElement) map[int64][]PlacedElement {
+	out := make(map[int64][]PlacedElement)
+	for _, item := range items {
+		out[item.ViewID] = append(out[item.ViewID], item)
+	}
+	return out
+}
+
+func groupConnectorsByView(items []Connector) map[int64][]Connector {
+	out := make(map[int64][]Connector)
+	for _, item := range items {
+		out[item.ViewID] = append(out[item.ViewID], item)
+	}
+	return out
+}
+
+func exploreNavigations(views []ViewTreeNode, placementsByView map[int64][]PlacedElement) []ViewConnector {
+	type childView struct {
+		id   int64
+		name string
+	}
+
+	childByElement := make(map[int64]childView)
+	for _, view := range views {
+		if view.OwnerElementID == nil {
+			continue
+		}
+		existing, ok := childByElement[*view.OwnerElementID]
+		if ok && existing.id < view.ID {
+			continue
+		}
+		childByElement[*view.OwnerElementID] = childView{id: view.ID, name: view.Name}
+	}
+
+	placementViewsByElement := make(map[int64][]int64)
+	for viewID, placements := range placementsByView {
+		for _, placement := range placements {
+			placementViewsByElement[placement.ElementID] = appendUniqueInt64(placementViewsByElement[placement.ElementID], viewID)
+		}
+	}
+	for elementID := range placementViewsByElement {
+		sort.Slice(placementViewsByElement[elementID], func(i, j int) bool {
+			return placementViewsByElement[elementID][i] < placementViewsByElement[elementID][j]
+		})
+	}
+
+	navs := make([]ViewConnector, 0)
+	for _, view := range views {
+		for _, placement := range placementsByView[view.ID] {
+			child, ok := childByElement[placement.ElementID]
+			if !ok {
+				continue
+			}
+			parentID, ok := firstParentViewID(placementViewsByElement[placement.ElementID], child.id)
+			if !ok || parentID != view.ID {
+				continue
+			}
+			elementID := placement.ElementID
+			navs = append(navs, ViewConnector{
+				ID:           0,
+				ElementID:    &elementID,
+				FromViewID:   view.ID,
+				ToViewID:     child.id,
+				ToViewName:   child.name,
+				RelationType: "child",
+			})
+		}
+	}
+	return navs
+}
+
+func appendUniqueInt64(items []int64, item int64) []int64 {
+	for _, existing := range items {
+		if existing == item {
+			return items
+		}
+	}
+	return append(items, item)
+}
+
+func firstParentViewID(viewIDs []int64, childViewID int64) (int64, bool) {
+	for _, viewID := range viewIDs {
+		if viewID != childViewID {
+			return viewID, true
+		}
+	}
+	return 0, false
 }
 
 func (s *Store) Dependencies(ctx context.Context) (map[string]any, error) {

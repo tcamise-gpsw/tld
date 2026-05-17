@@ -413,13 +413,19 @@ func (a *APIAdapter) ListAllViewLayers(ctx context.Context, _ uuid.UUID) ([]*dia
 	if err != nil {
 		return nil, err
 	}
+	layers, err := a.Store.legacy.AllLayers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byView := make(map[int64][]app.ViewLayer)
+	for _, layer := range layers {
+		byView[layer.DiagramID] = append(byView[layer.DiagramID], layer)
+	}
 	var out []*diagv1.ViewLayer
 	for _, node := range flattenViewTreeNodes(nodes) {
-		items, err := a.ListViewLayers(ctx, int32(node.ID))
-		if err != nil {
-			return nil, err
+		for _, layer := range byView[node.ID] {
+			out = append(out, layerToProto(layer))
 		}
-		out = append(out, items...)
 	}
 	return out, nil
 }

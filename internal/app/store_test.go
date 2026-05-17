@@ -360,6 +360,54 @@ func TestStoreLayersPersistTagsColorsAndUpdates(t *testing.T) {
 	_ = updated
 }
 
+func TestExploreLoadsWorkspaceDataInBatches(t *testing.T) {
+	store := openAppStore(t)
+	ctx := context.Background()
+	db := store.DB()
+	if _, err := db.Exec(`
+		INSERT INTO elements(id, name, tags, technology_connectors, created_at, updated_at)
+		VALUES
+			(100, 'API', '["runtime"]', '[]', 'now', 'now'),
+			(101, 'DB', '["data"]', '[]', 'now', 'now');
+		INSERT INTO views(id, owner_element_id, name, description, level_label, level, created_at, updated_at)
+		VALUES
+			(100, NULL, 'System', NULL, 'System', 1, 'now', 'now'),
+			(101, 100, 'API detail', NULL, 'Service', 2, 'now', 'now');
+		INSERT INTO placements(id, view_id, element_id, position_x, position_y, created_at, updated_at)
+		VALUES
+			(100, 100, 100, 10, 20, 'now', 'now'),
+			(101, 100, 101, 30, 40, 'now', 'now'),
+			(102, 101, 101, 50, 60, 'now', 'now');
+		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, direction, style, created_at, updated_at)
+		VALUES (100, 100, 100, 101, 'reads', 'forward', 'solid', 'now', 'now');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	explore, err := store.Explore(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := explore.Views["100"]
+	if len(root.Placements) != 2 || len(root.Connectors) != 1 {
+		t.Fatalf("root explore data = placements:%d connectors:%d, want 2/1", len(root.Placements), len(root.Connectors))
+	}
+	if !root.Placements[0].HasView || root.Placements[0].ViewLabel == nil || *root.Placements[0].ViewLabel != "Service" {
+		t.Fatalf("root first placement view metadata = has:%v label:%v, want Service child view", root.Placements[0].HasView, root.Placements[0].ViewLabel)
+	}
+	child := explore.Views["101"]
+	if len(child.Placements) != 1 || child.Placements[0].ElementID != 101 {
+		t.Fatalf("child explore placements = %+v, want DB placement", child.Placements)
+	}
+	if len(explore.Navigations) != 1 {
+		t.Fatalf("navigations = %+v, want one child navigation", explore.Navigations)
+	}
+	nav := explore.Navigations[0]
+	if nav.ElementID == nil || *nav.ElementID != 100 || nav.FromViewID != 100 || nav.ToViewID != 101 || nav.ToViewName != "API detail" || nav.RelationType != "child" {
+		t.Fatalf("navigation = %+v, want API child navigation from root to detail", nav)
+	}
+}
+
 func TestStoreAutoTagColorsPreserveUserMetadata(t *testing.T) {
 	store := openAppStore(t)
 	ctx := context.Background()
