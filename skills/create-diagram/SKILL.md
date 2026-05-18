@@ -1,10 +1,10 @@
 ---
 name: create-diagram
-description: Create architecture diagrams from a codebase using the tld CLI. Use this skill whenever the user asks to diagram, or map their codebase or system architecture. Trigger on phrases like "map my services", "document my architecture", "create a system diagram", "diagram this repo", "show how my code is structured", or any request to visually represent how a system's components fit together.
+description: Create architecture diagrams from a codebase using the tld CLI. Use this skill whenever the user asks to diagram, or map their codebase or system architecture. Trigger on phrases like "create a diagram of the codebase", "create a system diagram", "diagram this repo", or any request to visually represent how a system's components fit together.
 allowed-tools: Bash(tld *), Write
 ---
 # Prerequisite: Install tld
-Check if tld is already installed:
+Check if tld is already installed first:
 ```bash
 tld --version
 ```
@@ -12,19 +12,40 @@ If not installed, run:
 ```bash
 curl -LsSf https://tldiagram.com/install.sh | sh && tld --version
 ```
+if the user is on Windows, run:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | iex; tld --version"
+```
+
 If you have any issues with installation, refer the user to https://github.com/Mertcikla/tld 
+
+## CLI syntax guardrails
+
+Use the current flat CLI shape:
+
+- Add an element with `tld add "<name>" --ref <ref> --kind <kind> --parent <parent-ref>`.
+- Connect elements with `tld connect --from <source-ref> --to <target-ref> --label "<specific interaction>"`.
+- Create drill-down views by adding children with `--parent <element-ref>`. Do not create views with a separate command.
+
+Technology labels must come from the embedded catalog when possible. Before using an uncertain technology, run:
+
+```bash
+tld tech suggest "<technology name>"
+```
+
+Use a suggested catalog name such as `Go`, `React`, or `PostgreSQL`. If `tld add` warns that a technology is unknown, update the command to use a suggested catalog label or omit `--technology`.
 
 ## How tld thinks about architecture
 
-In tld, everything is an **element** a service, a database, a person, a class, a method, a module. Any element can have a **view**: a navigable canvas that holds child elements. Navigation works by drilling into any element whose view contains something interesting. There are no standalone "diagrams" to create separately views emerge from the element hierarchy.
+In tld, everything is an **element**: a service, a database, a person, a class, a method, a module. Any element can have a **view**: a navigable canvas that holds child elements. Navigation works by drilling into any element whose view contains something interesting. There are no standalone "diagrams" to create separately; views emerge from the element hierarchy.
 
 **Connectors** express relationships between elements in the same view. The view is inferred automatically from the elements' shared parent.
 
-**Roles** (service, database, external system, person, etc.) are expressed as tags not as distinct types. All elements share a single kind.
+**Kinds** express broad roles such as service, database, system, container, component, external system, or person. Use `--kind` for that broad role; use the element name, description, technology, and connectors for the specific architectural meaning.
 
-The aim is a **navigatable atlas of the entire system** like a hyperlinked wiki where you can zoom into anything. At the top you see services talking to each other. Drill into a service and you see its modules. Drill into a module and you see its classes. Drill into a class and you see its methods, parameters, what each method calls, its parent classes, its subclasses.
+The aim is a **navigable atlas of the entire system** like a hyperlinked wiki where you can zoom into anything. At the top you see services talking to each other. Drill into a service and you see its modules. Drill into a module and you see its classes. Drill into a class and you see its methods, parameters, what each method calls, its parent classes, its subclasses.
 
-Endpoint have connectors wired up to external APIs they call, to databases they read/write, to other services they talk to. 
+Endpoints have connectors wired up to external APIs they call, to databases they read/write, and to other services they talk to.
 
 **The goal at full detail: a reader can start at the root view and follow drill-downs until they understand any piece of the system without ever opening a file.**
 
@@ -40,7 +61,7 @@ A view is only useful if it tells you something you couldn't immediately see fro
 
 ## Working surface: diagram.sh
 
-All tld commands go into multiple bash scripts, inside the workspace directory ./.tld/ . The script is your notes and your execution log comments explain what you found, commands record what you built. Organize the script into batches of related commands and abstraction levels, with comments describing the purpose of each batch. Run each batch immediately after writing it, then do a checkpoint before moving to the next batch. 
+All tld commands go into a bash script inside the workspace directory: `./.tld/diagram.sh`. The script is your notes and your execution log: comments explain what you found, commands record what you built. Organize the script into batches of related commands and abstraction levels, with comments describing the purpose of each batch. Run each batch immediately after writing it, then do a checkpoint before moving to the next batch.
 
 
 **Create the script once at the beginning of Step 3:**
@@ -153,19 +174,19 @@ Create `diagram.sh`, then append and run the root elements as the first batch. R
 
 ```bash
 # === Root elements ===
-tld add "Domain & Business Logic" --ref domain --diagram-label "System" && \
-    tld add "Data & Persistence" --ref data --diagram-label "System" && \
-    tld add "Interfaces & Integrations" --ref interfaces --diagram-label "System" && \
-    tld add "Platform & Infrastructure" --ref deployment --diagram-label "System"
+tld add "Domain & Business Logic" --ref domain --kind system --diagram-label "System" && \
+    tld add "Data & Persistence" --ref data --kind system --diagram-label "System" && \
+    tld add "Interfaces & Integrations" --ref interfaces --kind system --diagram-label "System" && \
+    tld add "Platform & Infrastructure" --ref deployment --kind system --diagram-label "System"
 ```
 
 Append and run the next level as a second batch:
 
 ```bash
 # === Level 2: major subsystems ===
-tld add "Backend" --ref backend --parent domain && \
-    tld add "Frontend" --ref frontend --parent interfaces && \
-    tld add "Storage" --ref storage --parent data
+tld add "Backend" --ref backend --kind container --parent domain && \
+    tld add "Frontend" --ref frontend --kind container --parent interfaces && \
+    tld add "Storage" --ref storage --kind container --parent data
 ```
 
 **Batch checkpoint:** Are there connectors between root elements suggested by your inventory? Add them now:
@@ -184,8 +205,9 @@ Work one view at a time. For each view (parent element), append its children as 
 ```bash
 # === Backend children ===
 tld add "REST API" --parent backend --technology "Go" --ref api && \
-    tld add "Stripe API" --parent backend --technology "Stripe" --ref stripe && \
-    tld add "Job Worker" --parent backend --technology "Go" --ref worker
+    tld add "PostgreSQL Database" --parent backend --kind database --technology "PostgreSQL" --ref db && \
+    tld add "Job Queue" --parent backend --kind component --ref queue && \
+    tld add "Job Worker" --parent backend --kind component --technology "Go" --ref worker
 ```
 
 **Batch checkpoint after elements:** Do any of these elements also belong in other views? Add those placements now.
@@ -196,8 +218,8 @@ Append and run connectors for the same view immediately after its elements. View
 
 ```bash
 # === Backend connectors ===
-tld connect --from api --to stripe --label "billing" && \
-    tld connect --from api --to db --label "reads/writes" && \
+tld connect --from api --to db --label "reads/writes application data" && \
+    tld connect --from api --to queue --label "enqueues background jobs" && \
     tld connect --from worker --to queue --label "consumes jobs"
 ```
 
@@ -270,7 +292,7 @@ Go back to the code don't guess. Apply the 10-element rule here too; cluster if 
 ```bash
 tld add "Auth Middleware" --parent api-internals --technology "Go" --ref auth-mw && \
     tld add "User Handler" --parent api-internals --technology "Go" --ref user-handler && \
-    tld add "Database" --parent api-internals --technology "PostgreSQL" --ref dbb
+    tld add "PostgreSQL Database" --parent api-internals --kind database --technology "PostgreSQL" --ref db
 ```
 
 > If `db` already exists from a parent view, `tld add` with the same ref but a new `--parent` adds a new *placement* rather than a duplicate. Reused elements don't inherit connectors add them explicitly for this context.
@@ -279,7 +301,7 @@ tld add "Auth Middleware" --parent api-internals --technology "Go" --ref auth-mw
 
 ```bash
 tld connect --from auth-mw --to user-handler --label "forwards request" && \
-    tld connect --from user-handler --to db --label "SQL"
+    tld connect --from user-handler --to db --label "queries user records"
 ```
 
 Before moving to the next subsystem, check every element: at least one incoming connector, at least one outgoing connector, labels specific enough to tell a reader what the interaction does. Missing connectors = go back to the code.
