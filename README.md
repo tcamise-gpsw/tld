@@ -12,23 +12,20 @@
   <a href="https://deepwiki.com/Mertcikla/tld"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
-`tld` provides a complete software architecture management platform that bundles a high-performance Go backend with an interactive React frontend into a single, standalone binary. Includes a CLI to enable managing diagrams from the shell or in CI. 
-
-Designed for local-first development and private self-hosting, `tld` allows teams to visualize, document, and manage their system architecture using a combination of a rich web UI and "Diagrams as Code" workflows.
-
----
-
 <p align="center">
     <img src="./assets/tld-editor-ss.png" alt="editor-ss">
 </p>
+---
 
-## Key Features
+`tld` is an opinionated, flexible diagramming tool to help you visualize, understand, and maintain your software architecture. Inspired by C4 model, designed with multiple opt-in features to answer evolving needs of software teams. 
 
-- **Full-Featured Web UI**: A React frontend designed, polished and optimized to handle complex architectures while attempting to intelligently show and hide details.
-- **Git diff visualization**: Seamlessly sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
+## Highlights
+
+- **UI**: A frontend optimized to handle complex architectures while attempting to intelligently show and hide details.
 - **Bi-directional Sync**: Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
 - **Standalone Distribution**: A single, dependency-free binary containing both the server and the web application.
-- **CLI built that speaks agent**: Use the [agent skill](./skills/create-diagram/SKILL.md) and teach your agent how to create a diagram of your codebase with the exact detail level you need. You can prompt your agent to add/remove details as needed. 
+- **Git diff visualization**: Sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
+- **CLI that speaks agent**: Use the [agent skill](./skills/create-diagram/SKILL.md) and use your agent to create a diagram of your codebase with the exact detail level you need. Prompt the agent to add/remove details you see fit. 
 Here are some examples that were generated using the agent skill.
 
   - [Kubernetes](https://tldiagram.com/app/explore/shared/827bc17d-7d9b-411f-9d03-179fab99bcbd)
@@ -42,37 +39,17 @@ Here are some examples that were generated using the agent skill.
 - **Diagrams as Code**: A Git-like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
 - **Automated Codebase Analysis**: (Preview) Built-in tree-sitter integration to automatically discover architecture components in Go, Java, Python, C++, and TypeScript (more soon™ (hopefully)).
 
----
-
 ## Quick Start
-### Single line install and start
+
+macOS and Linux
 ```bash
 curl -LsSf https://tldiagram.com/install.sh | sh -s serve --open
 ```
 
-Windows:
+Windows
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | iex; tld serve --open"
 ```
-
-OR
-
-### 1. Install the binary
-```bash
-curl -LsSf https://tldiagram.com/install.sh | sh
-```
-
-Windows:
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | iex"
-```
-
-### 2. Launch the Web UI
-Initialize a workspace and start the local server:
-```bash
-tld serve
-```
-Open **`http://localhost:8060`** to start visually mapping your architecture.
 
 ---
 
@@ -92,9 +69,7 @@ Various configuration options are available in `~/.config/tldiagram/tld.yaml`
 
 ---
 
-## The tlDiagram Workflow
-
-`tld` bridges the gap between manual diagramming and automated documentation.
+## The workflow
 
 1. **Visualize**: Use `tld serve` to open the interactive UI. Drag, drop, and connect components.
 2. **Automate**: Run `tld analyze` to scan your repository. It will suggest new elements and connectors based on your actual source code.
