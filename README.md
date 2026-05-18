@@ -37,9 +37,9 @@ Here are some examples that were generated using the agent skill.
   - [.NET eShop reference](https://tldiagram.com/app/explore/shared/ba6cbf2a-e0ff-468a-87e5-f720d35f448d)
 
 - **Editor and Github Integration**: Jump to the code in your editor or Github from diagrams, or open the code symbol in diagram from your editor to visualize the code using the [VSCode extension](https://marketplace.visualstudio.com/items?itemName=tlDiagram-com.tldiagram).
-- **Bi-directional Sync**: Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
+- **Bi-directional Sync**: (Preview) Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
 - **Git diff visualization**: (Preview) Sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
-- **Diagrams as Code**: (Preview)A Git-like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
+- **Diagrams as Code**: (Preview) A git/terraform like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
 - **Automated Codebase Analysis**: (Preview) Built-in tree-sitter integration to automatically discover architecture components in Go, Java, Python, C++, and TypeScript (more soon™ (hopefully)).
 
 ## Quick Start
@@ -72,9 +72,9 @@ Various configuration options are available in `~/.config/tldiagram/tld.yaml`
 
 Visit [docs](https://tldiagram.com/docs) for more info.
 
-## The workflow
+## An example workflow
 
-1. **Visualize**: Use `tld serve` to open the interactive UI. Drag, drop, and connect components.
+1. **Visualize**: Use `tld serve` to open the interactive UI. 
 2. **Automate**: Run `tld analyze` to scan your repository. It will suggest new elements and connectors based on your actual source code.
 3. **Commit**: Save your changes. All UI edits are persisted to `elements.yaml` and `connectors.yaml`. Commit these to Git to version your architecture.
 
