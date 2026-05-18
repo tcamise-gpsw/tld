@@ -1,3 +1,6 @@
+
+
+
 <p align="center">
   <a href="https://tldiagram.com">
     <img src="./frontend/logo/tld.svg" alt="Logo" width="200">
@@ -13,8 +16,21 @@
   <a href="https://deepwiki.com/Mertcikla/tld"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
+
 <p align="center">
-    <img src="./assets/tld-editor-ss.png" alt="editor-ss">
+    <video src="https://github.com/user-attachments/assets/41838abb-9fea-4077-9cc5-988706c0dcff" autoplay loop muted playsinline width="100%"></video>
+
+
+</p>
+
+
+<p align="center">
+    <video src="https://github.com/user-attachments/assets/05bb5e48-0eda-44de-adb4-95a0a242f03b" autoplay loop muted playsinline width="100%"></video>
+
+
+</p>
+
+
 </p>
 
 ---
