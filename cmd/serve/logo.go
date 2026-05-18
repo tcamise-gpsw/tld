@@ -25,19 +25,28 @@ func PrintLogoWithUpdate(w io.Writer, status *selfupdate.Status) {
 	term.PrintLogo(w, versionText)
 }
 
-func StartupUpdateStatus(ctx context.Context, cfg *workspace.Config) (*selfupdate.Status, string) {
+func StartupUpdateStatus(ctx context.Context, cfg *workspace.Config, progressWriter io.Writer) (*selfupdate.Status, string) {
 	if cfg == nil {
 		cfg = workspace.DefaultConfig()
 	}
+
+	timeout := selfupdate.DefaultCheckTimeout
+	if cfg.Updates.Auto {
+		timeout = selfupdate.DefaultInstallTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	interval, err := time.ParseDuration(cfg.Updates.CheckInterval)
 	if err != nil || interval <= 0 {
 		interval = selfupdate.DefaultCheckInterval
 	}
 	statePath := updateStatePath()
 	opts := selfupdate.Options{
-		Current:       version.Version,
-		CheckInterval: interval,
-		StatePath:     statePath,
+		Current:        version.Version,
+		CheckInterval:  interval,
+		StatePath:      statePath,
+		ProgressWriter: progressWriter,
 	}
 	if cfg.Updates.Auto {
 		status, err := selfupdate.Install(ctx, opts)

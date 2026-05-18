@@ -16,23 +16,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/schollz/progressbar/v3"
 	"golang.org/x/mod/semver"
 )
 
 const (
-	DefaultRepo          = "Mertcikla/tld"
-	DefaultCheckInterval = 24 * time.Hour
-	defaultHTTPTimeout   = 1500 * time.Millisecond
+	DefaultRepo           = "Mertcikla/tld"
+	DefaultCheckInterval  = 24 * time.Hour
+	DefaultCheckTimeout   = 3 * time.Second
+	DefaultInstallTimeout = 30 * time.Minute
+	// defaultHTTPTimeout is set to 0 to rely on context timeouts.
+	defaultHTTPTimeout = 0
 )
 
 type Options struct {
-	Repo          string
-	Current       string
-	CheckInterval time.Duration
-	StatePath     string
-	HTTPClient    *http.Client
-	APIBaseURL    string
-	Force         bool
+	Repo           string
+	Current        string
+	CheckInterval  time.Duration
+	StatePath      string
+	HTTPClient     *http.Client
+	APIBaseURL     string
+	Force          bool
+	ProgressWriter io.Writer
 }
 
 type Status struct {
@@ -147,7 +152,27 @@ func Install(ctx context.Context, opts Options) (Status, error) {
 	if err != nil {
 		return status, err
 	}
-	if _, err := io.Copy(archive, resp.Body); err != nil {
+	var src io.Reader = resp.Body
+	if opts.ProgressWriter != nil && resp.ContentLength > 0 {
+		bar := progressbar.NewOptions64(
+			resp.ContentLength,
+			progressbar.OptionSetWriter(opts.ProgressWriter),
+			progressbar.OptionShowBytes(true),
+			progressbar.OptionSetDescription("Downloading"),
+			progressbar.OptionSetWidth(12),
+			progressbar.OptionFullWidth(),
+			progressbar.OptionClearOnFinish(),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "=",
+				SaucerHead:    ">",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}),
+		)
+		src = io.TeeReader(resp.Body, bar)
+	}
+	if _, err := io.Copy(archive, src); err != nil {
 		_ = archive.Close()
 		return status, err
 	}

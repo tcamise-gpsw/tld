@@ -48,13 +48,14 @@ func newUpdateCmd() *cobra.Command {
 			if dir, err := workspace.ConfigDir(); err == nil {
 				statePath = filepath.Join(dir, "update-check.json")
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+			ctx, cancel := context.WithTimeout(cmd.Context(), selfupdate.DefaultInstallTimeout)
 			defer cancel()
 			status, err := selfupdate.Install(ctx, selfupdate.Options{
-				Current:       Version,
-				CheckInterval: interval,
-				StatePath:     statePath,
-				Force:         true,
+				Current:        Version,
+				CheckInterval:  interval,
+				StatePath:      statePath,
+				Force:          true,
+				ProgressWriter: cmd.ErrOrStderr(),
 			})
 			if err != nil {
 				return fmt.Errorf("update tld: %w", err)

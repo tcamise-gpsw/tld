@@ -23,6 +23,7 @@ import (
 const (
 	backgroundReadyTimeout = 30 * time.Second
 	readyRequestTimeout    = 10 * time.Second
+	skipStartupUpdateEnv   = "TLD_SKIP_STARTUP_UPDATE"
 )
 
 func defaultServeRunE(cmd *cobra.Command, args []string) error {
@@ -71,10 +72,9 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	}
 	defer func() { _ = localserver.RemoveProcess(os.Getpid()) }()
 
-	updateStatus, updateNote := StartupUpdateStatus(cmd.Context(), cfg)
-	PrintLogoWithUpdate(cmd.OutOrStdout(), updateStatus)
-	if updateNote != "" {
-		term.Hint(cmd.OutOrStdout(), updateNote)
+	PrintLogo(cmd.OutOrStdout())
+	if os.Getenv(skipStartupUpdateEnv) != "1" {
+		go reportStartupUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg)
 	}
 	url := "http://" + app.Addr
 	printServeInfo(cmd.OutOrStdout(), url, serveStatus{
@@ -119,11 +119,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	initializedData := databaseWillBeInitialized(dataDir)
 
 	if existing, ok := findRunningServerProcess(dataDir, addr); ok {
-		updateStatus, updateNote := StartupUpdateStatus(cmd.Context(), cfg)
-		PrintLogoWithUpdate(cmd.OutOrStdout(), updateStatus)
-		if updateNote != "" {
-			term.Hint(cmd.OutOrStdout(), updateNote)
-		}
+		PrintLogo(cmd.OutOrStdout())
 		if existing.Addr != "" {
 			addr = existing.Addr
 			url = "http://" + addr
@@ -142,6 +138,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		if openBrowser {
 			_ = cmdutil.OpenBrowser(url)
 		}
+		reportStartupUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg)
 		return nil
 	}
 
@@ -173,6 +170,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	child := exec.Command(exe, fwdArgs...)
 	child.Stdout = lf
 	child.Stderr = lf
+	child.Env = append(os.Environ(), skipStartupUpdateEnv+"=1")
 	child.SysProcAttr = getSysProcAttr()
 
 	if err := child.Start(); err != nil {
@@ -191,11 +189,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		return fmt.Errorf("server process exited immediately; check logs: %s", localserver.LogPath(dataDir))
 	}
 
-	updateStatus, updateNote := StartupUpdateStatus(cmd.Context(), cfg)
-	PrintLogoWithUpdate(cmd.OutOrStdout(), updateStatus)
-	if updateNote != "" {
-		term.Hint(cmd.OutOrStdout(), updateNote)
-	}
+	PrintLogo(cmd.OutOrStdout())
 	printServeInfo(cmd.OutOrStdout(), url, serveStatus{
 		Mode:            "background",
 		InitializedData: initializedData,
@@ -209,7 +203,18 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	if openBrowser {
 		_ = cmdutil.OpenBrowser(url)
 	}
+	reportStartupUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg)
 	return nil
+}
+
+func reportStartupUpdate(ctx context.Context, out, progress io.Writer, cfg *workspace.Config) {
+	updateStatus, updateNote := StartupUpdateStatus(ctx, cfg, progress)
+	if updateStatus != nil && updateStatus.UpdateAvailable {
+		term.Hint(out, fmt.Sprintf("Update available: %s -> %s", updateStatus.Current, updateStatus.Latest))
+	}
+	if updateNote != "" {
+		term.Hint(out, updateNote)
+	}
 }
 
 func findRunningServerProcess(dataDir, addr string) (localserver.ProcessRecord, bool) {

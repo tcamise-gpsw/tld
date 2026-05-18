@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -66,5 +67,41 @@ func TestCheckFetchesLatestReleaseWhenCacheIsStale(t *testing.T) {
 	}
 	if !status.UpdateAvailable || status.Latest != "v2.0.4" || status.AssetURL == "" {
 		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
+func TestInstallDownloadUsesContextDeadline(t *testing.T) {
+	name := assetName()
+	if name == "" {
+		t.Skip("unsupported test platform")
+	}
+
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	mux.HandleFunc("/repos/Mertcikla/tld/releases", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name":"v2.0.4","prerelease":false,"html_url":"https://github.com/Mertcikla/tld/releases/tag/v2.0.4","assets":[{"name":"` + name + `","browser_download_url":"` + server.URL + `/asset"}]}]`))
+	})
+	mux.HandleFunc("/asset", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1024")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := Install(ctx, Options{
+		Current:       "2.0.2",
+		CheckInterval: time.Hour,
+		StatePath:     filepath.Join(t.TempDir(), "update-check.json"),
+		HTTPClient:    server.Client(),
+		APIBaseURL:    server.URL,
+		Force:         true,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Install() error = %v, want context deadline exceeded", err)
 	}
 }
