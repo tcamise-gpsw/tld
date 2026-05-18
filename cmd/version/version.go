@@ -14,7 +14,7 @@ import (
 
 // Version is the current version of the CLI.
 // This is overridden by ldflags during build.
-var Version = "2.1.0"
+var Version = "2.1.1"
 
 func NewVersionCmd() *cobra.Command {
 	c := &cobra.Command{
