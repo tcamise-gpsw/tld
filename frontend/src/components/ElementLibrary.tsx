@@ -30,6 +30,9 @@ import ScrollIndicatorWrapper from './ScrollIndicatorWrapper'
 
 import { useViewEditorContext } from '../pages/ViewEditor/context'
 
+const LIBRARY_ITEM_HEIGHT = 60
+const LIBRARY_ITEM_OVERSCAN = 8
+
 interface Props {
   existingElementIds: Set<number>
   existingElements?: LibraryElement[]
@@ -105,6 +108,8 @@ function ElementLibrary({
   const isFetching = useRef(false)
   const searchRef = useRef(search)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [listScrollTop, setListScrollTop] = useState(0)
+  const [listViewportHeight, setListViewportHeight] = useState(600)
   useEffect(() => { searchRef.current = search }, [search])
 
   const fetchElements = useCallback(async (offset: number, currentSearch: string, isInitial = false) => {
@@ -171,6 +176,28 @@ function ElementLibrary({
     })
   }, [existingElementIds, existingElements, hideExisting, elements, search])
 
+  const virtualItems = useMemo(() => {
+    const visibleCount = Math.ceil(listViewportHeight / LIBRARY_ITEM_HEIGHT) + (LIBRARY_ITEM_OVERSCAN * 2)
+    const maxStart = Math.max(0, filtered.length - visibleCount)
+    const start = Math.min(
+      maxStart,
+      Math.max(0, Math.floor(listScrollTop / LIBRARY_ITEM_HEIGHT) - LIBRARY_ITEM_OVERSCAN),
+    )
+    const end = Math.min(filtered.length, start + visibleCount)
+
+    return {
+      items: filtered.slice(start, end),
+      topSpacerHeight: start * LIBRARY_ITEM_HEIGHT,
+      bottomSpacerHeight: Math.max(0, (filtered.length - end) * LIBRARY_ITEM_HEIGHT),
+    }
+  }, [filtered, listScrollTop, listViewportHeight])
+
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    setListViewportHeight(el.clientHeight || 600)
+  }, [filtered.length, isOpen])
+
   // If a fetch completes but the container still isn't scrollable, keep loading
   useEffect(() => {
     if (!hasMore || loading || !isOpen) return
@@ -183,6 +210,8 @@ function ElementLibrary({
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
+    setListScrollTop(scrollTop)
+    setListViewportHeight(clientHeight || 600)
     if (scrollHeight - scrollTop <= clientHeight + 50 && hasMore && !loading) {
       fetchElements(elements.length, search)
     }
@@ -349,7 +378,7 @@ function ElementLibrary({
 
       {/* List */}
       <ScrollIndicatorWrapper ref={scrollContainerRef} flex={1} px={2} pt={2} pb={3} onScroll={handleScroll}>
-        <VStack align="stretch" spacing={1.5}>
+        <VStack align="stretch" spacing={0}>
           {loading && elements.length === 0 && (
             <Flex justify="center" py={10}>
               <Spinner size="sm" color="blue.500" thickness="2px" />
@@ -374,7 +403,11 @@ function ElementLibrary({
               No results for &ldquo;{search}&rdquo;
             </Text>
           )}
-          {filtered.map((obj) => {
+          {virtualItems.topSpacerHeight > 0 && (
+            <Box aria-hidden="true" h={`${virtualItems.topSpacerHeight}px`} flexShrink={0} />
+          )}
+
+          {virtualItems.items.map((obj) => {
             const already = existingElementIds.has(obj.id)
             const color = TYPE_COLORS[obj.kind ?? ''] ?? 'gray'
             const hasLogo = !!obj.logo_url
@@ -397,7 +430,8 @@ function ElementLibrary({
                     if (already && onFindElement) onFindElement(obj.id)
                   }}
                   p={2}
-                  minH="54px"
+                  h="54px"
+                  mb={1.5}
                   display="flex"
                   alignItems="center"
                   bg={already ? 'rgba(var(--accent-rgb), 0.06)' : 'whiteAlpha.50'}
@@ -494,6 +528,10 @@ function ElementLibrary({
               </Tooltip>
             )
           })}
+
+          {virtualItems.bottomSpacerHeight > 0 && (
+            <Box aria-hidden="true" h={`${virtualItems.bottomSpacerHeight}px`} flexShrink={0} />
+          )}
 
           {loading && elements.length > 0 && (
             <Flex justify="center" py={2}>
