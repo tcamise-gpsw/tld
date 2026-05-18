@@ -24,9 +24,7 @@
 ## Highlights
 
 - **UI**: A frontend optimized to handle complex architectures while attempting to intelligently show and hide details.
-- **Bi-directional Sync**: Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
 - **Standalone Distribution**: A single, dependency-free binary containing both the server and the web application.
-- **Git diff visualization**: Sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
 - **CLI that speaks agent**: Use the [agent skill](./skills/create-diagram/SKILL.md) and use your agent to create a diagram of your codebase with the exact detail level you need. Prompt the agent to add/remove details you see fit. 
 Here are some examples that were generated using the agent skill.
 
@@ -38,7 +36,10 @@ Here are some examples that were generated using the agent skill.
 
   - [.NET eShop reference](https://tldiagram.com/app/explore/shared/ba6cbf2a-e0ff-468a-87e5-f720d35f448d)
 
-- **Diagrams as Code**: A Git-like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
+- **Editor and Github Integration**: Jump to the code in your editor or Github from diagrams, or open the code symbol in diagram from your editor to visualize the code using the [VSCode extension](https://marketplace.visualstudio.com/items?itemName=tlDiagram-com.tldiagram).
+- **Bi-directional Sync**: Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
+- **Git diff visualization**: (Preview) Sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
+- **Diagrams as Code**: (Preview)A Git-like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
 - **Automated Codebase Analysis**: (Preview) Built-in tree-sitter integration to automatically discover architecture components in Go, Java, Python, C++, and TypeScript (more soon™ (hopefully)).
 
 ## Quick Start
@@ -55,7 +56,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | i
 
 ## Deployment & Self-Hosting
 
-The `tld` binary is designed to be run as a persistent service in your infrastructure or as a local development tool.
+`tld` designed to be run fully offline, behind a reverse-proxy or in your infrastructure or as a local development tool.
 
 ### Local Development
 Run `tld serve` in any directory to start a local instance that uses your current folder for storage. 
@@ -67,6 +68,9 @@ Run `tld serve` in any directory to start a local instance that uses your curren
 ### Configuration
 Various configuration options are available in `~/.config/tldiagram/tld.yaml`
 
+# Documentation
+
+Visit [docs](https://tldiagram.com/docs) for more info.
 
 ## The workflow
 
