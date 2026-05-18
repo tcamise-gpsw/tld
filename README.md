@@ -16,24 +16,10 @@
   <a href="https://deepwiki.com/Mertcikla/tld"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
-
 <p align="center">
-    <video src="https://github.com/user-attachments/assets/41838abb-9fea-4077-9cc5-988706c0dcff" autoplay loop muted playsinline width="100%"></video>
-
-
+<img width="640" height="441" alt="editor" src="https://github.com/user-attachments/assets/fd097ab7-eeb6-409f-aaed-db03a9c6ace5" />
 </p>
 
-
-<p align="center">
-    <video src="https://github.com/user-attachments/assets/05bb5e48-0eda-44de-adb4-95a0a242f03b" autoplay loop muted playsinline width="100%"></video>
-
-
-</p>
-
-
-</p>
-
----
 
 `tld` is an opinionated, flexible diagramming tool to help you visualize, understand, and maintain your software architecture. Inspired by C4 model, designed with multiple opt-in features to answer evolving needs of software teams. 
 
@@ -57,6 +43,10 @@ Here are some examples that were generated using the agent skill.
 - **Git diff visualization**: (Preview) Sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
 - **Diagrams as Code**: (Preview) A git/terraform like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
 - **Automated Codebase Analysis**: (Preview) Built-in tree-sitter integration to automatically discover architecture components in Go, Java, Python, C++, and TypeScript (more soon™ (hopefully)).
+
+<p align="center">
+<img width="640" height="360" alt="explore" src="https://github.com/user-attachments/assets/a69b3b05-b8da-49a8-828c-4fdd2b8d8ade" />
+</p>
 
 ## Quick Start
 
