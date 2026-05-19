@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
+	"github.com/mertcikla/tld/v2/internal/tech"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -93,6 +95,7 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 		if element.Technology != "" {
 			planElement.Technology = &element.Technology
 		}
+		planElement.TechnologyLinks = technologyLinksForElement(element.Technology, element.Language)
 		if element.URL != "" {
 			planElement.Url = &element.URL
 		}
@@ -216,6 +219,99 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 	}
 
 	return &Plan{Request: req, Model: "workspace"}, nil
+}
+
+func technologyLinksForElement(technology, language string) []*diagv1.TechnologyLink {
+	links := technologyLinksForLabel(technology)
+	if len(links) > 0 {
+		return links
+	}
+	return technologyLinksForLanguage(language)
+}
+
+func technologyLinksForLabel(label string) []*diagv1.TechnologyLink {
+	var links []*diagv1.TechnologyLink
+	seen := map[string]struct{}{}
+	for _, part := range technologyLabelParts(label) {
+		slug, displayLabel := technologyCatalogMatch(part)
+		if slug == "" {
+			continue
+		}
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		links = append(links, catalogTechnologyLink(slug, displayLabel, len(links) == 0))
+		if len(links) == 3 {
+			break
+		}
+	}
+	return links
+}
+
+func technologyLinksForLanguage(language string) []*diagv1.TechnologyLink {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "go":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("golang", "Go", true)}
+	case "typescript":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("typescript", "TypeScript", true)}
+	case "javascript":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("javascript", "JavaScript", true)}
+	case "python":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("python", "Python", true)}
+	case "java":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("java", "Java", true)}
+	case "cpp":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("c-plusplus", "C++", true)}
+	case "c":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("c", "C", true)}
+	case "json":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("json-javascript-object-notation", "JSON", true)}
+	default:
+		return nil
+	}
+}
+
+func technologyLabelParts(label string) []string {
+	parts := strings.FieldsFunc(label, func(r rune) bool {
+		return r == ',' || r == '/' || r == ';' || r == '|'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 && strings.TrimSpace(label) != "" {
+		return []string{strings.TrimSpace(label)}
+	}
+	return out
+}
+
+func technologyCatalogMatch(label string) (string, string) {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "architecture":
+		return "architecture", "Architecture"
+	case "structural":
+		return "structural", "Structural"
+	case "container":
+		return "docker", "Container"
+	default:
+		slug, name, ok := tech.LookupCatalogFuzzy(label)
+		if !ok {
+			return "", ""
+		}
+		return slug, name
+	}
+}
+
+func catalogTechnologyLink(slug, label string, primary bool) *diagv1.TechnologyLink {
+	return &diagv1.TechnologyLink{
+		Type:          "catalog",
+		Slug:          &slug,
+		Label:         label,
+		IsPrimaryIcon: primary,
+	}
 }
 
 func canonicalViewRefs(elements map[string]*workspace.Element, connectors map[string]*workspace.Connector) map[string]struct{} {

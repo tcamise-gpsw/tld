@@ -115,6 +115,32 @@ func TestBuild_MapsElementsAndConnectors(t *testing.T) {
 	}
 }
 
+func TestBuild_DerivesTechnologyLinksForCatalogIcons(t *testing.T) {
+	ws := elementWorkspace()
+	ws.Elements["api"].Technology = "Go / PostgreSQL"
+
+	plan, err := planner.Build(ws, false)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	api := planElementByRef(plan, "api")
+	if api == nil {
+		t.Fatal("api element missing")
+	}
+	if len(api.TechnologyLinks) != 2 {
+		t.Fatalf("technology links = %+v, want two catalog links", api.TechnologyLinks)
+	}
+	first := api.TechnologyLinks[0]
+	if first.GetType() != "catalog" || first.GetSlug() != "golang" || first.GetLabel() != "Go" || !first.GetIsPrimaryIcon() {
+		t.Fatalf("first technology link = %+v, want primary Go catalog icon", first)
+	}
+	second := api.TechnologyLinks[1]
+	if second.GetType() != "catalog" || second.GetSlug() != "postgresql" || second.GetLabel() != "PostgreSQL" || second.GetIsPrimaryIcon() {
+		t.Fatalf("second technology link = %+v, want non-primary PostgreSQL catalog icon", second)
+	}
+}
+
 func TestBuild_PromotesPlacementParentsToViews(t *testing.T) {
 	ws := &workspace.Workspace{
 		Config: workspace.Config{WorkspaceID: "test-org-id"},
