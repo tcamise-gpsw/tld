@@ -1092,6 +1092,9 @@ func elementToProto(element app.LibraryElement, workspaceID uuid.UUID) *diagv1.E
 		}
 		p.TechnologyLinks = append(p.TechnologyLinks, item)
 	}
+	if p.LogoUrl == nil {
+		p.LogoUrl = derivedTechnologyLogoURL(element.TechnologyConnectors)
+	}
 	return p
 }
 
@@ -1144,7 +1147,30 @@ func placedElementToProto(item app.PlacedElement) *diagv1.PlacedElement {
 		}
 		p.TechnologyLinks = append(p.TechnologyLinks, entry)
 	}
+	if p.LogoUrl == nil {
+		p.LogoUrl = derivedTechnologyLogoURL(item.TechnologyConnectors)
+	}
 	return p
+}
+
+func derivedTechnologyLogoURL(links []app.TechnologyConnector) *string {
+	var fallback string
+	for _, link := range links {
+		if link.Type != "catalog" || link.Slug == "" {
+			continue
+		}
+		path := "/icons/" + link.Slug + ".png"
+		if link.IsPrimaryIcon {
+			return &path
+		}
+		if fallback == "" {
+			fallback = path
+		}
+	}
+	if fallback == "" {
+		return nil
+	}
+	return &fallback
 }
 
 func connectorToProto(connector app.Connector) *diagv1.Connector {

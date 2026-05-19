@@ -49,6 +49,9 @@ func TestElementToProtoPreservesPrimaryIconMetadata(t *testing.T) {
 	if !strings.Contains(body, `"isPrimaryIcon":true`) {
 		t.Fatalf("response body = %s, want primary icon metadata", body)
 	}
+	if element.GetLogoUrl() != "/icons/javascript.png" {
+		t.Fatalf("logo url = %q, want derived primary technology icon", element.GetLogoUrl())
+	}
 }
 
 func TestPlacedElementToProtoPreservesPrimaryIconMetadata(t *testing.T) {
@@ -72,6 +75,28 @@ func TestPlacedElementToProtoPreservesPrimaryIconMetadata(t *testing.T) {
 	body := string(data)
 	if !strings.Contains(body, `"isPrimaryIcon":true`) {
 		t.Fatalf("response body = %s, want primary icon metadata", body)
+	}
+	if placement.GetLogoUrl() != "/icons/javascript.png" {
+		t.Fatalf("logo url = %q, want derived primary technology icon", placement.GetLogoUrl())
+	}
+}
+
+func TestElementToProtoPreservesExplicitLogoClear(t *testing.T) {
+	emptyLogo := ""
+	element := elementToProto(app.LibraryElement{
+		ID:      1,
+		Name:    "Web",
+		LogoURL: &emptyLogo,
+		TechnologyConnectors: []app.TechnologyConnector{{
+			Type:          "catalog",
+			Slug:          "javascript",
+			Label:         "JavaScript",
+			IsPrimaryIcon: true,
+		}},
+	}, uuid.Nil)
+
+	if element.LogoUrl == nil || element.GetLogoUrl() != "" {
+		t.Fatalf("logo url = %v, want explicit empty clear preserved", element.LogoUrl)
 	}
 }
 

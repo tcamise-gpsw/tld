@@ -22,7 +22,6 @@ import {
   CreateViewResponseSchema,
   UpdateViewResponseSchema,
   ListViewsResponseSchema,
-  GetViewResponseSchema,
   GetWorkspaceResponseSchema,
   ListElementsResponseSchema,
   GetElementResponseSchema,
@@ -63,6 +62,36 @@ const CONNECTOR_ROUTE_STYLES = new Set(['bezier', 'straight', 'step', 'smoothste
 
 export function normalizeConnectorRouteStyle(style: unknown): string {
   return typeof style === 'string' && CONNECTOR_ROUTE_STYLES.has(style) ? style : 'bezier'
+}
+
+type ProtoTechnologyLink = {
+  type?: string
+  slug?: string
+  label?: string
+  is_primary_icon?: boolean
+  isPrimaryIcon?: boolean
+}
+
+export function normalizeTechnologyConnectors(value: unknown): TechnologyConnector[] {
+  return ((value ?? []) as ProtoTechnologyLink[]).map(tl => ({
+    type: (tl.type ?? 'custom') as TechnologyConnector['type'],
+    slug: tl.slug,
+    label: tl.label ?? '',
+    is_primary_icon: !!(tl.is_primary_icon ?? tl.isPrimaryIcon),
+  }))
+}
+
+export function normalizeLogoUrl(
+  logoUrl: unknown,
+  technologyConnectors: TechnologyConnector[],
+): string | null {
+  if (logoUrl != null) return logoUrl as string
+  const primary = technologyConnectors.find((link) => (
+    link.type === 'catalog' &&
+    !!link.slug &&
+    !!(link.is_primary_icon ?? link.isPrimaryIcon)
+  )) ?? technologyConnectors.find((link) => link.type === 'catalog' && !!link.slug)
+  return primary?.slug ? `/icons/${primary.slug}.png` : null
 }
 
 async function responseError(res: Response, fallback: string): Promise<Error> {
@@ -268,6 +297,24 @@ async function fetchWorkspaceRaw(body: Record<string, unknown>) {
   }>
 }
 
+async function fetchViewRaw(body: Record<string, unknown>) {
+  const res = await fetchApiAsset(apiUrl('/diag.v1.WorkspaceService/GetView'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Connect-Protocol-Version': '1',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw new Error(`GetView failed: ${res.statusText}`)
+  }
+  return res.json() as Promise<{
+    view?: ProtoDiagram
+    content?: { placements?: Record<string, unknown>[]; connectors?: Record<string, unknown>[] }
+  }>
+}
+
 // ─── Proto → frontend type mappers ───────────────────────────────────────────
 
 interface ProtoDiagram {
@@ -355,6 +402,7 @@ function diagramToView(d: ProtoDiagram): View {
 }
 
 function protoElementToLibrary(e: Record<string, unknown>): LibraryElement {
+  const technologyConnectors = normalizeTechnologyConnectors(e.technology_connectors ?? e.technologyLinks)
   return {
     id: Number(e.id ?? 0),
     name: String(e.name ?? ''),
@@ -362,13 +410,8 @@ function protoElementToLibrary(e: Record<string, unknown>): LibraryElement {
     description: (e.description ?? null) as string | null,
     technology: (e.technology ?? null) as string | null,
     url: (e.url ?? null) as string | null,
-    logo_url: (e.logo_url ?? e.logoUrl ?? null) as string | null,
-    technology_connectors: ((e.technology_connectors ?? e.technologyLinks ?? []) as Array<{ type?: string; slug?: string; label?: string; is_primary_icon?: boolean; isPrimaryIcon?: boolean }>).map(tl => ({
-      type: (tl.type ?? 'custom') as TechnologyConnector['type'],
-      slug: tl.slug,
-      label: tl.label ?? '',
-      is_primary_icon: !!(tl.is_primary_icon ?? tl.isPrimaryIcon),
-    })),
+    logo_url: normalizeLogoUrl(e.logo_url ?? e.logoUrl, technologyConnectors),
+    technology_connectors: technologyConnectors,
     tags: (e.tags ?? []) as string[],
     repo: (e.repo ?? null) as string | null,
     branch: (e.branch ?? null) as string | null,
@@ -402,6 +445,7 @@ function libraryElementToDependency(element: LibraryElement): DependencyElement 
 }
 
 function protoPlacedElement(p: Record<string, unknown>): PlacedElement {
+  const technologyConnectors = normalizeTechnologyConnectors(p.technology_connect_ors ?? p.technology_connectors ?? p.technologyLinks)
   return {
     id: Number(p.id ?? 0),
     view_id: Number(p.view_id ?? p.viewId ?? 0),
@@ -413,13 +457,8 @@ function protoPlacedElement(p: Record<string, unknown>): PlacedElement {
     kind: (p.kind ?? null) as string | null,
     technology: (p.technology ?? null) as string | null,
     url: (p.url ?? null) as string | null,
-    logo_url: (p.logo_url ?? p.logoUrl ?? null) as string | null,
-    technology_connectors: ((p.technology_connect_ors ?? p.technology_connectors ?? p.technologyLinks ?? []) as Array<{ type?: string; slug?: string; label?: string; is_primary_icon?: boolean; isPrimaryIcon?: boolean }>).map(tl => ({
-      type: (tl.type ?? 'custom') as TechnologyConnector['type'],
-      slug: tl.slug,
-      label: tl.label ?? '',
-      is_primary_icon: !!(tl.is_primary_icon ?? tl.isPrimaryIcon),
-    })),
+    logo_url: normalizeLogoUrl(p.logo_url ?? p.logoUrl, technologyConnectors),
+    technology_connectors: technologyConnectors,
     tags: (p.tags ?? []) as string[],
     repo: (p.repo ?? null) as string | null,
     branch: (p.branch ?? null) as string | null,
@@ -682,11 +721,7 @@ export const api = {
 
       content: (id: number): Promise<{ view?: ViewTreeNode; placements: PlacedElement[]; connectors: Connector[] }> =>
         rpc(async () => {
-          const res = await workspaceClient.getView({ viewId: id, includeContent: true })
-          const json = j<{
-            view?: ProtoDiagram
-            content?: { placements?: Record<string, unknown>[]; connectors?: Record<string, unknown>[] }
-          }>(GetViewResponseSchema, res)
+          const json = await fetchViewRaw({ viewId: id, includeContent: true })
           return {
             view: json.view ? mapDiagram(json.view) : undefined,
             placements: (json.content?.placements ?? []).map(protoPlacedElement),
@@ -766,8 +801,7 @@ export const api = {
 
       get: (id: number): Promise<ViewTreeNode> =>
         rpc(async () => {
-          const res = await workspaceClient.getView({ viewId: id })
-          const json = j<{ view?: ProtoDiagram }>(GetViewResponseSchema, res)
+          const json = await fetchViewRaw({ viewId: id })
           if (!json.view) throw new Error('View not found')
           return mapDiagram(json.view)
         }),
