@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+vars:
+  GOPATH:
+    sh: go env GOPATH
+
+tasks:
+  setup-hooks:
+    desc: Install pre-commit git hooks
+    cmds:
+      - chmod +x scripts/pre-commit.sh
+      - cp scripts/pre-commit.sh .git/hooks/pre-commit
+      - chmod +x .git/hooks/pre-commit
+      - echo "Pre-commit hooks installed!"
+
+  frontend-deps:
+    desc: Install frontend dependencies
+    status:
+      - test -d frontend/node_modules
+    cmds:
+      - cd frontend && npm install
+
+  frontend-build:
+    desc: Build frontend assets
+    deps:
+      - frontend-deps
+    sources:
+      - frontend/src/**/*
+      - frontend/package.json
+      - frontend/package-lock.json
+      - frontend/tsconfig.json
+      - frontend/tsconfig.lib.json
+      - frontend/tsconfig.node.json
+      - frontend/vite.config.ts
+      - frontend/vite.lib.config.ts
+      - frontend/vite.vscode.config.ts
+      - frontend/index.html
+      - build-assets/icons.tar.gz
+      - scripts/extract_icons.go
+    generates:
+      - frontend/dist/index.html
+    cmds:
+      - cd frontend && VITE_APP_BASE=/ VITE_ROUTER_BASENAME=/ npm run build:app
+
+  lint-be:
+    desc: Lint Go backend
+    cmds:
+      - golangci-lint run ./...
+
+  lint-fe:
+    desc: Lint TypeScript frontend
+    deps:
+      - frontend-deps
+    cmds:
+      - cd frontend && npm run lint
+
+  be:
+    desc: Run backend in dev mode with air
+    env:
+      TLD_DATA_DIR: data/dev
+      TLD_CONFIG_DIR: data/dev/config
+      DEV: "true"
+    cmds:
+      - air
+
+  fe:
+    desc: Run frontend dev server
+    deps:
+      - frontend-deps
+    cmds:
+      - cd frontend && npm run dev
+
+  dev:
+    desc: Run development stack (backend + frontend)
+    deps:
+      - be
+      - fe
+
+  dev-stop:
+    desc: Stop development backend
+    cmds:
+      - cmd: pkill -x tlddebug
+        ignore_error: true
+
+  proto:
+    desc: Update go.mod to latest BSR-published proto versions
+    cmds:
+      - go get buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go@$(buf registry sdk version --module=buf.build/tldiagramcom/diagram --plugin=buf.build/protocolbuffers/go)
+      - go get buf.build/gen/go/tldiagramcom/diagram/connectrpc/go@$(buf registry sdk version --module=buf.build/tldiagramcom/diagram --plugin=buf.build/connectrpc/go)
+      - go mod tidy
+
+  test:
+    desc: Run Go backend tests
+    cmds:
+      - go test ./...
+
+  build:
+    desc: Build the Go binary (includes frontend assets)
+    deps:
+      - frontend-build
+    cmds:
+      - go build -o {{.GOPATH}}/bin/tld ./cmd/tld
+
+  go:
+    desc: Build the Go binary without rebuilding frontend assets
+    cmds:
+      - go build -o {{.GOPATH}}/bin/tld ./cmd/tld
+
+  run:
+    desc: Build frontend and run the server
+    deps:
+      - frontend-build
+    cmds:
+      - go run ./cmd/tld serve
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -f tld
