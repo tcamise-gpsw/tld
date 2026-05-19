@@ -80,7 +80,7 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 			if name := strings.TrimSpace(d.Name); name != "" && !strings.EqualFold(name, strings.TrimSpace(element.Name)) {
 				element.ViewName = name
 			}
-			if label := exportedDiagramLabel(d, element.Name); element.ViewLabel == "" && label != "" {
+			if label := exportedDiagramLabel(d); element.ViewLabel == "" && label != "" {
 				element.ViewLabel = label
 			}
 			newWS.Meta.Views[ownerRef] = &workspace.ResourceMetadata{
@@ -103,9 +103,11 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 			parentRef = "root"
 		}
 		newWS.Elements[elementRef].Placements = append(newWS.Elements[elementRef].Placements, workspace.ViewPlacement{
-			ParentRef: parentRef,
-			PositionX: p.PositionX,
-			PositionY: p.PositionY,
+			ParentRef:    parentRef,
+			PositionX:    p.PositionX,
+			PositionY:    p.PositionY,
+			PositionXSet: true,
+			PositionYSet: true,
 		})
 	}
 
@@ -169,15 +171,8 @@ func CountViews(ws *workspace.Workspace) int {
 	return count
 }
 
-func exportedDiagramLabel(diagram *diagv1.View, elementName string) string {
-	if label := strings.TrimSpace(diagram.GetLevelLabel()); label != "" {
-		return label
-	}
-	name := strings.TrimSpace(diagram.Name)
-	if name != "" && !strings.EqualFold(name, strings.TrimSpace(elementName)) {
-		return name
-	}
-	return ""
+func exportedDiagramLabel(diagram *diagv1.View) string {
+	return strings.TrimSpace(diagram.GetLevelLabel())
 }
 
 func cloneStrings(values []string) []string {
@@ -264,8 +259,12 @@ func diagramMatchesOwnedElement(diagram *diagv1.View, element *workspace.Element
 	if element == nil {
 		return false
 	}
+	label := exportedDiagramLabel(diagram)
+	if strings.TrimSpace(element.ViewLabel) == "" {
+		return label == ""
+	}
 	return strings.EqualFold(
-		strings.TrimSpace(exportedDiagramLabel(diagram, element.Name)),
+		label,
 		strings.TrimSpace(element.ViewLabel),
 	)
 }

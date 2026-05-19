@@ -135,10 +135,10 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 				parentRef = syntheticRootViewRef
 			}
 			planPlacement := &diagv1.PlanViewPlacement{ParentRef: parentRef}
-			if placement.PositionX != 0 {
+			if placement.PositionXSet || placement.PositionX != 0 {
 				planPlacement.PositionX = &placement.PositionX
 			}
-			if placement.PositionY != 0 {
+			if placement.PositionYSet || placement.PositionY != 0 {
 				planPlacement.PositionY = &placement.PositionY
 			}
 			if placement.VisibilityDelta != 0 {
@@ -237,16 +237,22 @@ func technologyLinksForElement(technology, language string) []*diagv1.Technology
 func technologyLinksForLabel(label string) []*diagv1.TechnologyLink {
 	var links []*diagv1.TechnologyLink
 	seen := map[string]struct{}{}
+	hasPrimary := false
 	for _, part := range technologyLabelParts(label) {
 		slug, displayLabel := technologyCatalogMatch(part)
 		if slug == "" {
+			links = append(links, customTechnologyLink(part))
+			if len(links) == 3 {
+				break
+			}
 			continue
 		}
 		if _, ok := seen[slug]; ok {
 			continue
 		}
 		seen[slug] = struct{}{}
-		links = append(links, catalogTechnologyLink(slug, displayLabel, len(links) == 0))
+		links = append(links, catalogTechnologyLink(slug, displayLabel, !hasPrimary))
+		hasPrimary = true
 		if len(links) == 3 {
 			break
 		}
@@ -316,6 +322,13 @@ func catalogTechnologyLink(slug, label string, primary bool) *diagv1.TechnologyL
 		Slug:          &slug,
 		Label:         label,
 		IsPrimaryIcon: primary,
+	}
+}
+
+func customTechnologyLink(label string) *diagv1.TechnologyLink {
+	return &diagv1.TechnologyLink{
+		Type:  "custom",
+		Label: label,
 	}
 }
 
