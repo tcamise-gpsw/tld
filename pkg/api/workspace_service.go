@@ -983,13 +983,29 @@ func (s *WorkspaceService) UpdateConnector(
 		targetID = tid
 	}
 
+	label := existing.Label
+	if m.Label != nil {
+		label = m.Label
+	}
+	description := existing.Description
+	if m.Description != nil {
+		description = m.Description
+	}
+	relationship := existing.Relationship
+	if m.Relationship != nil {
+		relationship = m.Relationship
+	}
+	url := existing.Url
+	if m.Url != nil {
+		url = m.Url
+	}
 	sourceHandle := existing.SourceHandle
-	if m.GetSourceHandle() != "" {
-		sourceHandle = OptStr(m.GetSourceHandle())
+	if m.SourceHandle != nil {
+		sourceHandle = m.SourceHandle
 	}
 	targetHandle := existing.TargetHandle
-	if m.GetTargetHandle() != "" {
-		targetHandle = OptStr(m.GetTargetHandle())
+	if m.TargetHandle != nil {
+		targetHandle = m.TargetHandle
 	}
 
 	direction := m.GetDirection()
@@ -1009,9 +1025,9 @@ func (s *WorkspaceService) UpdateConnector(
 
 	c, err := s.Store.UpdateConnector(ctx, connectorID, workspaceID, ConnectorInput{
 		ViewID: existing.ViewId, SourceID: sourceID, TargetID: targetID,
-		Label: OptStr(m.GetLabel()), Description: OptStr(m.GetDescription()),
-		Relationship: OptStr(m.GetRelationship()), Direction: direction, Style: style,
-		URL: OptStr(m.GetUrl()), SourceHandle: sourceHandle, TargetHandle: targetHandle,
+		Label: label, Description: description,
+		Relationship: relationship, Direction: direction, Style: style,
+		URL: url, SourceHandle: sourceHandle, TargetHandle: targetHandle,
 	})
 	if err != nil {
 		return nil, storeErr("update connector", err)

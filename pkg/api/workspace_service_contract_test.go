@@ -343,6 +343,42 @@ func TestWorkspaceService_UpdateConnectorCanRestoreAllUndoableFields(t *testing.
 	}
 }
 
+func TestWorkspaceService_UpdateConnectorCanClearLabel(t *testing.T) {
+	existing := &diagv1.Connector{
+		Id: 7, ViewId: 3, SourceElementId: 4, TargetElementId: 5,
+		Label: new("reads"), Direction: "forward", Style: "bezier",
+	}
+	store := &contractStore{
+		getConnector: func(context.Context, int32, uuid.UUID) (*diagv1.Connector, error) {
+			return existing, nil
+		},
+		updateConnector: func(_ context.Context, id int32, _ uuid.UUID, input ConnectorInput) (*diagv1.Connector, error) {
+			if id != 7 {
+				t.Fatalf("connector id = %d, want 7", id)
+			}
+			if input.Label == nil || *input.Label != "" {
+				t.Fatalf("connector label = %v, want explicit empty string", input.Label)
+			}
+			return &diagv1.Connector{
+				Id: id, ViewId: input.ViewID, SourceElementId: input.SourceID, TargetElementId: input.TargetID,
+				Label: input.Label, Direction: input.Direction, Style: input.Style,
+			}, nil
+		},
+	}
+	service := &WorkspaceService{Store: store, Hooks: &recordingHooks{}}
+
+	resp, err := service.UpdateConnector(context.Background(), connect.NewRequest(&diagv1.UpdateConnectorRequest{
+		ConnectorId: 7,
+		Label:       new(""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.GetConnector().GetLabel() != "" {
+		t.Fatalf("connector response label = %q, want empty", resp.Msg.GetConnector().GetLabel())
+	}
+}
+
 func TestWorkspaceService_UpdateConnectorNormalizesLegacyStoredStyle(t *testing.T) {
 	existing := &diagv1.Connector{
 		Id: 7, ViewId: 3, SourceElementId: 4, TargetElementId: 5,
