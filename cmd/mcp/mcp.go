@@ -123,6 +123,9 @@ func registerTools(server *mcpsdk.Server, cmd *cobra.Command, wdir *string, data
 		ref := a.Ref
 		if ref == "" {
 			ref = workspace.Slugify(a.Name)
+			if ref == "" {
+				return errResult(fmt.Errorf("could not generate a valid reference from name %q. please provide an explicit reference with the 'ref' argument (e.g. 'my-element')", a.Name))
+			}
 		}
 		kind := a.Kind
 		if kind == "" {

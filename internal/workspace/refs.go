@@ -15,16 +15,16 @@ var refPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 func ValidateRef(ref string, allowRoot bool) error {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return fmt.Errorf("ref is required")
+		return fmt.Errorf("reference is required and cannot be empty")
 	}
 	if ref == RootRef {
 		if allowRoot {
 			return nil
 		}
-		return fmt.Errorf("%q is reserved for the synthetic root view", RootRef)
+		return fmt.Errorf("%q is a reserved reference for the root view", RootRef)
 	}
 	if !refPattern.MatchString(ref) {
-		return fmt.Errorf("invalid ref %q: use lowercase letters, numbers, hyphens, underscores, or dots", ref)
+		return fmt.Errorf("invalid reference %q: must start with a letter or number and contain only lowercase letters, numbers, hyphens, underscores, or dots", ref)
 	}
 	return nil
 }

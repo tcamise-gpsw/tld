@@ -1,6 +1,7 @@
 package cmdutil
 
 import (
+	"fmt"
 	"strings"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
@@ -38,6 +39,9 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 		ref, ok := existingElementRefs[e.Id]
 		if !ok {
 			ref = workspace.Slugify(e.Name)
+			if ref == "" {
+				ref = fmt.Sprintf("element-%d", e.Id)
+			}
 		}
 		objectIDToRef[e.Id] = ref
 		kind := e.GetKind()
