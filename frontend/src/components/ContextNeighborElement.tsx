@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Handle, Position } from 'reactflow'
 import {
   Badge,
@@ -38,7 +38,8 @@ interface ContextNeighborData {
   commonAncestorViewName: string | null
   connectorCount: number
   onNavigateToView: (viewId: number) => void
-  onSelectDetails?: () => void
+  onSelectElement?: () => void
+  onOpenRelationshipDetails?: () => void
   isCanvasMoving?: boolean
   isGroupAnchor?: boolean
   groupChildCount?: number
@@ -53,10 +54,37 @@ interface Props {
 
 function ContextNeighborNode({ data }: Props) {
   const [isHovered, setIsHovered] = useState(false)
+  const hoverCloseTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (data.isCanvasMoving) setIsHovered(false)
   }, [data.isCanvasMoving])
+
+  useEffect(() => () => {
+    if (hoverCloseTimeoutRef.current !== null) {
+      window.clearTimeout(hoverCloseTimeoutRef.current)
+    }
+  }, [])
+
+  const clearHoverCloseTimeout = () => {
+    if (hoverCloseTimeoutRef.current !== null) {
+      window.clearTimeout(hoverCloseTimeoutRef.current)
+      hoverCloseTimeoutRef.current = null
+    }
+  }
+
+  const openPopover = () => {
+    clearHoverCloseTimeout()
+    setIsHovered(true)
+  }
+
+  const schedulePopoverClose = () => {
+    clearHoverCloseTimeout()
+    hoverCloseTimeoutRef.current = window.setTimeout(() => {
+      setIsHovered(false)
+      hoverCloseTimeoutRef.current = null
+    }, 180)
+  }
 
   const color = TYPE_COLORS[data.kind ?? ''] ?? 'gray'
 
@@ -135,13 +163,13 @@ function ContextNeighborNode({ data }: Props) {
               <ElementContainer
                 minW="180px"
                 maxW="230px"
-                cursor={data.onSelectDetails || primaryOwnerViewId ? 'pointer' : 'default'}
+                cursor={data.onSelectElement || primaryOwnerViewId ? 'pointer' : 'default'}
                 pointerEvents="auto"
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
+                onMouseEnter={openPopover}
+                onMouseLeave={schedulePopoverClose}
                 onClick={() => {
-                  if (data.onSelectDetails) {
-                    data.onSelectDetails()
+                  if (data.onSelectElement) {
+                    data.onSelectElement()
                     return
                   }
                   if (primaryOwnerViewId) data.onNavigateToView(primaryOwnerViewId)
@@ -173,6 +201,8 @@ function ContextNeighborNode({ data }: Props) {
             width="300px"
             _focus={{ boxShadow: 'none' }}
             pointerEvents="auto"
+            onMouseEnter={openPopover}
+            onMouseLeave={schedulePopoverClose}
           >
             <PopoverArrow bg="gray.900" />
             <PopoverHeader borderBottom="1px solid" borderColor="whiteAlpha.200" px={4} py={3}>
@@ -233,6 +263,19 @@ function ContextNeighborNode({ data }: Props) {
                       <Text fontSize="xs" isTruncated>{data.ownerViewNames[index] ?? `View ${viewId}`}</Text>
                     </Button>
                   ))}
+                  {data.onOpenRelationshipDetails && (
+                    <Button
+                      size="xs"
+                      justifyContent="space-between"
+                      variant="ghost"
+                      color="gray.200"
+                      _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                      rightIcon={<LinkIcon />}
+                      onClick={() => data.onOpenRelationshipDetails?.()}
+                    >
+                      <Text fontSize="xs">Show connectors</Text>
+                    </Button>
+                  )}
                 </VStack>
               </VStack>
             </PopoverBody>
