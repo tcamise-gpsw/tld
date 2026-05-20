@@ -49,6 +49,7 @@ interface Props {
   onCreateLayer: (name: string, tags: string[], color: string) => Promise<void>
   onUpdateLayer: (layer: ViewLayer) => Promise<void>
   onDeleteLayer: (id: number) => Promise<void>
+  noFocusLock?: boolean
 }
 
 function ViewExplorer({
@@ -73,6 +74,7 @@ function ViewExplorer({
   onCreateLayer,
   onUpdateLayer,
   onDeleteLayer,
+  noFocusLock,
 }: Props) {
   const { viewId } = useViewEditorContext()
   const [query, setQuery] = useState('')
@@ -206,7 +208,7 @@ function ViewExplorer({
         break
       }
       case 'Escape':
-        e.preventDefault(); setActiveFilter(null); break
+        e.preventDefault(); (e.target as HTMLInputElement).blur(); setActiveFilter(null); break
     }
   }
 
@@ -249,6 +251,7 @@ function ViewExplorer({
       width="300px"
       zIndex={1000}
       hasBackdrop={isMobile}
+      noFocusLock={noFocusLock}
     >
       <VStack ref={containerRef} align="stretch" spacing={0} h="full" overflow="hidden">
         {/* Panel header */}

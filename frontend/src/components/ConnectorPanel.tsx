@@ -77,6 +77,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
   onDemoteVisibility?: (id: number) => Promise<void> | void
   onResetVisibility?: (id: number) => Promise<void> | void
   hasBackdrop?: boolean
+  noFocusLock?: boolean
 }
 
 /**
@@ -85,7 +86,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: Connector Properties, Connector Details.
  */
-function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, connectorPanelAfterContentSlot }: ConnectorPanelProps) {
+function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, noFocusLock, connectorPanelAfterContentSlot }: ConnectorPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isReadOnly = !canEdit
   const autoSaveEdit = autoSave && !!connector && !isReadOnly
@@ -263,7 +264,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
 
   return (
     <>
-      <SlidingPanel data-testid="connector-panel" isOpen={isOpen} onClose={handleClose} panelKey="connector" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop} autoFocus={true}>
+      <SlidingPanel data-testid="connector-panel" isOpen={isOpen} onClose={handleClose} panelKey="connector" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop} noFocusLock={noFocusLock} autoFocus={true}>
         <PanelHeader title="Edit Connector" onClose={handleClose} />
 
         {/* Body */}

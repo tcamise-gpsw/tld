@@ -21,6 +21,7 @@ import {
   CloseButton,
   Flex,
   IconButton,
+  Input,
   Spinner,
   Text,
   Tooltip,
@@ -539,7 +540,8 @@ function ViewEditorInner({
     drawingMode, setDrawingMode, drawingVisible, setDrawingVisible,
     drawingPaths, setDrawingPaths: _setDrawingPaths, drawingTool, setDrawingTool,
     drawingColor, setDrawingColor, drawingWidth, setDrawingWidth,
-    setTextEditorState, drawingHistoryRef, drawingRedoStackRef,
+    textEditorState, setTextEditorState, commitDrawingText,
+    drawingHistoryRef, drawingRedoStackRef,
     handleUndo, handleRedo, onPathComplete, onPathDelete, onPathUpdate,
   } = drawing
 
@@ -1897,6 +1899,7 @@ function ViewEditorInner({
               onUpdateTags={handleUpdateTags}
               onCreateTag={handleCreateTag}
               suppressed={elementPanel.isOpen || connectorPanel.isOpen || viewDetails.isOpen}
+              noFocusLock={!!addingElementAt || !!textEditorState}
             />
 
             <EditorOverlays
@@ -1916,8 +1919,34 @@ function ViewEditorInner({
               setDrawingMode={setDrawingMode}
             />
 
-            {/* Inline text editor ... */}
-            {/* ... */}
+            {textEditorState && (
+              <Box
+                position="absolute"
+                left={textEditorState.canvasX}
+                top={textEditorState.canvasY}
+                transform="translate(-50%, -50%)"
+                zIndex={2000}
+              >
+                <Input
+                  autoFocus
+                  variant="unstyled"
+                  bg="var(--bg-panel)"
+                  border="2px solid"
+                  borderColor="var(--accent)"
+                  rounded="md"
+                  px={2}
+                  py={1}
+                  color={drawingColor}
+                  fontSize={`${Math.max(14, drawingWidth * 5)}px`}
+                  fontWeight="bold"
+                  onBlur={(e: React.FocusEvent<HTMLInputElement>) => commitDrawingText(e.target.value, textEditorState)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === 'Enter') commitDrawingText(e.currentTarget.value, textEditorState)
+                    if (e.key === 'Escape') setTextEditorState(null)
+                  }}
+                />
+              </Box>
+            )}
 
             <DrawingCanvas
               ref={drawingCanvasRef}
@@ -2058,6 +2087,7 @@ function ViewEditorInner({
           onTapAdd={canEdit ? handleTapAdd : undefined}
           onFindElement={handleFindElement}
           onTouchDrop={canEdit ? handleTouchDrop : undefined}
+          noFocusLock={!!addingElementAt || !!textEditorState}
         />
 
         <ElementPanel
@@ -2079,6 +2109,7 @@ function ViewEditorInner({
           parentLinks={selectedElement ? (parentLinksMap[selectedElement.id] || EMPTY_LINKS) : EMPTY_LINKS}
           hasBackdrop={isMobileLayout}
           availableTags={availableTags}
+          noFocusLock={!!addingElementAt || !!textEditorState}
           elementPanelAfterContentSlot={elementPanelAfterContentSlot}
         />
 
@@ -2094,6 +2125,7 @@ function ViewEditorInner({
           onDemoteVisibility={(id) => handleVisibilityOverride('connector', id, 'demote')}
           onResetVisibility={(id) => handleVisibilityOverride('connector', id, 'reset')}
           hasBackdrop={isMobileLayout}
+          noFocusLock={!!addingElementAt || !!textEditorState}
           connectorPanelAfterContentSlot={connectorPanelAfterContentSlot}
         />
         <ProxyConnectorPanel

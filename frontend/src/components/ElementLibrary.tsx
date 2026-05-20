@@ -42,6 +42,7 @@ interface Props {
   onTapAdd?: (obj: LibraryElement) => void
   onFindElement?: (id: number) => void
   onTouchDrop?: (obj: LibraryElement, clientX: number, clientY: number) => void
+  noFocusLock?: boolean
 }
 
 function mergeUniqueElements(existing: LibraryElement[], incoming: LibraryElement[]) {
@@ -96,6 +97,7 @@ function ElementLibrary({
   onTapAdd,
   onFindElement,
   onTouchDrop,
+  noFocusLock,
 }: Props) {
   const { canEdit } = useViewEditorContext()
   const [elements, setElements] = useState<LibraryElement[]>([])
@@ -354,7 +356,11 @@ function ElementLibrary({
                   if (isMobile) onClose()
                 } else if (target && existingElementIds.has(target.id) && onFindElement) {
                   onFindElement(target.id)
+                  if (isMobile) onClose()
                 }
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                ;(e.target as HTMLInputElement).blur()
               }
             }}
           />
@@ -567,7 +573,17 @@ function ElementLibrary({
   )
 
   return (
-    <SlidingPanel data-testid="element-library-panel" isOpen={isOpen} onClose={onClose} panelKey="elementlibrary" side="left" width="300px" hasBackdrop={false} zIndex={1000}>
+    <SlidingPanel
+      data-testid="element-library-panel"
+      isOpen={isOpen}
+      onClose={onClose}
+      panelKey="elementlibrary"
+      side="left"
+      width="300px"
+      hasBackdrop={false}
+      noFocusLock={noFocusLock}
+      zIndex={1000}
+    >
       <PanelHeader title="Element Library" onClose={onClose} hasCloseButton={isMobile} />
 
       <Box p={0} display="flex" flexDir="column" overflow="hidden" flex={1}>

@@ -17,6 +17,7 @@ interface Props {
   zIndex?: number
   children: ReactNode
   autoFocus?: boolean
+  noFocusLock?: boolean
   'data-testid'?: string
 }
 
@@ -33,6 +34,7 @@ export default function SlidingPanel({
   zIndex = 1000,
   children,
   autoFocus = false,
+  noFocusLock = false,
   'data-testid': dataTestId,
 }: Props) {
   // Use width if it's a fixed value, otherwise default to a safe offscreen distance
@@ -107,7 +109,7 @@ export default function SlidingPanel({
               rounded="xl"
               shadow="panel"
             >
-              <FocusLock isDisabled={!isOpen} autoFocus={autoFocus} restoreFocus>
+              <FocusLock isDisabled={!isOpen || noFocusLock} autoFocus={autoFocus} restoreFocus>
                 {children}
               </FocusLock>
             </Box>

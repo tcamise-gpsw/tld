@@ -223,6 +223,7 @@ export interface ElementPanelProps extends ElementPanelSlots {
   parentLinks?: ViewConnector[]
   hasBackdrop?: boolean
   availableTags?: string[]
+  noFocusLock?: boolean
 }
 
 /**
@@ -231,7 +232,27 @@ export interface ElementPanelProps extends ElementPanelSlots {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: Element Properties, Element Details.
  */
-function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDelete, onPermanentDelete, onMerge, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, orgId, links = [], parentLinks = [], hasBackdrop = true, availableTags = [], elementPanelAfterContentSlot }: ElementPanelProps) {
+function ElementPanel({
+  isOpen,
+  onClose,
+  element,
+  onSave,
+  autoSave = false,
+  onDelete,
+  onPermanentDelete,
+  onMerge,
+  visibilityOverrideDelta = 0,
+  onPromoteVisibility,
+  onDemoteVisibility,
+  onResetVisibility,
+  orgId,
+  links = [],
+  parentLinks = [],
+  hasBackdrop = true,
+  availableTags = [],
+  noFocusLock,
+  elementPanelAfterContentSlot,
+}: ElementPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isEdit = !!element
   const isReadOnly = !canEdit
@@ -689,7 +710,17 @@ function ElementPanel({ isOpen, onClose, element, onSave, autoSave = false, onDe
 
   return (
     <>
-      <SlidingPanel data-testid="element-panel" isOpen={isOpen} onClose={handleClose} panelKey="element" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop} autoFocus={true}>
+      <SlidingPanel
+        data-testid="element-panel"
+        isOpen={isOpen}
+        onClose={handleClose}
+        panelKey="element"
+        side={isMobile ? 'left' : 'right'}
+        width="300px"
+        hasBackdrop={hasBackdrop}
+        autoFocus={true}
+        noFocusLock={noFocusLock}
+      >
         <PanelHeader title={isEdit ? 'Edit Element' : 'New Element'} onClose={handleClose} />
 
         {/* Body */}
