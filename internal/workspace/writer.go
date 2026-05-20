@@ -33,6 +33,7 @@ var elementScalarFields = map[string]bool{
 	"file_path":     true,
 	"symbol":        true,
 	"has_view":      true,
+	"view_name":     true,
 	"view_label":    true,
 	"density_level": true,
 }
@@ -481,6 +482,8 @@ func mergeElementFields(ref string, existing, incoming *Element) (*Element, erro
 			if placement.ParentRef == newPlacement.ParentRef {
 				merged.Placements[index].PositionX = newPlacement.PositionX
 				merged.Placements[index].PositionY = newPlacement.PositionY
+				merged.Placements[index].PositionXSet = newPlacement.PositionXSet
+				merged.Placements[index].PositionYSet = newPlacement.PositionYSet
 				found = true
 				break
 			}

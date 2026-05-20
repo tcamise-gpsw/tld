@@ -1,53 +1,48 @@
-.PHONY: frontend-deps frontend-build lint-be lint-fe build run clean dev dev-stop test-backend build-go setup-hooks make-be make-fe
+TASK = go tool task
+
+.PHONY: setup-hooks frontend-deps frontend-build lint-be lint-fe be fe dev dev-stop proto test build go run clean
 
 setup-hooks:
-	chmod +x scripts/pre-commit.sh
-	cp scripts/pre-commit.sh .git/hooks/pre-commit
-	chmod +x .git/hooks/pre-commit
-	@echo "Pre-commit hooks installed!"
+	$(TASK) setup-hooks
 
 frontend-deps:
-	if [ ! -d frontend/node_modules ]; then cd frontend && npm install; fi
+	$(TASK) frontend-deps
 
-frontend-build: frontend-deps
-	cd frontend && VITE_APP_BASE=/ VITE_ROUTER_BASENAME=/ npm run build:app
+frontend-build:
+	$(TASK) frontend-build
 
 lint-be:
-	golangci-lint run ./...
+	$(TASK) lint-be
 
-lint-fe: frontend-deps
-	cd frontend && npm run lint
+lint-fe:
+	$(TASK) lint-fe
 
 be:
-	TLD_DATA_DIR=data/dev TLD_CONFIG_DIR=data/dev/config DEV=true air
+	$(TASK) be
 
-fe: frontend-deps
-	cd frontend && npm run dev
+fe:
+	$(TASK) fe
 
 dev:
-	@echo "Starting development stack..."
-	@$(MAKE) -j 2 be fe
+	$(TASK) dev
 
 dev-stop:
-	@echo "Stopping development backend..."
-	-pkill -x tlddebug
+	$(TASK) dev-stop
 
-proto: ## Update go.mod to latest BSR-published proto versions (run after buf push in proto/)
-	go get buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go@$(shell buf registry sdk version --module=buf.build/tldiagramcom/diagram --plugin=buf.build/protocolbuffers/go)
-	go get buf.build/gen/go/tldiagramcom/diagram/connectrpc/go@$(shell buf registry sdk version --module=buf.build/tldiagramcom/diagram --plugin=buf.build/connectrpc/go)
-	go mod tidy
+proto:
+	$(TASK) proto
 
-test: test-backend
-	go test ./...
+test:
+	$(TASK) test
 
-build: frontend-build
-	go build -o $(shell go env GOPATH)/bin/tld ./cmd/tld
+build:
+	$(TASK) build
 
-go: build-go
-	go build -o $(shell go env GOPATH)/bin/tld ./cmd/tld
+go:
+	$(TASK) go
 
-run: frontend-build
-	go run ./cmd/tld serve
+run:
+	$(TASK) run
 
 clean:
-	rm -f tld
+	$(TASK) clean

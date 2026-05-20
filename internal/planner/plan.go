@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
+	"github.com/mertcikla/tld/v2/internal/tech"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -19,6 +21,7 @@ type Plan struct {
 	Request      *diagv1.ApplyPlanRequest
 	DiagramOrder []string // sorted refs
 	Model        string
+	ViewNames    map[string]string
 }
 
 // Build resolves workspace refs into an ApplyPlanRequest, ordering diagrams
@@ -68,6 +71,7 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 		OrgId:  ws.Config.WorkspaceID,
 		DryRun: new(bool),
 	}
+	viewNames := make(map[string]string)
 
 	for _, ref := range elementRefs {
 		element := elements[ref]
@@ -93,6 +97,7 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 		if element.Technology != "" {
 			planElement.Technology = &element.Technology
 		}
+		planElement.TechnologyLinks = technologyLinksForElement(element.Technology, element.Language)
 		if element.URL != "" {
 			planElement.Url = &element.URL
 		}
@@ -117,6 +122,9 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 		if element.ViewLabel != "" {
 			planElement.ViewLabel = &element.ViewLabel
 		}
+		if element.ViewName != "" {
+			viewNames[ref] = element.ViewName
+		}
 		if element.DensityLevel != 0 {
 			level := int32(element.DensityLevel)
 			planElement.ViewDensityLevel = &level
@@ -127,10 +135,10 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 				parentRef = syntheticRootViewRef
 			}
 			planPlacement := &diagv1.PlanViewPlacement{ParentRef: parentRef}
-			if placement.PositionX != 0 {
+			if placement.PositionXSet || placement.PositionX != 0 {
 				planPlacement.PositionX = &placement.PositionX
 			}
-			if placement.PositionY != 0 {
+			if placement.PositionYSet || placement.PositionY != 0 {
 				planPlacement.PositionY = &placement.PositionY
 			}
 			if placement.VisibilityDelta != 0 {
@@ -215,7 +223,113 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 		req.Connectors = append(req.Connectors, planConnector)
 	}
 
-	return &Plan{Request: req, Model: "workspace"}, nil
+	return &Plan{Request: req, Model: "workspace", ViewNames: viewNames}, nil
+}
+
+func technologyLinksForElement(technology, language string) []*diagv1.TechnologyLink {
+	links := technologyLinksForLabel(technology)
+	if len(links) > 0 {
+		return links
+	}
+	return technologyLinksForLanguage(language)
+}
+
+func technologyLinksForLabel(label string) []*diagv1.TechnologyLink {
+	var links []*diagv1.TechnologyLink
+	seen := map[string]struct{}{}
+	hasPrimary := false
+	for _, part := range technologyLabelParts(label) {
+		slug, displayLabel := technologyCatalogMatch(part)
+		if slug == "" {
+			links = append(links, customTechnologyLink(part))
+			if len(links) == 3 {
+				break
+			}
+			continue
+		}
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		links = append(links, catalogTechnologyLink(slug, displayLabel, !hasPrimary))
+		hasPrimary = true
+		if len(links) == 3 {
+			break
+		}
+	}
+	return links
+}
+
+func technologyLinksForLanguage(language string) []*diagv1.TechnologyLink {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "go":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("golang", "Go", true)}
+	case "typescript":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("typescript", "TypeScript", true)}
+	case "javascript":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("javascript", "JavaScript", true)}
+	case "python":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("python", "Python", true)}
+	case "java":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("java", "Java", true)}
+	case "cpp":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("c-plusplus", "C++", true)}
+	case "c":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("c", "C", true)}
+	case "json":
+		return []*diagv1.TechnologyLink{catalogTechnologyLink("json-javascript-object-notation", "JSON", true)}
+	default:
+		return nil
+	}
+}
+
+func technologyLabelParts(label string) []string {
+	parts := strings.FieldsFunc(label, func(r rune) bool {
+		return r == ',' || r == '/' || r == ';' || r == '|'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 && strings.TrimSpace(label) != "" {
+		return []string{strings.TrimSpace(label)}
+	}
+	return out
+}
+
+func technologyCatalogMatch(label string) (string, string) {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "architecture":
+		return "architecture", "Architecture"
+	case "structural":
+		return "structural", "Structural"
+	case "container":
+		return "docker", "Container"
+	default:
+		slug, name, ok := tech.LookupCatalogFuzzy(label)
+		if !ok {
+			return "", ""
+		}
+		return slug, name
+	}
+}
+
+func catalogTechnologyLink(slug, label string, primary bool) *diagv1.TechnologyLink {
+	return &diagv1.TechnologyLink{
+		Type:          "catalog",
+		Slug:          &slug,
+		Label:         label,
+		IsPrimaryIcon: primary,
+	}
+}
+
+func customTechnologyLink(label string) *diagv1.TechnologyLink {
+	return &diagv1.TechnologyLink{
+		Type:  "custom",
+		Label: label,
+	}
 }
 
 func canonicalViewRefs(elements map[string]*workspace.Element, connectors map[string]*workspace.Connector) map[string]struct{} {
@@ -272,15 +386,15 @@ func resolveRepositoryRootElement(ws *workspace.Workspace) (string, *workspace.E
 		if !ok || element == nil {
 			return "", nil, fmt.Errorf("repository %q root %q not found in elements", ws.ActiveRepo, repository.Root)
 		}
-		if element.Kind != "repository" {
-			return "", nil, fmt.Errorf("repository %q root %q must be kind repository, got %q", ws.ActiveRepo, repository.Root, element.Kind)
-		}
 		return repository.Root, nil, nil
 	}
 
 	candidates := repositoryRootCandidates(ws.Elements, ws.ActiveRepo)
 	switch len(candidates) {
 	case 0:
+		if hasRootLevelElement(ws.Elements, ws.ActiveRepo) {
+			return "", nil, nil
+		}
 		ref := uniqueRepositoryRootRef(ws.ActiveRepo, ws.Elements)
 		return ref, &workspace.Element{
 			Name:      ws.ActiveRepo,
@@ -295,7 +409,7 @@ func resolveRepositoryRootElement(ws *workspace.Workspace) (string, *workspace.E
 	case 1:
 		return candidates[0], nil, nil
 	default:
-		return "", nil, fmt.Errorf("repository %q has multiple root candidates %v; set repositories[%q].root explicitly", ws.ActiveRepo, candidates, ws.ActiveRepo)
+		return "", nil, nil
 	}
 }
 
@@ -311,22 +425,40 @@ func repositoryRootCandidates(elements map[string]*workspace.Element, repoName s
 		if element.Owner != "" && element.Owner != repoName {
 			continue
 		}
-		if len(element.Placements) > 0 {
-			rooted := false
-			for _, placement := range element.Placements {
-				if placement.ParentRef == "root" || placement.ParentRef == syntheticRootViewRef || placement.ParentRef == "" {
-					rooted = true
-					break
-				}
-			}
-			if !rooted {
-				continue
-			}
+		if !isRootLevelElement(element) {
+			continue
 		}
 		candidates = append(candidates, ref)
 	}
 	sort.Strings(candidates)
 	return candidates
+}
+
+func hasRootLevelElement(elements map[string]*workspace.Element, repoName string) bool {
+	for _, element := range elements {
+		if element == nil {
+			continue
+		}
+		if element.Owner != "" && element.Owner != repoName {
+			continue
+		}
+		if isRootLevelElement(element) {
+			return true
+		}
+	}
+	return false
+}
+
+func isRootLevelElement(element *workspace.Element) bool {
+	if len(element.Placements) == 0 {
+		return true
+	}
+	for _, placement := range element.Placements {
+		if placement.ParentRef == "" || placement.ParentRef == syntheticRootViewRef {
+			return true
+		}
+	}
+	return false
 }
 
 func uniqueRepositoryRootRef(repoName string, elements map[string]*workspace.Element) string {

@@ -6,6 +6,7 @@ import (
 
 	hashidlib "github.com/mertcikla/tld/v2/internal/hashids"
 	"github.com/mertcikla/tld/v2/internal/ignore"
+	"gopkg.in/yaml.v3"
 )
 
 // WorkspaceConfig is parsed from the workspace-local .tld.yaml.
@@ -35,7 +36,52 @@ type ViewPlacement struct {
 	ParentRef       string  `yaml:"parent"`
 	PositionX       float64 `yaml:"position_x,omitempty"`
 	PositionY       float64 `yaml:"position_y,omitempty"`
+	PositionXSet    bool    `yaml:"-"`
+	PositionYSet    bool    `yaml:"-"`
 	VisibilityDelta int     `yaml:"visibility_delta,omitempty"`
+}
+
+func (p *ViewPlacement) UnmarshalYAML(node *yaml.Node) error {
+	var raw struct {
+		ParentRef       string   `yaml:"parent"`
+		PositionX       *float64 `yaml:"position_x"`
+		PositionY       *float64 `yaml:"position_y"`
+		VisibilityDelta int      `yaml:"visibility_delta"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	p.ParentRef = raw.ParentRef
+	p.VisibilityDelta = raw.VisibilityDelta
+	if raw.PositionX != nil {
+		p.PositionX = *raw.PositionX
+		p.PositionXSet = true
+	}
+	if raw.PositionY != nil {
+		p.PositionY = *raw.PositionY
+		p.PositionYSet = true
+	}
+	return nil
+}
+
+func (p ViewPlacement) MarshalYAML() (any, error) {
+	var raw struct {
+		ParentRef       string   `yaml:"parent"`
+		PositionX       *float64 `yaml:"position_x,omitempty"`
+		PositionY       *float64 `yaml:"position_y,omitempty"`
+		VisibilityDelta int      `yaml:"visibility_delta,omitempty"`
+	}
+	raw.ParentRef = p.ParentRef
+	raw.VisibilityDelta = p.VisibilityDelta
+	if p.PositionXSet || p.PositionX != 0 {
+		x := p.PositionX
+		raw.PositionX = &x
+	}
+	if p.PositionYSet || p.PositionY != 0 {
+		y := p.PositionY
+		raw.PositionY = &y
+	}
+	return raw, nil
 }
 
 // Element is the primary workspace resource.
@@ -55,6 +101,7 @@ type Element struct {
 	Symbol       string          `yaml:"symbol,omitempty"` // Named code symbol within FilePath (e.g. "MyFunc")
 	Tags         []string        `yaml:"tags,omitempty"`
 	HasView      bool            `yaml:"has_view"`
+	ViewName     string          `yaml:"view_name,omitempty"`
 	ViewLabel    string          `yaml:"view_label,omitempty"`
 	DensityLevel int             `yaml:"density_level,omitempty"`
 	Placements   []ViewPlacement `yaml:"placements,omitempty"`

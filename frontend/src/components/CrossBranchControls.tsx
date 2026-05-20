@@ -51,7 +51,7 @@ export default function CrossBranchControls({
   onEnabledChange,
   onBudgetChange,
   onPriorityChange,
-  label = 'Cross-Branch',
+  label = '',
 }: Props) {
   const connectorBudget = settings.connectorBudget
   const { isOpen, onClose, onToggle } = useDisclosure()
@@ -112,9 +112,9 @@ export default function CrossBranchControls({
                     <FocusIcon />
                   </Box>
                   <Box minW={0}>
-                    <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Cross-branch context</Text>
+                    <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Off-view-branch context</Text>
                     <Text fontSize="10px" color="whiteAlpha.600" noOfLines={1}>
-                      {settings.enabled ? 'Show relationships across branches' : 'Branch context is hidden'}
+                      {settings.enabled ? 'Show relationships across views' : 'View context is hidden'}
                     </Text>
                   </Box>
                 </HStack>
@@ -124,7 +124,7 @@ export default function CrossBranchControls({
                   onChange={(event) => onEnabledChange(event.target.checked)}
                   colorScheme="teal"
                   flexShrink={0}
-                  aria-label="Toggle cross-branch context"
+                  aria-label="Toggle cross-view context"
                 />
               </HStack>
 

@@ -18,6 +18,7 @@ import { toPng, toSvg } from 'html-to-image'
 import {
   Box,
   Button,
+  CloseButton,
   Flex,
   IconButton,
   Spinner,
@@ -67,7 +68,13 @@ import ContextBoundaryElement from '../../components/ContextBoundaryElement'
 import ContextStraightConnector from '../../components/ContextStraightConnector'
 import ProxyConnectorEdge from '../../components/ProxyConnectorEdge'
 import ProxyConnectorPanel from '../../components/ProxyConnectorPanel'
-import { useViewContextNeighbours } from './hooks/useViewContextNeighbours'
+import {
+  clampContextNodeAxisPosition,
+  type ContextNodePositionOverride,
+  type ContextSide,
+  useViewContextNeighbours,
+} from './hooks/useViewContextNeighbours'
+import { canonicalNodePairKey } from './pairKey'
 import type { ParsedImport } from '../../pkg/importer/mermaid'
 import { vscodeBridge } from '../../lib/vscodeBridge'
 import type { ExtensionToWebviewMessage } from '../../types/vscode-messages'
@@ -77,6 +84,8 @@ import { useViewData } from './hooks/useViewData'
 import { useDrawingEngine } from './hooks/useDrawingEngine'
 import { applyNodeChangesWithStructuralSharing, useCanvasInteractions } from './hooks/useCanvasInteractions'
 import { useViewEditHistory } from './hooks/useViewEditHistory'
+import { useOverlapDetection } from './hooks/useOverlapDetection'
+import { removeCollisions } from '../../utils/layout'
 import { connectorToConnector, findClosestHandles, sanitizeExportFilename, triggerDownload } from './utils'
 import { pickUnusedColor } from '../../components/ViewExplorer/utils'
 
@@ -141,6 +150,47 @@ function connectorUpdatePayload(connector: Connector) {
   }
 }
 
+function getContextBoundaryBounds(nodes: RFNode[]) {
+  const boundaryNode = nodes.find((node) => node.type === 'ContextBoundaryElement')
+  if (!boundaryNode) return null
+
+  const boundaryData = boundaryNode.data as { width?: number; height?: number } | undefined
+  const width = boundaryData?.width ?? boundaryNode.width
+  const height = boundaryData?.height ?? boundaryNode.height
+  if (width == null || height == null) return null
+
+  return {
+    left: boundaryNode.position.x,
+    right: boundaryNode.position.x + width,
+    top: boundaryNode.position.y,
+    bottom: boundaryNode.position.y + height,
+  }
+}
+
+function clampContextNodeChangePosition(
+  node: RFNode,
+  position: { x: number; y: number },
+  bounds: NonNullable<ReturnType<typeof getContextBoundaryBounds>>,
+  fixedPosition: { x: number; y: number } = node.position,
+) {
+  const side = (node.data as { side?: ContextSide } | undefined)?.side
+  if (!side) return { position, override: null }
+
+  if (side === 'left' || side === 'right') {
+    const axisPosition = clampContextNodeAxisPosition(side, position.y, bounds)
+    return {
+      position: { x: fixedPosition.x, y: axisPosition },
+      override: { side, axisPosition } as ContextNodePositionOverride,
+    }
+  }
+
+  const axisPosition = clampContextNodeAxisPosition(side, position.x, bounds)
+  return {
+    position: { x: axisPosition, y: fixedPosition.y },
+    override: { side, axisPosition } as ContextNodePositionOverride,
+  }
+}
+
 function connectorSnapshotsEqual(left: Connector, right: Connector) {
   return JSON.stringify(connectorUpdatePayload(left)) === JSON.stringify(connectorUpdatePayload(right))
 }
@@ -199,12 +249,6 @@ function areTranslateExtentsEqual(
     left[1][1] === right[1][1]
 }
 
-function canonicalNodePairKey(leftId: string, rightId: string) {
-  return leftId <= rightId ? `${leftId}::${rightId}` : `${rightId}::${leftId}`
-}
-
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ViewEditorPermissions {
@@ -262,6 +306,7 @@ function ViewEditorInner({
   const codePreview = useDisclosure()
   const mergeDialog = useDisclosure()
   const [mergeSourceElement, setMergeSourceElement] = useState<WorkspaceElement | null>(null)
+  const [adjustingLayout, setAdjustingLayout] = useState(false)
 
   useEffect(() => {
     if (viewId == null) {
@@ -572,6 +617,8 @@ function ViewEditorInner({
     handleElementDeleted, handleElementPermanentlyDeleted, handleElementSaved: applyElementSaved,
   } = data
   refreshElementsRef.current = refreshElements
+
+  const { hasSignificantOverlaps, dismiss: dismissOverlapSuggestion } = useOverlapDetection(rfNodes, viewId)
 
   const overrideDeltaFor = useCallback((resourceType: VisibilityOverride['resource_type'], resourceId?: number | null) => {
     if (resourceId == null) return 0
@@ -947,11 +994,13 @@ function ViewEditorInner({
     }
   }, [redoViewEdit, toast])
 
+  const interactionNodesRef = useRef<RFNode[]>([])
+
   // ── Canvas interactions ────────────────────────────────────────────────────
   const canvas = useCanvasInteractions({
     viewId, canEdit,
     drawingMode, isMobileLayout,
-    rfNodesRef, rfEdgesRef, viewElementsRef, viewIdRef,
+    rfNodesRef, interactionNodesRef, rfEdgesRef, viewElementsRef, viewIdRef,
     incomingLinksRef,
     treeDataRef,
     navigateRef,
@@ -969,8 +1018,9 @@ function ViewEditorInner({
       const cid = viewIdRef.current
       if (sourceId === null || cid === null) return
       interactionSourceIdRef.current = null
-      const sourceNode = rfNodesRef.current.find((n) => n.id === String(sourceId))
-      const targetNode = rfNodesRef.current.find((n) => n.id === String(targetElementId))
+      const interactionNodes = interactionNodesRef.current.length > 0 ? interactionNodesRef.current : rfNodesRef.current
+      const sourceNode = interactionNodes.find((n) => n.id === String(sourceId))
+      const targetNode = interactionNodes.find((n) => n.id === String(targetElementId))
       let finalSourceHandle = 'right'; let finalTargetHandle = 'left'
       if (sourceNode && targetNode) {
         const h = findClosestHandles(sourceNode, targetNode)
@@ -1030,6 +1080,7 @@ function ViewEditorInner({
   const viewName = view?.name ?? null
 
   const [expandedAncestorGroups, setExpandedAncestorGroups] = useState<Set<string>>(new Set())
+  const [contextNodePositionOverrides, setContextNodePositionOverrides] = useState<Record<string, ContextNodePositionOverride>>({})
   const stableOnToggleAncestorGroup = useCallback((anchorId: string) => {
     setExpandedAncestorGroups((prev) => {
       const next = new Set(prev)
@@ -1046,6 +1097,15 @@ function ViewEditorInner({
     viewElements,
     rfNodes,
     stableOnNavigateToView: canvas.stableOnNavigateToView,
+    contextNodePositionOverrides,
+    onSelectContextElement: useCallback((element: WorkspaceElement) => {
+      setSelectedEdge(null)
+      setSelectedProxyConnectorDetails(null)
+      closeConnectorPanelRef.current()
+      closeProxyConnectorPanelRef.current()
+      setSelectedElement(element)
+      openElementPanelRef.current()
+    }, []),
     onSelectProxyDetails: useCallback((details: ProxyConnectorDetails) => {
       setSelectedElement(null)
       setSelectedEdge(null)
@@ -1057,6 +1117,10 @@ function ViewEditorInner({
     expandedAncestorGroups,
     onToggleAncestorGroup: stableOnToggleAncestorGroup,
   })
+
+  useEffect(() => {
+    setContextNodePositionOverrides({})
+  }, [viewId])
 
   const rfEdgesWithProxyBadges = useMemo(() => {
     if (Object.keys(hiddenProxyCountsByPair).length === 0) return rfEdges
@@ -1095,9 +1159,26 @@ function ViewEditorInner({
   // When computed positions change (e.g. main node drag), preserve the previously
   // measured width/height so nodes don't flash hidden while being re-measured.
   const [liveContextNodes, setLiveContextNodes] = useState<RFNode[]>([])
+  const liveContextNodesRef = useRef<RFNode[]>([])
   const contextNodeIdsRef = useRef<Set<string>>(new Set())
+  liveContextNodesRef.current = liveContextNodes
+  interactionNodesRef.current = liveContextNodes.length === 0
+    ? rfNodes
+    : rfNodes.length === 0
+      ? liveContextNodes
+      : [...liveContextNodes, ...rfNodes]
   useEffect(() => {
-    contextNodeIdsRef.current = new Set(contextNodes.map((n) => n.id))
+    const nextIds = new Set(contextNodes.map((n) => n.id))
+    contextNodeIdsRef.current = nextIds
+    setContextNodePositionOverrides((prev) => {
+      let changed = false
+      const next: Record<string, ContextNodePositionOverride> = {}
+      for (const [id, override] of Object.entries(prev)) {
+        if (nextIds.has(id)) next[id] = override
+        else changed = true
+      }
+      return changed ? next : prev
+    })
     setLiveContextNodes((prev) => {
       const prevById = new Map(prev.map((p) => [p.id, p]))
       return contextNodes.map((n) => {
@@ -1216,7 +1297,43 @@ function ViewEditorInner({
     const ctxChanges = changes.filter((c) => 'id' in c && contextNodeIdsRef.current.has((c as { id: string }).id))
     const mainChanges = changes.filter((c) => !('id' in c) || !contextNodeIdsRef.current.has((c as { id: string }).id))
     if (ctxChanges.length > 0) {
-      setLiveContextNodes((nds) => applyNodeChangesWithStructuralSharing(ctxChanges, nds))
+      const currentContextNodes = liveContextNodesRef.current
+      const bounds = getContextBoundaryBounds(currentContextNodes)
+      const adjustedChanges = !bounds
+        ? ctxChanges
+        : ctxChanges.map((change) => {
+          if (change.type !== 'position' || !('position' in change)) return change
+          const node = currentContextNodes.find((candidate) => candidate.id === change.id)
+          if (!node) return change
+          const nextPosition = change.position ?? node.position
+          const { position } = clampContextNodeChangePosition(node, nextPosition, bounds, node.position)
+          const fixedAbsolutePosition = node.positionAbsolute ?? node.position
+          const nextPositionAbsolute = change.positionAbsolute ?? fixedAbsolutePosition
+          const { position: positionAbsolute } = clampContextNodeChangePosition(node, nextPositionAbsolute, bounds, fixedAbsolutePosition)
+          return { ...change, position, positionAbsolute }
+        })
+
+      if (bounds) {
+        setContextNodePositionOverrides((prev) => {
+          let changed = false
+          const next = { ...prev }
+          for (const change of adjustedChanges) {
+            if (change.type !== 'position' || !('position' in change)) continue
+            const node = currentContextNodes.find((candidate) => candidate.id === change.id)
+            if (!node) continue
+            const nextPosition = change.position ?? node.position
+            const { override } = clampContextNodeChangePosition(node, nextPosition, bounds, node.position)
+            if (!override) continue
+            const previous = next[change.id]
+            if (previous?.side === override.side && previous.axisPosition === override.axisPosition) continue
+            next[change.id] = override
+            changed = true
+          }
+          return changed ? next : prev
+        })
+      }
+
+      setLiveContextNodes((nds) => applyNodeChangesWithStructuralSharing(adjustedChanges, nds))
     }
     if (mainChanges.length > 0) {
       canvasOnNodesChange(mainChanges)
@@ -1815,6 +1932,38 @@ function ViewEditorInner({
               </Box>
             )}
 
+            {/* Overlap suggestion banner */}
+            {hasSignificantOverlaps && !reconnectPicking && (
+              <Box position="absolute" top="14px" left="50%" transform="translateX(-50%)" zIndex={2000}
+                bg="blue.900" border="1px" borderColor="blue.700" px={4} py={2} rounded="xl" shadow="xl"
+                display="flex" alignItems="center" gap={3} transition="all 0.2s"
+                _hover={{ bg: 'blue.800', transform: 'translateX(-50%) translateY(-1px)' }}>
+                <Text fontSize="sm" fontWeight="bold" color="blue.100">Elements are overlapping</Text>
+                <Button
+                  size="xs" colorScheme="blue" variant="solid"
+                  isLoading={adjustingLayout}
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    if (!viewId) return
+                    setAdjustingLayout(true)
+                    try {
+                      await removeCollisions(viewId)
+                      window.location.reload()
+                    } catch {
+                      setAdjustingLayout(false)
+                    }
+                  }}
+                >
+                  Adjust Layout
+                </Button>
+                <IconButton
+                  aria-label="Dismiss" icon={<CloseButton size="sm" />}
+                  size="xs" variant="ghost" colorScheme="blue"
+                  onClick={(e) => { e.stopPropagation(); dismissOverlapSuggestion() }}
+                />
+              </Box>
+            )}
+
             <CanvasContextMenu
               menu={canvasMenu}
               onAddElement={(x, y) => {
@@ -1927,6 +2076,7 @@ function ViewEditorInner({
           isOpen={proxyConnectorPanel.isOpen}
           onClose={proxyConnectorPanel.onClose}
           details={selectedProxyConnectorDetails}
+          snapshot={effectiveWorkspaceSnapshot}
           hasBackdrop={isMobileLayout}
           onEdit={(connector) => {
             setSelectedEdge(connector)

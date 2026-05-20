@@ -1,8 +1,10 @@
 import { useMemo } from 'react'
 import { type Edge as RFEdge, type Node as RFNode } from 'reactflow'
-import type { Connector, PlacedElement } from '../../../types'
+import type { Connector, LibraryElement, PlacedElement } from '../../../types'
 import type { CrossBranchContextSettings, ProxyConnectorDetails, WorkspaceGraphSnapshot } from '../../../crossBranch/types'
 import { resolveViewProxyGraph } from '../../../crossBranch/resolve'
+import { placedElementToLibraryElement } from '../../../store/useStore'
+import { canonicalNodePairKey } from '../pairKey'
 
 interface Props {
   snapshot: WorkspaceGraphSnapshot | null
@@ -11,12 +13,26 @@ interface Props {
   viewElements: PlacedElement[]
   rfNodes: RFNode[]
   stableOnNavigateToView: (id: number) => void
+  contextNodePositionOverrides: Record<string, ContextNodePositionOverride>
+  onSelectContextElement: (element: LibraryElement) => void
   onSelectProxyDetails: (details: ProxyConnectorDetails) => void
   expandedAncestorGroups: Set<string>
   onToggleAncestorGroup: (anchorId: string) => void
 }
 
-type ContextSide = 'top' | 'bottom' | 'left' | 'right'
+export type ContextSide = 'top' | 'bottom' | 'left' | 'right'
+
+export interface ContextNodePositionOverride {
+  side: ContextSide
+  axisPosition: number
+}
+
+interface ContextBoundaryBounds {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
 
 const CONTEXT_NODE_W = 200
 const CONTEXT_NODE_H = 100
@@ -73,8 +89,46 @@ function canonicalElementPairKey(leftId: number, rightId: number) {
   return leftId <= rightId ? `${leftId}::${rightId}` : `${rightId}::${leftId}`
 }
 
-function canonicalNodePairKey(leftId: string, rightId: string) {
-  return leftId <= rightId ? `${leftId}::${rightId}` : `${rightId}::${leftId}`
+export function clampContextNodeAxisPosition(
+  side: ContextSide,
+  axisPosition: number,
+  bounds: ContextBoundaryBounds,
+) {
+  if (side === 'left' || side === 'right') {
+    return Math.max(bounds.top - CONTEXT_NODE_HALF_H, Math.min(axisPosition, bounds.bottom - CONTEXT_NODE_HALF_H))
+  }
+  return Math.max(bounds.left - CONTEXT_NODE_HALF_W, Math.min(axisPosition, bounds.right - CONTEXT_NODE_HALF_W))
+}
+
+function applyContextNodePositionOverride(
+  position: { x: number; y: number },
+  side: ContextSide,
+  override: ContextNodePositionOverride | undefined,
+  bounds: ContextBoundaryBounds,
+) {
+  if (!override || override.side !== side) return position
+  if (side === 'left' || side === 'right') {
+    return { ...position, y: clampContextNodeAxisPosition(side, override.axisPosition, bounds) }
+  }
+  return { ...position, x: clampContextNodeAxisPosition(side, override.axisPosition, bounds) }
+}
+
+function buildContextNodeExtent(
+  side: ContextSide,
+  position: { x: number; y: number },
+  bounds: ContextBoundaryBounds,
+): [[number, number], [number, number]] {
+  if (side === 'left' || side === 'right') {
+    return [
+      [position.x, bounds.top - CONTEXT_NODE_HALF_H],
+      [position.x, bounds.bottom - CONTEXT_NODE_HALF_H],
+    ]
+  }
+
+  return [
+    [bounds.left - CONTEXT_NODE_HALF_W, position.y],
+    [bounds.right - CONTEXT_NODE_HALF_W, position.y],
+  ]
 }
 
 function buildDirectConnectorPairSet(connectors: Connector[], visibleElementIds: Set<number>) {
@@ -112,7 +166,7 @@ function mergeHiddenProxyDetails(
 
   return {
     key: existing.key,
-    label: count === 1 ? connectors[0]?.connector.label?.trim() || connectors[0]?.connector.relationship?.trim() || 'Cross-branch' : `${count} connectors`,
+    label: count === 1 ? connectors[0]?.connector.label?.trim() || connectors[0]?.connector.relationship?.trim() || 'Cross-view' : `${count} connectors`,
     count,
     sourceAnchorId: existing.sourceAnchorId,
     targetAnchorId: existing.targetAnchorId,
@@ -124,6 +178,20 @@ function mergeHiddenProxyDetails(
   }
 }
 
+function summarizeProxyConnectorLabel(connectors: ProxyConnectorDetails['connectors']) {
+  if (connectors.length === 0) return 'Connectors'
+  if (connectors.length === 1) {
+    return connectors[0]?.connector.label?.trim() || connectors[0]?.connector.relationship?.trim() || 'Cross-view'
+  }
+
+  const labels = Array.from(new Set(connectors.map((leaf) => (
+    leaf.connector.label?.trim() || leaf.connector.relationship?.trim() || ''
+  )).filter(Boolean)))
+
+  if (labels.length === 1) return `${connectors.length} x ${labels[0]}`
+  return `${connectors.length} connectors`
+}
+
 export function useViewContextNeighbours({
   snapshot,
   settings,
@@ -131,6 +199,8 @@ export function useViewContextNeighbours({
   viewElements,
   rfNodes,
   stableOnNavigateToView,
+  contextNodePositionOverrides,
+  onSelectContextElement,
   onSelectProxyDetails,
   expandedAncestorGroups,
   onToggleAncestorGroup,
@@ -195,6 +265,12 @@ export function useViewContextNeighbours({
     const boundaryRight = maxX + totalInset
     const boundaryTop = minY - totalInset
     const boundaryBottom = maxY + totalInset
+    const boundaryBounds = {
+      left: boundaryLeft,
+      right: boundaryRight,
+      top: boundaryTop,
+      bottom: boundaryBottom,
+    }
 
     const livePositions = new Map(rfNodes.map((node) => [node.id, node.position] as const))
     const currentViewPositions = new Map(viewElements.map((element) => {
@@ -215,7 +291,7 @@ export function useViewContextNeighbours({
 
         const details: ProxyConnectorDetails = {
           key: `node:${proxyNode.id}`,
-          label: 'Merged branch context',
+          label: summarizeProxyConnectorLabel(connectors),
           count: connectors.length,
           sourceAnchorId: proxyNode.id,
           targetAnchorId: proxyNode.id,
@@ -499,17 +575,30 @@ export function useViewContextNeighbours({
         return expandedAncestorGroups.has(anchorId)
       })
       .map(({ contextNode, position, side }) => {
+        const adjustedPosition = applyContextNodePositionOverride(
+          position,
+          side,
+          contextNodePositionOverrides[contextNode.id],
+          boundaryBounds,
+        )
+        const placements = snapshot.placementsByElementId[contextNode.anchorElementId] ?? []
+        const placementViews = new Map<number, string>()
+        placements.forEach((placement) => {
+          placementViews.set(placement.viewId, placement.viewName)
+        })
+        const primaryPlacement = placements[0]?.element
         const isGroupAnchor = anchorGroupChildCount.has(contextNode.id)
         const groupChildCount = anchorGroupChildCount.get(contextNode.id) ?? 0
         const isGroupExpanded = expandedAncestorGroups.has(contextNode.id)
         return {
           id: contextNode.id,
           type: 'contextNeighborNode',
-          position,
+          position: adjustedPosition,
+          extent: buildContextNodeExtent(side, adjustedPosition, boundaryBounds),
           width: CONTEXT_NODE_W,
           height: CONTEXT_NODE_H,
           selectable: false,
-          draggable: false,
+          draggable: true,
           connectable: false,
           zIndex: isGroupAnchor && isGroupExpanded ? 8 : 6,
           data: {
@@ -520,13 +609,17 @@ export function useViewContextNeighbours({
             technology: contextNode.technology,
             logo_url: contextNode.logoUrl,
             technology_connectors: contextNode.technologyConnectors,
-            ownerViewIds: contextNode.ownerViewIds,
-            ownerViewNames: contextNode.ownerViewNames,
+            ownerViewIds: Array.from(placementViews.keys()),
+            ownerViewNames: Array.from(placementViews.values()),
+            currentViewId: viewId,
             commonAncestorViewId: contextNode.commonAncestorViewId,
             commonAncestorViewName: contextNode.commonAncestorViewName,
             connectorCount: contextNode.connectorCount,
             onNavigateToView: stableOnNavigateToView,
-            onSelectDetails: proxyNodeDetailsById.get(contextNode.id)
+            onSelectElement: primaryPlacement
+              ? () => onSelectContextElement(placedElementToLibraryElement(primaryPlacement))
+              : undefined,
+            onOpenRelationshipDetails: proxyNodeDetailsById.get(contextNode.id)
               ? () => onSelectProxyDetails(proxyNodeDetailsById.get(contextNode.id) as ProxyConnectorDetails)
               : undefined,
             isGroupAnchor,
@@ -597,5 +690,5 @@ export function useViewContextNeighbours({
       hiddenProxyCountsByPair,
       hiddenProxyDetailsByPair,
     }
-  }, [snapshot, settings, viewId, viewElements, rfNodes, stableOnNavigateToView, onSelectProxyDetails, expandedAncestorGroups, onToggleAncestorGroup])
+  }, [snapshot, settings, viewId, viewElements, rfNodes, stableOnNavigateToView, contextNodePositionOverrides, onSelectContextElement, onSelectProxyDetails, expandedAncestorGroups, onToggleAncestorGroup])
 }

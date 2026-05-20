@@ -1125,7 +1125,7 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
                 <PopoverHeader borderBottom="1px solid" borderColor="whiteAlpha.200" px={4} py={3}>
                   <VStack align="start" spacing={0}>
                     <Text fontWeight="600" fontSize="sm" color="white">
-                      Cross-Branch Connector
+                      Cross-View Connector
                     </Text>
                     <Badge colorScheme="blue" variant="subtle" fontSize="2xs">
                       {hoveredItem.data.details.count} connector{hoveredItem.data.details.count === 1 ? '' : 's'}

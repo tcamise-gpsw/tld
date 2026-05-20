@@ -91,7 +91,7 @@ func TestAddCmd_EmptySlugFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected empty slug error")
 	}
-	if !strings.Contains(err.Error(), "ref is required") {
+	if !strings.Contains(err.Error(), "could not generate a valid reference") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

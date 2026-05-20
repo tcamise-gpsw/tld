@@ -21,6 +21,7 @@ func TestSlugify(t *testing.T) {
 		{"My DB!", "my-db"},
 		{"  leading spaces  ", "leading-spaces"},
 		{"multiple---hyphens", "multiple-hyphens"},
+		{"ı", ""},
 	}
 	for _, tc := range cases {
 		if got := workspace.Slugify(tc.in); got != tc.want {

@@ -1,6 +1,7 @@
 package cmdutil
 
 import (
+	"fmt"
 	"strings"
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
@@ -38,6 +39,9 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 		ref, ok := existingElementRefs[e.Id]
 		if !ok {
 			ref = workspace.Slugify(e.Name)
+			if ref == "" {
+				ref = fmt.Sprintf("element-%d", e.Id)
+			}
 		}
 		objectIDToRef[e.Id] = ref
 		kind := e.GetKind()
@@ -73,7 +77,10 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 			diagramIDToViewRef[d.Id] = ownerRef
 			element := newWS.Elements[ownerRef]
 			element.HasView = true
-			if label := exportedDiagramLabel(d, element.Name); element.ViewLabel == "" && label != "" {
+			if name := strings.TrimSpace(d.Name); name != "" && !strings.EqualFold(name, strings.TrimSpace(element.Name)) {
+				element.ViewName = name
+			}
+			if label := exportedDiagramLabel(d); element.ViewLabel == "" && label != "" {
 				element.ViewLabel = label
 			}
 			newWS.Meta.Views[ownerRef] = &workspace.ResourceMetadata{
@@ -96,9 +103,11 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 			parentRef = "root"
 		}
 		newWS.Elements[elementRef].Placements = append(newWS.Elements[elementRef].Placements, workspace.ViewPlacement{
-			ParentRef: parentRef,
-			PositionX: p.PositionX,
-			PositionY: p.PositionY,
+			ParentRef:    parentRef,
+			PositionX:    p.PositionX,
+			PositionY:    p.PositionY,
+			PositionXSet: true,
+			PositionYSet: true,
 		})
 	}
 
@@ -113,9 +122,10 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 			continue
 		}
 
+		fallbackKey := viewRef + ":" + srcRef + ":" + tgtRef + ":" + e.GetLabel()
 		key, ok := existingConnectorRefs[e.Id]
-		if !ok {
-			key = viewRef + ":" + srcRef + ":" + tgtRef + ":" + e.GetLabel()
+		if !ok || !connectorRefMatches(key, viewRef, srcRef, tgtRef, e.GetLabel()) {
+			key = fallbackKey
 		}
 
 		newWS.Connectors[key] = &workspace.Connector{
@@ -140,6 +150,17 @@ func ConvertExportResponse(baseWS *workspace.Workspace, msg *diagv1.ExportOrgani
 	return newWS
 }
 
+func connectorRefMatches(ref, viewRef, srcRef, tgtRef, label string) bool {
+	parts := strings.Split(ref, ":")
+	if len(parts) < 4 {
+		return false
+	}
+	return parts[0] == viewRef &&
+		parts[1] == srcRef &&
+		parts[2] == tgtRef &&
+		strings.Join(parts[3:], ":") == label
+}
+
 func CountViews(ws *workspace.Workspace) int {
 	count := 0
 	for _, element := range ws.Elements {
@@ -150,15 +171,8 @@ func CountViews(ws *workspace.Workspace) int {
 	return count
 }
 
-func exportedDiagramLabel(diagram *diagv1.View, elementName string) string {
-	if label := strings.TrimSpace(diagram.GetLevelLabel()); label != "" {
-		return label
-	}
-	name := strings.TrimSpace(diagram.Name)
-	if name != "" && !strings.EqualFold(name, strings.TrimSpace(elementName)) {
-		return name
-	}
-	return ""
+func exportedDiagramLabel(diagram *diagv1.View) string {
+	return strings.TrimSpace(diagram.GetLevelLabel())
 }
 
 func cloneStrings(values []string) []string {
@@ -172,7 +186,22 @@ func buildDiagramOwnerIndex(msg *diagv1.ExportOrganizationResponse, elements map
 	owners := make(map[int32]string)
 	usedRefs := make(map[string]struct{})
 
+	for _, diagram := range msg.Views {
+		if diagram.OwnerElementId == nil {
+			continue
+		}
+		ownerRef, ok := objectIDToRef[*diagram.OwnerElementId]
+		if !ok {
+			continue
+		}
+		owners[diagram.Id] = ownerRef
+		usedRefs[ownerRef] = struct{}{}
+	}
+
 	for _, navigation := range msg.Navigations {
+		if _, ok := owners[navigation.ToViewId]; ok {
+			continue
+		}
 		ownerRef, ok := objectIDToRef[navigation.ElementId]
 		if !ok || navigation.ToViewId == 0 {
 			continue
@@ -230,8 +259,12 @@ func diagramMatchesOwnedElement(diagram *diagv1.View, element *workspace.Element
 	if element == nil {
 		return false
 	}
+	label := exportedDiagramLabel(diagram)
+	if strings.TrimSpace(element.ViewLabel) == "" {
+		return label == ""
+	}
 	return strings.EqualFold(
-		strings.TrimSpace(exportedDiagramLabel(diagram, element.Name)),
+		label,
 		strings.TrimSpace(element.ViewLabel),
 	)
 }

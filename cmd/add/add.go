@@ -42,6 +42,9 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 			r := ref
 			if r == "" {
 				r = workspace.Slugify(name)
+				if r == "" {
+					return fmt.Errorf("could not generate a valid reference from name %q. please provide an explicit reference with --ref (e.g. --ref my-element)", name)
+				}
 			}
 			if err := workspace.ValidateElementRef(r); err != nil {
 				return err

@@ -46,6 +46,22 @@ type HandleTarget = {
   y: number
 }
 
+function resolveElementIdFromNode(node: RFNode | null | undefined) {
+  if (!node) return null
+  const numericId = parseNumericId(node.id)
+  if (numericId !== null) return numericId
+
+  const nodeData = node.data as { element_id?: unknown } | undefined
+  return typeof nodeData?.element_id === 'number' ? nodeData.element_id : null
+}
+
+function findNodeFromEventTarget(target: EventTarget | null, nodes: RFNode[]) {
+  if (!(target instanceof globalThis.Element)) return null
+  const nodeId = target.closest('.react-flow__node')?.getAttribute('data-id')
+  if (!nodeId) return null
+  return nodes.find((node) => node.id === nodeId) ?? null
+}
+
 function collectHandleTargets(excludeNodeId?: string): HandleTarget[] {
   const handles = document.querySelectorAll('.react-flow__handle')
   const targets: HandleTarget[] = []
@@ -154,6 +170,7 @@ interface CanvasInteractionOptions {
   drawingMode: boolean
   isMobileLayout: boolean
   rfNodesRef: React.MutableRefObject<RFNode[]>
+  interactionNodesRef: React.MutableRefObject<RFNode[]>
   rfEdgesRef: React.MutableRefObject<RFEdge[]>
   viewElementsRef: React.MutableRefObject<PlacedElement[]>
   viewIdRef: React.MutableRefObject<number | null>
@@ -237,6 +254,7 @@ export function useCanvasInteractions({
   drawingMode: _drawingMode,
   isMobileLayout: _isMobileLayout,
   rfNodesRef,
+  interactionNodesRef,
   rfEdgesRef: _rfEdgesRef,
   viewElementsRef,
   viewIdRef,
@@ -293,6 +311,9 @@ export function useCanvasInteractions({
   const replaceConnector = useStore((state) => state.replaceConnector)
   const screenToFlowPositionRef = useRef(screenToFlowPosition)
   screenToFlowPositionRef.current = screenToFlowPosition
+  const getInteractionNodes = useCallback(() => {
+    return interactionNodesRef.current.length > 0 ? interactionNodesRef.current : rfNodesRef.current
+  }, [interactionNodesRef, rfNodesRef])
 
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; flowX: number; flowY: number } | null>(null)
   const [addingElementAt, setAddingElementAt] = useState<PickerState | null>(null)
@@ -377,7 +398,7 @@ export function useCanvasInteractions({
     if (preferredMode !== 'connect') return preferredMode
     if (forceConnect) return 'connect'
 
-    const boundaryNode = rfNodesRef.current.find((node) => node.type === 'ContextBoundaryElement')
+    const boundaryNode = getInteractionNodes().find((node) => node.type === 'ContextBoundaryElement')
     if (!boundaryNode) return 'add'
 
     const boundaryData = boundaryNode.data as { width?: number; height?: number } | undefined
@@ -392,7 +413,7 @@ export function useCanvasInteractions({
       flowY <= boundaryNode.position.y + height
 
     return withinBoundary ? 'add' : 'connect'
-  }, [rfNodesRef])
+  }, [getInteractionNodes])
 
   // ── showAddingElementAt ─────────────────────────────────────────────────────
   const showAddingElementAt = useCallback((clientX: number, clientY: number, expandResults = false, mode: 'add' | 'connect' = 'add', forceConnect = false) => {
@@ -771,8 +792,9 @@ export function useCanvasInteractions({
     if (!canEdit || isReconnectingRef.current) return
     connectWasValidRef.current = true
     if (viewId === null || !params.source || !params.target) return
-    const sourceId = parseNumericId(params.source)
-    const targetId = parseNumericId(params.target)
+    const interactionNodes = getInteractionNodes()
+    const sourceId = resolveElementIdFromNode(interactionNodes.find((node) => node.id === params.source)) ?? parseNumericId(params.source)
+    const targetId = resolveElementIdFromNode(interactionNodes.find((node) => node.id === params.target)) ?? parseNumericId(params.target)
     if (sourceId === null || targetId === null) return
     try {
       const sourceHandle = getLogicalHandleId(params.sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE)
@@ -786,7 +808,7 @@ export function useCanvasInteractions({
       await finalizeConnectorCreate(connector)
       onUnsupportedMutation?.()
     } catch { /* intentionally empty */ }
-  }, [canEdit, finalizeConnectorCreate, onUnsupportedMutation, viewId])
+  }, [canEdit, finalizeConnectorCreate, getInteractionNodes, onUnsupportedMutation, viewId])
 
   const onConnectStart = useCallback((_: React.MouseEvent | React.TouchEvent, { nodeId }: OnConnectStartParams) => {
     if (!canEdit || isReconnectingRef.current) return
@@ -814,15 +836,18 @@ export function useCanvasInteractions({
     connectingSourceRef.current = null
     if (!sourceId || connectWasValidRef.current) { connectWasValidRef.current = false; return }
     connectWasValidRef.current = false
+    const interactionNodes = getInteractionNodes()
+    const droppedNode = findNodeFromEventTarget(event.target, interactionNodes)
     const target = event.target
     if (target instanceof globalThis.Element) {
-      if (target.closest('.react-flow__handle') || target.closest('.react-flow__node')) return
+      if (target.closest('.react-flow__handle')) return
+      if (droppedNode && droppedNode.type !== 'contextNeighborNode') return
     }
     const { clientX, clientY } = 'changedTouches' in event
       ? (event as TouchEvent).changedTouches[0]
       : (event as MouseEvent)
     const flowPos = screenToFlowPositionRef.current({ x: clientX, y: clientY })
-    const nearNode = rfNodesRef.current.find((node) => {
+    const nearNode = droppedNode ?? interactionNodes.find((node) => {
       if (node.id === sourceId) return false
       const cx = node.position.x + (node.width ?? 180) / 2
       const cy = node.position.y + (node.height ?? 80) / 2
@@ -830,12 +855,12 @@ export function useCanvasInteractions({
     })
     const cid = viewIdRef.current
     if (cid === null) return
-    const sourceElementId = parseNumericId(sourceId)
+    const sourceElementId = resolveElementIdFromNode(interactionNodes.find((node) => node.id === sourceId)) ?? parseNumericId(sourceId)
     if (sourceElementId === null) return
     if (nearNode) {
-      const targetElementId = parseNumericId(nearNode.id)
+      const targetElementId = resolveElementIdFromNode(nearNode)
       if (targetElementId === null) return
-      const sourceNode = rfNodesRef.current.find((n) => n.id === sourceId)
+      const sourceNode = interactionNodes.find((n) => n.id === sourceId)
       const { sourceHandle, targetHandle } = sourceNode
         ? findClosestHandles(sourceNode, nearNode)
         : { sourceHandle: 'right', targetHandle: 'left' }
@@ -852,7 +877,7 @@ export function useCanvasInteractions({
       suppressNextPaneClickRef.current = true
       showAddingElementAt(clientX, clientY, true, 'connect', 'shiftKey' in event && event.shiftKey)
     }
-  }, [canEdit, clearConnectGhostListener, finalizeConnectorCreate, onUnsupportedMutation, showAddingElementAt, rfNodesRef, viewIdRef])
+  }, [canEdit, clearConnectGhostListener, finalizeConnectorCreate, getInteractionNodes, onUnsupportedMutation, showAddingElementAt, viewIdRef])
 
   // ── Reconnect ──────────────────────────────────────────────────────────────
   const performReconnect = useCallback(async (oldConnector: RFEdge, newConnection: Connection) => {
@@ -1140,15 +1165,16 @@ export function useCanvasInteractions({
     closeProxyConnectorPanel()
     const sourceId = interactionSourceIdRef.current
     if (sourceId !== null) {
+      const interactionNodes = getInteractionNodes()
       const flowPos = screenToFlowPositionRef.current({ x: e.clientX, y: e.clientY })
-      const nearNode = rfNodesRef.current.find((node) => {
+      const nearNode = interactionNodes.find((node) => {
         if (node.id === String(sourceId)) return false
         const cx = node.position.x + (node.width ?? 180) / 2
         const cy = node.position.y + (node.height ?? 80) / 2
         return Math.hypot(flowPos.x - cx, flowPos.y - cy) < SNAP_RADIUS
       })
       if (nearNode) {
-        const targetId = parseNumericId(nearNode.id)
+        const targetId = resolveElementIdFromNode(nearNode)
         if (targetId === null) return
         stableOnConnectTo(targetId)
       } else {
@@ -1165,7 +1191,7 @@ export function useCanvasInteractions({
     setPendingConnectionSource(null)
     pendingConnectionSourceHandleRef.current = null
     setAddingElementAt(null)
-  }, [stableOnConnectTo, showAddingElementAt, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, rfNodesRef, interactionSourceIdRef, setSelectedElement, setSelectedEdge, setSelectedProxyConnectorDetails])
+  }, [stableOnConnectTo, showAddingElementAt, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, getInteractionNodes, interactionSourceIdRef, setSelectedElement, setSelectedEdge, setSelectedProxyConnectorDetails])
 
   const onPaneContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()

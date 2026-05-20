@@ -127,7 +127,9 @@ function buildProxyEndpoint(
 
   const actualPlacement = elementDisplayPlacement(snapshot, elementId, chosenPlacement.viewId)
   const actualName = actualPlacement?.element.name ?? `Element ${elementId}`
-  const forceExplicitOffViewContext = ownerViewId === currentViewId && chosenPlacement.viewId !== currentViewId
+  const forceExplicitOffViewContext = ownerViewId === currentViewId &&
+    chosenPlacement.viewId !== currentViewId &&
+    snapshot.childViewIdByOwnerElementId[elementId] != null
 
   if (forceExplicitOffViewContext) {
     const contextPathElementIds = explicitOffViewContextPath(
@@ -232,7 +234,7 @@ function buildProxyEndpoint(
 function proxyDisplayLabel(connectors: ProxyConnectorLeaf[]): string {
   if (connectors.length === 1) {
     const [leaf] = connectors
-    return leaf.connector.label?.trim() || leaf.connector.relationship?.trim() || 'Cross-branch'
+    return leaf.connector.label?.trim() || leaf.connector.relationship?.trim() || 'Cross-view'
   }
   const labels = new Set(connectors.map((leaf) => leaf.connector.label?.trim()).filter(Boolean))
   if (labels.size === 1) return `${connectors.length} × ${Array.from(labels)[0]}`
@@ -383,7 +385,13 @@ export function resolveViewProxyGraph(
     const sourceAnchorId = displayNodeId(source)
     const targetAnchorId = displayNodeId(target)
     if (sourceAnchorId === targetAnchorId) continue
-    if (!source.externalToView && !target.externalToView && connector.view_id === currentViewId) continue
+    if (
+      !source.externalToView &&
+      !target.externalToView &&
+      connector.view_id === currentViewId &&
+      source.placementViewId === currentViewId &&
+      target.placementViewId === currentViewId
+    ) continue
 
     connectorLeaves.push({
       connector,

@@ -316,12 +316,33 @@ func (s *WorkspaceService) ExportWorkspace(
 		})
 	}
 
+	elementToChildView := make(map[int32]*diagv1.View, len(views))
+	for _, v := range views {
+		if v.OwnerElementId != nil {
+			elementToChildView[*v.OwnerElementId] = v
+		}
+	}
+	navigations := make([]*diagv1.ElementNavigation, 0)
+	for _, p := range placements {
+		childView, ok := elementToChildView[p.ElementId]
+		if !ok {
+			continue
+		}
+		navigations = append(navigations, &diagv1.ElementNavigation{
+			Id:         p.Id,
+			ElementId:  p.ElementId,
+			FromViewId: p.ViewId,
+			ToViewId:   childView.Id,
+		})
+	}
+
 	return connect.NewResponse(&diagv1.ExportOrganizationResponse{
-		Views:      views,
-		Elements:   elements,
-		Placements: exportPlacements,
-		Connectors: connectors,
-		Layers:     layers,
+		Views:       views,
+		Elements:    elements,
+		Navigations: navigations,
+		Placements:  exportPlacements,
+		Connectors:  connectors,
+		Layers:      layers,
 	}), nil
 }
 
@@ -983,13 +1004,29 @@ func (s *WorkspaceService) UpdateConnector(
 		targetID = tid
 	}
 
+	label := existing.Label
+	if m.Label != nil {
+		label = m.Label
+	}
+	description := existing.Description
+	if m.Description != nil {
+		description = m.Description
+	}
+	relationship := existing.Relationship
+	if m.Relationship != nil {
+		relationship = m.Relationship
+	}
+	url := existing.Url
+	if m.Url != nil {
+		url = m.Url
+	}
 	sourceHandle := existing.SourceHandle
-	if m.GetSourceHandle() != "" {
-		sourceHandle = OptStr(m.GetSourceHandle())
+	if m.SourceHandle != nil {
+		sourceHandle = m.SourceHandle
 	}
 	targetHandle := existing.TargetHandle
-	if m.GetTargetHandle() != "" {
-		targetHandle = OptStr(m.GetTargetHandle())
+	if m.TargetHandle != nil {
+		targetHandle = m.TargetHandle
 	}
 
 	direction := m.GetDirection()
@@ -1009,9 +1046,9 @@ func (s *WorkspaceService) UpdateConnector(
 
 	c, err := s.Store.UpdateConnector(ctx, connectorID, workspaceID, ConnectorInput{
 		ViewID: existing.ViewId, SourceID: sourceID, TargetID: targetID,
-		Label: OptStr(m.GetLabel()), Description: OptStr(m.GetDescription()),
-		Relationship: OptStr(m.GetRelationship()), Direction: direction, Style: style,
-		URL: OptStr(m.GetUrl()), SourceHandle: sourceHandle, TargetHandle: targetHandle,
+		Label: label, Description: description,
+		Relationship: relationship, Direction: direction, Style: style,
+		URL: url, SourceHandle: sourceHandle, TargetHandle: targetHandle,
 	})
 	if err != nil {
 		return nil, storeErr("update connector", err)
