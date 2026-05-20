@@ -208,6 +208,7 @@ func TestBuild_ReusesMetadataIDs(t *testing.T) {
 	}
 	if api == nil {
 		t.Fatal("api element missing")
+		return
 	}
 	if api.Id == nil || *api.Id != 101 {
 		t.Fatalf("api id = %v", api.Id)
