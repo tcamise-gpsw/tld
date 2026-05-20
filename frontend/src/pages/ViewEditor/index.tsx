@@ -1069,6 +1069,8 @@ function ViewEditorInner({
     handleUpdateTags,
     drawingCanvasRef,
     snapToGrid,
+    libraryOpen,
+    openLibrary: useCallback(() => setLibraryOpen(true), []),
     toggleLibrary: useCallback(() => setLibraryOpen((v) => !v), []),
     toggleExplorer: handleToggleExplorer,
     onFitView: safeFitView,

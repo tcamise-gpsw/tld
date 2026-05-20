@@ -219,6 +219,8 @@ interface CanvasInteractionOptions {
   drawingCanvasRef: React.MutableRefObject<DrawingCanvasHandle | null>
   snapToGrid?: boolean
   onMoveStateChange?: (isMoving: boolean) => void
+  libraryOpen?: boolean
+  openLibrary?: () => void
   toggleLibrary?: () => void
   toggleExplorer?: () => void
   onFitView?: () => void
@@ -307,6 +309,8 @@ export function useCanvasInteractions({
   drawingCanvasRef,
   snapToGrid,
   onMoveStateChange,
+  libraryOpen,
+  openLibrary,
   toggleLibrary,
   toggleExplorer,
   onFitView,
@@ -1439,9 +1443,15 @@ export function useCanvasInteractions({
 
       if (key === '/') {
         e.preventDefault()
-        // Focus search in open panel
-        const searchInput = document.querySelector<HTMLInputElement>('.panel-search-input')
-        searchInput?.focus()
+        // Toggle the library panel if it's not already open
+        if (!libraryOpen && openLibrary) {
+          openLibrary()
+        }
+        // Focus search in open panel (might need a tiny timeout to wait for panel to mount/open)
+        setTimeout(() => {
+          const searchInput = document.querySelector<HTMLInputElement>('.panel-search-input')
+          searchInput?.focus()
+        }, 10)
         return
       }
 
