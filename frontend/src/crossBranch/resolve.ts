@@ -234,7 +234,7 @@ function buildProxyEndpoint(
 function proxyDisplayLabel(connectors: ProxyConnectorLeaf[]): string {
   if (connectors.length === 1) {
     const [leaf] = connectors
-    return leaf.connector.label?.trim() || leaf.connector.relationship?.trim() || 'Cross-branch'
+    return leaf.connector.label?.trim() || leaf.connector.relationship?.trim() || 'Cross-view'
   }
   const labels = new Set(connectors.map((leaf) => leaf.connector.label?.trim()).filter(Boolean))
   if (labels.size === 1) return `${connectors.length} × ${Array.from(labels)[0]}`

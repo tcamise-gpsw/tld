@@ -6,6 +6,10 @@ import {
   Button,
   Divider,
   HStack,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuList,
   Popover,
   PopoverArrow,
   PopoverBody,
@@ -17,7 +21,7 @@ import {
   Text,
   VStack,
 } from '@chakra-ui/react'
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, LinkIcon } from '@chakra-ui/icons'
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, EditIcon } from '@chakra-ui/icons'
 import type { PlacedElement } from '../types'
 import { TYPE_COLORS } from '../types'
 import { resolveElementIconUrl } from '../utils/elementIcon'
@@ -34,6 +38,7 @@ interface ContextNeighborData {
   technology_connectors: PlacedElement['technology_connectors']
   ownerViewIds: number[]
   ownerViewNames: string[]
+  currentViewId: number | null
   commonAncestorViewId: number | null
   commonAncestorViewName: string | null
   connectorCount: number
@@ -92,11 +97,21 @@ function ContextNeighborNode({ data }: Props) {
     return resolveElementIconUrl(data.logo_url, data.technology_connectors) ?? undefined
   }, [data.logo_url, data.technology_connectors])
 
+  const availableViews = useMemo(() => {
+    const uniqueViews = new Map<number, string>()
+    data.ownerViewIds.forEach((viewId, index) => {
+      if (viewId === data.currentViewId) return
+      uniqueViews.set(viewId, data.ownerViewNames[index] ?? `View ${viewId}`)
+    })
+    return Array.from(uniqueViews.entries()).map(([viewId, viewName]) => ({ viewId, viewName }))
+  }, [data.currentViewId, data.ownerViewIds, data.ownerViewNames])
+
   const primaryOwnerViewId = data.ownerViewIds[0] ?? data.commonAncestorViewId ?? null
   const isGroupAnchor = data.isGroupAnchor ?? false
   const groupChildCount = data.groupChildCount ?? 0
   const isGroupExpanded = data.isGroupExpanded ?? false
   const side = data.side ?? 'right'
+  const hasDetails = Boolean(data.technology || data.description)
 
   // Position chevron just past the visual node edge (node is scale(0.5) with center origin,
   // so the visual edge is at 75% of the layout box dimension on the outward side).
@@ -206,7 +221,7 @@ function ContextNeighborNode({ data }: Props) {
           >
             <PopoverArrow bg="gray.900" />
             <PopoverHeader borderBottom="1px solid" borderColor="whiteAlpha.200" px={4} py={3}>
-              <HStack spacing={3}>
+              <HStack spacing={3} align="start">
                 {logoUrl && (
                   <Box flexShrink={0}>
                     <Box as="img" src={logoUrl} w="24px" h="24px" objectFit="contain" />
@@ -220,9 +235,66 @@ function ContextNeighborNode({ data }: Props) {
                     {data.kind || 'branch'}
                   </Tag>
                 </VStack>
-                <Badge colorScheme="blue" variant="subtle">
-                  {data.connectorCount}
-                </Badge>
+                <VStack align="stretch" spacing={1.5} flexShrink={0} minW="92px">
+                  {data.onSelectElement && (
+                    <Button
+                      size="xs"
+                      leftIcon={<EditIcon />}
+                      variant="ghost"
+                      color="gray.200"
+                      bg="whiteAlpha.50"
+                      border="1px solid"
+                      borderColor="whiteAlpha.100"
+                      _hover={{ bg: 'whiteAlpha.100', borderColor: 'whiteAlpha.200', color: 'white' }}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        data.onSelectElement?.()
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                  <Menu placement="bottom-end" isLazy>
+                    <MenuButton
+                      as={Button}
+                      size="xs"
+                      rightIcon={<ChevronDownIcon />}
+                      variant="ghost"
+                      color={availableViews.length > 0 ? 'gray.200' : 'gray.500'}
+                      bg="whiteAlpha.50"
+                      border="1px solid"
+                      borderColor="whiteAlpha.100"
+                      _hover={{ bg: 'whiteAlpha.100', borderColor: 'whiteAlpha.200', color: 'white' }}
+                      _active={{ bg: 'whiteAlpha.150' }}
+                      isDisabled={availableViews.length === 0}
+                    >
+                      Views
+                    </MenuButton>
+                    <MenuList
+                      bg="rgba(26, 32, 44, 0.98)"
+                      border="1px solid"
+                      borderColor="whiteAlpha.200"
+                      borderRadius="lg"
+                      boxShadow="0 12px 32px rgba(0,0,0,0.45)"
+                      minW="180px"
+                      py={1}
+                    >
+                      {availableViews.map(({ viewId, viewName }) => (
+                        <MenuItem
+                          key={viewId}
+                          fontSize="13px"
+                          color="gray.200"
+                          bg="transparent"
+                          _hover={{ bg: 'whiteAlpha.100' }}
+                          _focus={{ bg: 'whiteAlpha.100' }}
+                          onClick={() => data.onNavigateToView(viewId)}
+                        >
+                          {viewName}
+                        </MenuItem>
+                      ))}
+                    </MenuList>
+                  </Menu>
+                </VStack>
               </HStack>
             </PopoverHeader>
             <PopoverBody px={4} py={3}>
@@ -239,44 +311,23 @@ function ContextNeighborNode({ data }: Props) {
                     <Text fontSize="xs" color="gray.200" noOfLines={4}>{data.description}</Text>
                   </Box>
                 )}
-                <Box>
-                  <Text color="gray.400" fontSize="xs" fontWeight="600" mb={0.5} letterSpacing="wider">BRANCH CONTEXT</Text>
-                  <Text fontSize="xs" color="gray.200">
-                    {data.commonAncestorViewName
-                      ? `Branch diverges around ${data.commonAncestorViewName}.`
-                      : 'Branch lives outside the current visible scope.'}
-                  </Text>
-                </Box>
-                <Divider borderColor="whiteAlpha.200" />
-                <VStack align="stretch" spacing={2} width="full">
-                  {data.ownerViewIds.slice(0, 4).map((viewId, index) => (
-                    <Button
-                      key={`${viewId}-${index}`}
-                      size="xs"
-                      justifyContent="space-between"
-                      variant="ghost"
-                      color="gray.200"
-                      _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
-                      rightIcon={<LinkIcon />}
-                      onClick={() => data.onNavigateToView(viewId)}
-                    >
-                      <Text fontSize="xs" isTruncated>{data.ownerViewNames[index] ?? `View ${viewId}`}</Text>
-                    </Button>
-                  ))}
-                  {data.onOpenRelationshipDetails && (
-                    <Button
-                      size="xs"
-                      justifyContent="space-between"
-                      variant="ghost"
-                      color="gray.200"
-                      _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
-                      rightIcon={<LinkIcon />}
-                      onClick={() => data.onOpenRelationshipDetails?.()}
-                    >
-                      <Text fontSize="xs">Show connectors</Text>
-                    </Button>
-                  )}
-                </VStack>
+                {hasDetails && data.onOpenRelationshipDetails && <Divider borderColor="whiteAlpha.200" />}
+                {data.onOpenRelationshipDetails && (
+                  <Button
+                    size="sm"
+                    width="full"
+                    justifyContent="space-between"
+                    variant="ghost"
+                    color="gray.200"
+                    _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                    onClick={() => data.onOpenRelationshipDetails?.()}
+                  >
+                    <Text fontSize="xs">Show connectors</Text>
+                    <Badge colorScheme="blue" variant="subtle">
+                      {data.connectorCount}
+                    </Badge>
+                  </Button>
+                )}
               </VStack>
             </PopoverBody>
           </PopoverContent>

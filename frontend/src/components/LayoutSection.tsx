@@ -17,11 +17,13 @@ import {
   VStack,
   Icon,
   useDisclosure,
+  useBreakpointValue,
 } from '@chakra-ui/react'
 import { ChevronDownIcon, ChevronRightIcon } from './Icons'
 import { api } from '../api/client'
 import type { ViewTreeNode } from '../types'
 import ConfirmDialog from './ConfirmDialog'
+import { removeCollisions } from '../utils/layout'
 
 type Algorithm = 'dagre' | 'force'
 
@@ -53,7 +55,8 @@ interface Props {
 }
 
 export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: Props) {
-  const [open, setOpen] = useState(false)
+  const isLargeScreen = useBreakpointValue({ base: false, md: true }) ?? false
+  const [open, setOpen] = useState(isLargeScreen)
   const [algo, setAlgo] = useState<Algorithm>('dagre')
   const [running, setRunning] = useState(false)
   const [collisionRunning, setCollisionRunning] = useState(false)
@@ -77,113 +80,7 @@ export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: 
     onUnsupportedMutation?.()
     setCollisionRunning(true)
     try {
-      const [objs, edgeList] = await Promise.all([
-        api.workspace.views.placements.list(view.id),
-        api.workspace.connectors.list(view.id),
-      ])
-
-      const WIDTH = NODE_W
-      const HEIGHT = NODE_H
-      const PADDING = 40
-
-      const newPositions = new Map<number, { x: number; y: number }>()
-      objs.forEach((o) => newPositions.set(o.element_id, { x: o.position_x, y: o.position_y }))
-
-      for (let pass = 0; pass < 3; pass++) {
-        for (let j = 0; j < objs.length; j++) {
-          for (let k = j + 1; k < objs.length; k++) {
-            const a = objs[j]
-            const b = objs[k]
-            const posA = newPositions.get(a.element_id)!
-            const posB = newPositions.get(b.element_id)!
-
-            const dx = posB.x + WIDTH / 2 - (posA.x + WIDTH / 2)
-            const dy = posB.y + HEIGHT / 2 - (posA.y + HEIGHT / 2)
-            const adx = Math.abs(dx)
-            const ady = Math.abs(dy)
-
-            const minX = WIDTH + PADDING
-            const minY = HEIGHT + PADDING
-
-            if (adx < minX && ady < minY) {
-              const pushX = (minX - adx) / 2
-              const pushY = (minY - ady) / 2
-              const factorX = dx >= 0 ? 1 : -1
-              const factorY = dy >= 0 ? 1 : -1
-
-              posA.x -= pushX * factorX
-              posA.y -= pushY * factorY
-              posB.x += pushX * factorX
-              posB.y += pushY * factorY
-            }
-          }
-        }
-      }
-
-      await Promise.all(
-        objs.map((obj) => {
-          const pos = newPositions.get(obj.element_id)!
-          return api.workspace.views.placements.updatePosition(
-            view.id,
-            obj.element_id,
-            Math.round(pos.x),
-            Math.round(pos.y)
-          )
-        })
-      )
-
-      const handleUpdates = []
-      for (const edge of edgeList) {
-        const sPos = newPositions.get(edge.source_element_id)
-        const tPos = newPositions.get(edge.target_element_id)
-        if (!sPos || !tPos) continue
-
-        const sourceHandles: Record<string, { x: number; y: number }> = {
-          top: { x: sPos.x + WIDTH / 2, y: sPos.y },
-          bottom: { x: sPos.x + WIDTH / 2, y: sPos.y + HEIGHT },
-          left: { x: sPos.x, y: sPos.y + HEIGHT / 2 },
-          right: { x: sPos.x + WIDTH, y: sPos.y + HEIGHT / 2 },
-        }
-
-        const targetHandles: Record<string, { x: number; y: number }> = {
-          top: { x: tPos.x + WIDTH / 2, y: tPos.y },
-          bottom: { x: tPos.x + WIDTH / 2, y: tPos.y + HEIGHT },
-          left: { x: tPos.x, y: tPos.y + HEIGHT / 2 },
-          right: { x: tPos.x + WIDTH, y: tPos.y + HEIGHT / 2 },
-        }
-
-        let minDist = Infinity
-        let bestSource = edge.source_handle || 'top'
-        let bestTarget = edge.target_handle || 'top'
-
-        for (const [sId, sCoord] of Object.entries(sourceHandles)) {
-          for (const [tId, tCoord] of Object.entries(targetHandles)) {
-            const dist = Math.sqrt((sCoord.x - tCoord.x) ** 2 + (sCoord.y - tCoord.y) ** 2)
-            if (dist < minDist) {
-              minDist = dist
-              bestSource = sId
-              bestTarget = tId
-            }
-          }
-        }
-
-        if (bestSource !== edge.source_handle || bestTarget !== edge.target_handle) {
-          handleUpdates.push(api.workspace.connectors.update(view.id, edge.id, {
-            source_element_id: edge.source_element_id,
-            target_element_id: edge.target_element_id,
-            source_handle: bestSource,
-            target_handle: bestTarget,
-            label: edge.label || undefined,
-            description: edge.description || undefined,
-            relationship: edge.relationship || undefined,
-            direction: edge.direction || undefined,
-            style: edge.style === 'default' ? 'bezier' : (edge.style || 'bezier'),
-            url: edge.url || undefined,
-          }))
-        }
-      }
-
-      await Promise.all(handleUpdates)
+      await removeCollisions(view.id)
       window.location.reload()
     } catch (err) {
       console.error('Collision removal failed:', err)

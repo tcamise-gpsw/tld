@@ -7,7 +7,7 @@ import {
   CROSS_BRANCH_DEPTH_ALL,
 } from './types'
 
-const STORAGE_PREFIX = 'diag:cross-branch'
+const STORAGE_PREFIX = 'diag:cross-view'
 export const DEFAULT_MIN_CONNECTOR_ANCHOR_ALPHA = 0.35
 export const DEFAULT_MAX_PROXY_CONNECTOR_GROUPS = 32
 export const DEFAULT_CONNECTOR_PRIORITY: CrossBranchConnectorPriority = 'external'

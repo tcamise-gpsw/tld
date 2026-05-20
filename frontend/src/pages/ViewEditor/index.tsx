@@ -18,6 +18,7 @@ import { toPng, toSvg } from 'html-to-image'
 import {
   Box,
   Button,
+  CloseButton,
   Flex,
   IconButton,
   Spinner,
@@ -83,6 +84,8 @@ import { useViewData } from './hooks/useViewData'
 import { useDrawingEngine } from './hooks/useDrawingEngine'
 import { applyNodeChangesWithStructuralSharing, useCanvasInteractions } from './hooks/useCanvasInteractions'
 import { useViewEditHistory } from './hooks/useViewEditHistory'
+import { useOverlapDetection } from './hooks/useOverlapDetection'
+import { removeCollisions } from '../../utils/layout'
 import { connectorToConnector, findClosestHandles, sanitizeExportFilename, triggerDownload } from './utils'
 import { pickUnusedColor } from '../../components/ViewExplorer/utils'
 
@@ -303,6 +306,7 @@ function ViewEditorInner({
   const codePreview = useDisclosure()
   const mergeDialog = useDisclosure()
   const [mergeSourceElement, setMergeSourceElement] = useState<WorkspaceElement | null>(null)
+  const [adjustingLayout, setAdjustingLayout] = useState(false)
 
   useEffect(() => {
     if (viewId == null) {
@@ -613,6 +617,8 @@ function ViewEditorInner({
     handleElementDeleted, handleElementPermanentlyDeleted, handleElementSaved: applyElementSaved,
   } = data
   refreshElementsRef.current = refreshElements
+
+  const { hasSignificantOverlaps, dismiss: dismissOverlapSuggestion } = useOverlapDetection(rfNodes, viewId)
 
   const overrideDeltaFor = useCallback((resourceType: VisibilityOverride['resource_type'], resourceId?: number | null) => {
     if (resourceId == null) return 0
@@ -1092,16 +1098,14 @@ function ViewEditorInner({
     rfNodes,
     stableOnNavigateToView: canvas.stableOnNavigateToView,
     contextNodePositionOverrides,
-    onSelectContextElement: useCallback((elementId: number) => {
-      const element = resolveElementForUpdate(elementId, selectedElement, allElements, viewElements)
-      if (!element) return
+    onSelectContextElement: useCallback((element: WorkspaceElement) => {
       setSelectedEdge(null)
       setSelectedProxyConnectorDetails(null)
       closeConnectorPanelRef.current()
       closeProxyConnectorPanelRef.current()
       setSelectedElement(element)
       openElementPanelRef.current()
-    }, [allElements, selectedElement, viewElements]),
+    }, []),
     onSelectProxyDetails: useCallback((details: ProxyConnectorDetails) => {
       setSelectedElement(null)
       setSelectedEdge(null)
@@ -1928,6 +1932,38 @@ function ViewEditorInner({
               </Box>
             )}
 
+            {/* Overlap suggestion banner */}
+            {hasSignificantOverlaps && !reconnectPicking && (
+              <Box position="absolute" top="14px" left="50%" transform="translateX(-50%)" zIndex={2000}
+                bg="blue.900" border="1px" borderColor="blue.700" px={4} py={2} rounded="xl" shadow="xl"
+                display="flex" alignItems="center" gap={3} transition="all 0.2s"
+                _hover={{ bg: 'blue.800', transform: 'translateX(-50%) translateY(-1px)' }}>
+                <Text fontSize="sm" fontWeight="bold" color="blue.100">Elements are overlapping</Text>
+                <Button
+                  size="xs" colorScheme="blue" variant="solid"
+                  isLoading={adjustingLayout}
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    if (!viewId) return
+                    setAdjustingLayout(true)
+                    try {
+                      await removeCollisions(viewId)
+                      window.location.reload()
+                    } catch {
+                      setAdjustingLayout(false)
+                    }
+                  }}
+                >
+                  Adjust Layout
+                </Button>
+                <IconButton
+                  aria-label="Dismiss" icon={<CloseButton size="sm" />}
+                  size="xs" variant="ghost" colorScheme="blue"
+                  onClick={(e) => { e.stopPropagation(); dismissOverlapSuggestion() }}
+                />
+              </Box>
+            )}
+
             <CanvasContextMenu
               menu={canvasMenu}
               onAddElement={(x, y) => {
@@ -2040,6 +2076,7 @@ function ViewEditorInner({
           isOpen={proxyConnectorPanel.isOpen}
           onClose={proxyConnectorPanel.onClose}
           details={selectedProxyConnectorDetails}
+          snapshot={effectiveWorkspaceSnapshot}
           hasBackdrop={isMobileLayout}
           onEdit={(connector) => {
             setSelectedEdge(connector)

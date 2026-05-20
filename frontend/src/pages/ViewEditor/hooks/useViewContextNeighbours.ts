@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { type Edge as RFEdge, type Node as RFNode } from 'reactflow'
-import type { Connector, PlacedElement } from '../../../types'
+import type { Connector, LibraryElement, PlacedElement } from '../../../types'
 import type { CrossBranchContextSettings, ProxyConnectorDetails, WorkspaceGraphSnapshot } from '../../../crossBranch/types'
 import { resolveViewProxyGraph } from '../../../crossBranch/resolve'
+import { placedElementToLibraryElement } from '../../../store/useStore'
 import { canonicalNodePairKey } from '../pairKey'
 
 interface Props {
@@ -13,7 +14,7 @@ interface Props {
   rfNodes: RFNode[]
   stableOnNavigateToView: (id: number) => void
   contextNodePositionOverrides: Record<string, ContextNodePositionOverride>
-  onSelectContextElement: (elementId: number) => void
+  onSelectContextElement: (element: LibraryElement) => void
   onSelectProxyDetails: (details: ProxyConnectorDetails) => void
   expandedAncestorGroups: Set<string>
   onToggleAncestorGroup: (anchorId: string) => void
@@ -165,7 +166,7 @@ function mergeHiddenProxyDetails(
 
   return {
     key: existing.key,
-    label: count === 1 ? connectors[0]?.connector.label?.trim() || connectors[0]?.connector.relationship?.trim() || 'Cross-branch' : `${count} connectors`,
+    label: count === 1 ? connectors[0]?.connector.label?.trim() || connectors[0]?.connector.relationship?.trim() || 'Cross-view' : `${count} connectors`,
     count,
     sourceAnchorId: existing.sourceAnchorId,
     targetAnchorId: existing.targetAnchorId,
@@ -175,6 +176,20 @@ function mergeHiddenProxyDetails(
     ownerViewNames: Array.from(ownerViews.values()),
     connectors,
   }
+}
+
+function summarizeProxyConnectorLabel(connectors: ProxyConnectorDetails['connectors']) {
+  if (connectors.length === 0) return 'Connectors'
+  if (connectors.length === 1) {
+    return connectors[0]?.connector.label?.trim() || connectors[0]?.connector.relationship?.trim() || 'Cross-view'
+  }
+
+  const labels = Array.from(new Set(connectors.map((leaf) => (
+    leaf.connector.label?.trim() || leaf.connector.relationship?.trim() || ''
+  )).filter(Boolean)))
+
+  if (labels.length === 1) return `${connectors.length} x ${labels[0]}`
+  return `${connectors.length} connectors`
 }
 
 export function useViewContextNeighbours({
@@ -276,7 +291,7 @@ export function useViewContextNeighbours({
 
         const details: ProxyConnectorDetails = {
           key: `node:${proxyNode.id}`,
-          label: 'Merged branch context',
+          label: summarizeProxyConnectorLabel(connectors),
           count: connectors.length,
           sourceAnchorId: proxyNode.id,
           targetAnchorId: proxyNode.id,
@@ -566,6 +581,12 @@ export function useViewContextNeighbours({
           contextNodePositionOverrides[contextNode.id],
           boundaryBounds,
         )
+        const placements = snapshot.placementsByElementId[contextNode.anchorElementId] ?? []
+        const placementViews = new Map<number, string>()
+        placements.forEach((placement) => {
+          placementViews.set(placement.viewId, placement.viewName)
+        })
+        const primaryPlacement = placements[0]?.element
         const isGroupAnchor = anchorGroupChildCount.has(contextNode.id)
         const groupChildCount = anchorGroupChildCount.get(contextNode.id) ?? 0
         const isGroupExpanded = expandedAncestorGroups.has(contextNode.id)
@@ -588,13 +609,16 @@ export function useViewContextNeighbours({
             technology: contextNode.technology,
             logo_url: contextNode.logoUrl,
             technology_connectors: contextNode.technologyConnectors,
-            ownerViewIds: contextNode.ownerViewIds,
-            ownerViewNames: contextNode.ownerViewNames,
+            ownerViewIds: Array.from(placementViews.keys()),
+            ownerViewNames: Array.from(placementViews.values()),
+            currentViewId: viewId,
             commonAncestorViewId: contextNode.commonAncestorViewId,
             commonAncestorViewName: contextNode.commonAncestorViewName,
             connectorCount: contextNode.connectorCount,
             onNavigateToView: stableOnNavigateToView,
-            onSelectElement: () => onSelectContextElement(contextNode.anchorElementId),
+            onSelectElement: primaryPlacement
+              ? () => onSelectContextElement(placedElementToLibraryElement(primaryPlacement))
+              : undefined,
             onOpenRelationshipDetails: proxyNodeDetailsById.get(contextNode.id)
               ? () => onSelectProxyDetails(proxyNodeDetailsById.get(contextNode.id) as ProxyConnectorDetails)
               : undefined,

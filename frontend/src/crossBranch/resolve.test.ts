@@ -141,7 +141,7 @@ function baseData(connectors: Connector[]): ExploreData {
 }
 
 describe('resolveZUIProxyConnectors', () => {
-  it('collapses direct-child cross-branch links into a native +N badge', () => {
+  it('collapses direct-child cross-view connectors into a native +N badge', () => {
     const snapshot = buildWorkspaceGraphSnapshot(baseData([
       connector(1, 1, 1, 2, 'A-B'),
       connector(2, 1, 3, 2, 'AA-B'),
