@@ -200,8 +200,11 @@ function ViewExplorer({
         e.preventDefault(); setFocusedIdx((i) => Math.min(i + 1, filtered.length - 1)); break
       case 'ArrowUp':
         e.preventDefault(); setFocusedIdx((i) => Math.max(i - 1, 0)); break
-      case 'Enter':
-        if (focusedIdx >= 0 && filtered[focusedIdx]) { e.preventDefault(); handleNavigate(filtered[focusedIdx].id) }; break
+      case 'Enter': {
+        const targetIdx = focusedIdx >= 0 ? focusedIdx : 0
+        if (filtered[targetIdx]) { e.preventDefault(); handleNavigate(filtered[targetIdx].id) }
+        break
+      }
       case 'Escape':
         e.preventDefault(); setActiveFilter(null); break
     }
@@ -264,7 +267,7 @@ function ViewExplorer({
         />
         <Divider borderColor="whiteAlpha.100" />
 
-        <ViewSearch query={query} setQuery={setQuery} activeFilter={activeFilter} />
+        <ViewSearch query={query} setQuery={setQuery} activeFilter={activeFilter} onKeyDown={handleKeyDown} />
 
         <ViewTree
           filtered={filtered}

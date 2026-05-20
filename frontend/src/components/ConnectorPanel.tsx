@@ -203,23 +203,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
     return () => window.clearTimeout(timer)
   }, [autoSaveEdit, connector, label, description, relType, direction, connectorType, url])
 
-  const handleClose = useCallback(async () => {
-    if (autoSaveEdit) {
-      await saveIfDirtyRef.current?.()
-    }
-    onClose()
-  }, [autoSaveEdit, onClose])
-
-  useEffect(() => {
-    if (!isOpen) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [isOpen, handleClose])
-
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (isReadOnly || !connector || viewId == null) return
     setLoading(true)
     try {
@@ -239,7 +223,31 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
     } finally {
       setLoading(false)
     }
-  }
+  }, [isReadOnly, connector, viewId, buildPayloadAndFingerprint, onSave, onClose])
+
+  const handleClose = useCallback(async () => {
+    if (autoSaveEdit) {
+      await saveIfDirtyRef.current?.()
+    }
+    onClose()
+  }, [autoSaveEdit, onClose])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose()
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        if (!autoSaveEdit) {
+          handleSave()
+        } else {
+          handleClose()
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [isOpen, handleClose, autoSaveEdit, handleSave])
 
   const handleDelete = async () => {
     if (isReadOnly || !connector) return
@@ -255,7 +263,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
 
   return (
     <>
-      <SlidingPanel data-testid="connector-panel" isOpen={isOpen} onClose={handleClose} panelKey="connector" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop}>
+      <SlidingPanel data-testid="connector-panel" isOpen={isOpen} onClose={handleClose} panelKey="connector" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop} autoFocus={true}>
         <PanelHeader title="Edit Connector" onClose={handleClose} />
 
         {/* Body */}

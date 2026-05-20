@@ -57,6 +57,7 @@ import ViewPanel from '../../components/ViewPanel'
 import InlineElementAdder from '../../components/InlineElementAdder'
 import ExportModal, { type ExportOptions } from '../../components/ExportModal'
 import ImportModal from '../../components/ImportModal'
+import { KbdHint } from '../../components/PanelUI'
 import ViewEditorOnboarding from '../../components/ViewEditorOnboarding'
 import DrawingCanvas, { type DrawingCanvasHandle } from '../../components/DrawingCanvas'
 import ViewFloatingMenu from '../../components/ViewFloatingMenu'
@@ -994,6 +995,8 @@ function ViewEditorInner({
     }
   }, [redoViewEdit, toast])
 
+  const handleToggleExplorer = useCallback(() => setIsExplorerOpen((v) => !v), [])
+
   const interactionNodesRef = useRef<RFNode[]>([])
 
   // ── Canvas interactions ────────────────────────────────────────────────────
@@ -1064,6 +1067,10 @@ function ViewEditorInner({
     handleUpdateTags,
     drawingCanvasRef,
     snapToGrid,
+    toggleLibrary: useCallback(() => setLibraryOpen((v) => !v), []),
+    toggleExplorer: handleToggleExplorer,
+    onFitView: safeFitView,
+    setSnapToGrid,
   })
 
   // Wire stable placeholders to the real implementations from canvas hook
@@ -1560,7 +1567,6 @@ function ViewEditorInner({
   const handleExplorerHoverZoom = useCallback((elementId: number | null, type: 'in' | 'out' | null) => {
     setHoveredZoom(type && elementId ? { elementId, type } : null)
   }, [])
-  const handleToggleExplorer = useCallback(() => setIsExplorerOpen((v) => !v), [])
   const handleCloseLibrary = useCallback(() => setLibraryOpen(false), [])
   const handleCreateNewLibraryRef = useRef<() => void>(() => { })
   const handleCreateNewLibrary = useCallback(() => handleCreateNewLibraryRef.current(), [])
@@ -1742,42 +1748,60 @@ function ViewEditorInner({
           >
             {/* Library toggle */}
             {!isMobileLayout && (
-              <Tooltip label={libraryOpen ? 'Close element library' : 'Open element library'} placement="right" openDelay={300}>
-                <IconButton
-                  data-testid="vieweditor-toggle-library"
-                  aria-label={libraryOpen ? 'Close element library' : 'Open element library'}
-                  icon={libraryOpen ? <ChevronLeftIcon size={16} strokeWidth={3.5} /> : <ChevronRightIcon size={16} strokeWidth={3.5} />}
-                  size="md" position="absolute" top="50%"
-                  left={libraryOpen ? '328px' : 3}
-                  transition="left 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.15s ease"
-                  zIndex={1200} border='1px solid rgba(255, 255, 255, 0.08)'
-                  variant="clay" colorScheme="gray" bg="var(--bg-panel)"
-                  color={libraryOpen ? 'white' : 'gray.300'}
-                  _hover={{ bg: 'var(--bg-card-solid)', transform: 'translateY(-50%) scale(1.1)', color: 'white' }}
-                  onClick={() => setLibraryOpen((v) => !v)}
-                  transform="translateY(-50%)"
-                />
-              </Tooltip>
+              <VStack
+                position="absolute"
+                top="50%"
+                left={libraryOpen ? '328px' : 3}
+                transform="translateY(-50%)"
+                spacing={1}
+                zIndex={1200}
+                transition="left 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)"
+              >
+                <Tooltip label={libraryOpen ? 'Close element library' : 'Open element library'} placement="right" openDelay={300}>
+                  <IconButton
+                    data-testid="vieweditor-toggle-library"
+                    aria-label={libraryOpen ? 'Close element library' : 'Open element library'}
+                    icon={libraryOpen ? <ChevronLeftIcon size={16} strokeWidth={3.5} /> : <LibraryIcon size={18} />}
+                    size="md"
+                    transition="transform 0.15s ease"
+                    border='1px solid rgba(255, 255, 255, 0.08)'
+                    variant="clay" colorScheme="gray" bg="var(--bg-panel)"
+                    color={libraryOpen ? 'white' : 'gray.300'}
+                    _hover={{ bg: 'var(--bg-card-solid)', transform: 'scale(1.1)', color: 'white' }}
+                    onClick={() => setLibraryOpen((v) => !v)}
+                  />
+                </Tooltip>
+                <KbdHint ml={0} opacity={0.6}>A</KbdHint>
+              </VStack>
             )}
 
             {/* Explorer toggle */}
             {!isMobileLayout && !elementPanel.isOpen && !connectorPanel.isOpen && !viewDetails.isOpen && (
-              <Tooltip label={isExplorerOpen ? 'Close view explorer' : 'Open view explorer'} placement="left" openDelay={300}>
-                <IconButton
-                  data-testid="vieweditor-toggle-explorer"
-                  aria-label={isExplorerOpen ? 'Close view explorer' : 'Open view explorer'}
-                  icon={isExplorerOpen ? <ChevronRightIcon size={16} strokeWidth={3.5} /> : <ChevronLeftIcon size={16} strokeWidth={3.5} />}
-                  size="md" position="absolute" top="50%"
-                  right={isExplorerOpen ? '328px' : 3}
-                  transition="right 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.15s ease"
-                  zIndex={5} border="1px solid rgba(255, 255, 255, 0.08)"
-                  variant="clay" colorScheme="gray" bg="var(--bg-panel)"
-                  color={isExplorerOpen ? 'white' : 'gray.300'}
-                  _hover={{ bg: 'var(--bg-card-solid)', transform: 'translateY(-50%) scale(1.1)', color: 'white' }}
-                  onClick={() => setIsExplorerOpen((v) => !v)}
-                  transform="translateY(-50%)"
-                />
-              </Tooltip>
+              <VStack
+                position="absolute"
+                top="50%"
+                right={isExplorerOpen ? '328px' : 3}
+                transform="translateY(-50%)"
+                spacing={1}
+                zIndex={5}
+                transition="right 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)"
+              >
+                <Tooltip label={isExplorerOpen ? 'Close view explorer' : 'Open view explorer'} placement="left" openDelay={300}>
+                  <IconButton
+                    data-testid="vieweditor-toggle-explorer"
+                    aria-label={isExplorerOpen ? 'Close view explorer' : 'Open view explorer'}
+                    icon={isExplorerOpen ? <ChevronRightIcon size={16} strokeWidth={3.5} /> : <NavigationIcon size={18} />}
+                    size="md"
+                    transition="transform 0.15s ease"
+                    border="1px solid rgba(255, 255, 255, 0.08)"
+                    variant="clay" colorScheme="gray" bg="var(--bg-panel)"
+                    color={isExplorerOpen ? 'white' : 'gray.300'}
+                    _hover={{ bg: 'var(--bg-card-solid)', transform: 'scale(1.1)', color: 'white' }}
+                    onClick={() => setIsExplorerOpen((v) => !v)}
+                  />
+                </Tooltip>
+                <KbdHint ml={0} opacity={0.6}>D</KbdHint>
+              </VStack>
             )}
 
             {/* Mobile toggles */}

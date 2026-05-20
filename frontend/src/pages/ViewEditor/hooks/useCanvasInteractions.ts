@@ -219,6 +219,10 @@ interface CanvasInteractionOptions {
   drawingCanvasRef: React.MutableRefObject<DrawingCanvasHandle | null>
   snapToGrid?: boolean
   onMoveStateChange?: (isMoving: boolean) => void
+  toggleLibrary?: () => void
+  toggleExplorer?: () => void
+  onFitView?: () => void
+  setSnapToGrid?: (snap: boolean) => void
 }
 
 type PickerState = {
@@ -303,6 +307,10 @@ export function useCanvasInteractions({
   drawingCanvasRef,
   snapToGrid,
   onMoveStateChange,
+  toggleLibrary,
+  toggleExplorer,
+  onFitView,
+  setSnapToGrid: setGlobalSnapToGrid,
 }: CanvasInteractionOptions) {
   const { screenToFlowPosition, setViewport, getViewport, zoomIn, zoomOut } = useReactFlow()
   const updateElementPosition = useStore((state) => state.updateElementPosition)
@@ -1334,10 +1342,23 @@ export function useCanvasInteractions({
       const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' ||
         target?.tagName === 'SELECT' || target?.isContentEditable
       if (isInput) return
-      if (e.key === 'Escape') { setInteractionSourceId(null); return }
+      if (e.key === 'Escape') {
+        if (selectedElement || selectedConnector) {
+          setSelectedElement(null)
+          setSelectedEdge(null)
+          closeElementPanel()
+          closeConnectorPanel()
+          closeProxyConnectorPanel()
+        }
+        if (clickConnectMode) {
+          setClickConnectMode(null)
+        }
+        setInteractionSourceId(null)
+        return
+      }
       const key = e.key.toLowerCase()
-      if (!['w', 'a', 's', 'd', 'c', 'e', 'backspace', 'delete', 'r'].includes(key)) return
-      if (e.ctrlKey || e.altKey || e.metaKey) return
+      if (!['w', 'a', 's', 'd', 'c', 'e', 'backspace', 'delete', 'r', 'f', 'g', '+', '=', '-', '/'].includes(key)) return
+      if (e.ctrlKey || e.altKey || (e.metaKey && key !== 'z')) return
       if (key === 'c' && e.shiftKey) return
 
       if (key === 'backspace' || key === 'delete' || key === 'r') {
@@ -1403,6 +1424,50 @@ export function useCanvasInteractions({
         if (cursor) setClickConnectCursorPos({ x: cursor.clientX, y: cursor.clientY })
         return
       }
+
+      if (key === 'f') {
+        e.preventDefault()
+        onFitView?.()
+        return
+      }
+
+      if (key === 'g') {
+        e.preventDefault()
+        setGlobalSnapToGrid?.(!snapToGrid)
+        return
+      }
+
+      if (key === '/') {
+        e.preventDefault()
+        // Focus search in open panel
+        const searchInput = document.querySelector<HTMLInputElement>('.panel-search-input')
+        searchInput?.focus()
+        return
+      }
+
+      if (key === '+' || key === '=') {
+        e.preventDefault()
+        zoomIn()
+        return
+      }
+
+      if (key === '-') {
+        e.preventDefault()
+        zoomOut()
+        return
+      }
+
+      if (key === 'a') {
+        e.preventDefault()
+        toggleLibrary?.()
+        return
+      }
+
+      if (key === 'd') {
+        e.preventDefault()
+        toggleExplorer?.()
+        return
+      }
       const cid = viewIdRef.current
       if (!cid) return
       const incoming = incomingLinksRef.current
@@ -1462,18 +1527,12 @@ export function useCanvasInteractions({
           if (allParents.length > 0) nav(`/views/${allParents[0]}`)
         } else if (key === 's') {
           if (allChildren.length > 0) nav(`/views/${allChildren[0]}`)
-        } else {
-          if (allSiblings.length < 2) return
-          const idx = allSiblings.findIndex((n) => n.id === cid)
-          if (idx === -1) return
-          const next = key === 'd' ? (idx + 1) % allSiblings.length : (idx - 1 + allSiblings.length) % allSiblings.length
-          nav(`/views/${allSiblings[next].id}`)
         }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, closeElementPanel, closeConnectorPanel, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef])
+  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, clickConnectMode, setClickConnectMode, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef, onFitView, setGlobalSnapToGrid, snapToGrid, toggleLibrary, toggleExplorer, zoomIn, zoomOut])
 
   // ── DnD handlers ──────────────────────────────────────────────────────────
   const onDragOver = useCallback((e: React.DragEvent) => {
