@@ -94,13 +94,24 @@ import { pickUnusedColor } from '../../components/ViewExplorer/utils'
 import { EmptyCanvasState } from './components/EmptyCanvasState'
 import { EditorOverlays } from './components/EditorOverlays'
 import { ConnectorContextMenu, CanvasContextMenu } from './components/EditorMenus'
+import SelectionBulkBar from './components/SelectionBulkBar'
 import { overrideViewContentInSnapshot } from '../../crossBranch/graph'
 import { useCrossBranchContextSettings } from '../../crossBranch/settings'
-import { removeConnectorGraphSnapshot, upsertConnectorGraphSnapshot, useWorkspaceGraphSnapshot } from '../../crossBranch/store'
+import { removeConnectorGraphSnapshot, removePlacementGraphSnapshot, upsertConnectorGraphSnapshot, upsertPlacementGraphSnapshot, useWorkspaceGraphSnapshot } from '../../crossBranch/store'
 import type { ProxyConnectorDetails } from '../../crossBranch/types'
 import { useDemoRevealViewport, type ViewEditorDemoOptions } from '../../demo/viewEditor'
 import { buildElementLibraryItems, useStore, placedElementToLibraryElement, resolveElementForUpdate } from '../../store/useStore'
 import { useWorkspaceVersionPreview } from '../../context/WorkspaceVersionContext'
+import {
+  elementSelectionRects,
+  planSelectionAlignment,
+  planSelectionDistribution,
+  selectedElementIds,
+  selectionBounds,
+  type SelectionAlign,
+  type SelectionDistribute,
+  type SelectionNodeUpdate,
+} from './selection'
 
 const nodeTypes = {
   elementNode: ElementNode,
@@ -622,6 +633,32 @@ function ViewEditorInner({
   refreshElementsRef.current = refreshElements
 
   const { hasSignificantOverlaps, dismiss: dismissOverlapSuggestion } = useOverlapDetection(rfNodes, viewId)
+  const selectedCanvasElementIds = useMemo(() => selectedElementIds(rfNodes), [rfNodes])
+  const selectedCanvasElementIdKey = selectedCanvasElementIds.join(',')
+  const selectedCanvasElements = useMemo(() => {
+    const selectedIds = new Set(selectedCanvasElementIds)
+    return viewElements.filter((element) => selectedIds.has(element.element_id))
+  }, [selectedCanvasElementIds, viewElements])
+  const selectedCanvasTagCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    selectedCanvasElements.forEach((element) => {
+      const tags = element.tags ?? []
+      tags.forEach((tag) => {
+        counts[tag] = (counts[tag] ?? 0) + 1
+      })
+    })
+    return counts
+  }, [selectedCanvasElements])
+
+  useEffect(() => {
+    if (selectedCanvasElementIds.length <= 1) return
+    setSelectedElement(null)
+    setSelectedEdge(null)
+    setSelectedProxyConnectorDetails(null)
+    elementPanel.onClose()
+    connectorPanel.onClose()
+    proxyConnectorPanel.onClose()
+  }, [connectorPanel, elementPanel, proxyConnectorPanel, selectedCanvasElementIdKey, selectedCanvasElementIds.length])
 
   const overrideDeltaFor = useCallback((resourceType: VisibilityOverride['resource_type'], resourceId?: number | null) => {
     if (resourceId == null) return 0
@@ -827,6 +864,28 @@ function ViewEditorInner({
     })
   }, [applyElementSaved, pushEditAction, refreshElements])
 
+  const pushElementEditBatchAction = useCallback((beforeBatch: WorkspaceElement[], afterBatch: WorkspaceElement[]) => {
+    const pairs = beforeBatch
+      .map((before, index) => ({ before, after: afterBatch[index] }))
+      .filter((pair): pair is { before: WorkspaceElement; after: WorkspaceElement } =>
+        !!pair.after && !elementSnapshotsEqual(pair.before, pair.after)
+      )
+    if (pairs.length === 0) return
+
+    pushEditAction({
+      undo: async () => {
+        const saved = await Promise.all(pairs.map(({ before }) => api.elements.update(before.id, elementUpdatePayload(before))))
+        saved.forEach(applyElementSaved)
+        await refreshElements()
+      },
+      redo: async () => {
+        const saved = await Promise.all(pairs.map(({ after }) => api.elements.update(after.id, elementUpdatePayload(after))))
+        saved.forEach(applyElementSaved)
+        await refreshElements()
+      },
+    })
+  }, [applyElementSaved, pushEditAction, refreshElements])
+
   const handleUpdateTags = useCallback(async (elementId: number, tags: string[]) => {
     if (!canEdit) return
     const obj = resolveElementForUpdate(elementId, selectedElement, allElements, viewElements)
@@ -860,6 +919,30 @@ function ViewEditorInner({
     })
   }, [pushEditAction, refreshElements])
 
+  const pushPlacementMoveBatchAction = useCallback((beforeBatch: PlacedElement[], afterBatch: PlacedElement[]) => {
+    const pairs = beforeBatch
+      .map((before, index) => ({ before, after: afterBatch[index] }))
+      .filter((pair): pair is { before: PlacedElement; after: PlacedElement } =>
+        !!pair.after && !placementSnapshotsEqual(pair.before, pair.after)
+      )
+    if (pairs.length === 0) return
+
+    pushEditAction({
+      undo: async () => {
+        await Promise.all(pairs.map(({ before }) =>
+          api.workspace.views.placements.updatePosition(before.view_id, before.element_id, before.position_x, before.position_y)
+        ))
+        await refreshElements()
+      },
+      redo: async () => {
+        await Promise.all(pairs.map(({ after }) =>
+          api.workspace.views.placements.updatePosition(after.view_id, after.element_id, after.position_x, after.position_y)
+        ))
+        await refreshElements()
+      },
+    })
+  }, [pushEditAction, refreshElements])
+
   const pushPlacementRemoveAction = useCallback((placement: PlacedElement) => {
     pushEditAction({
       undo: async () => {
@@ -872,6 +955,155 @@ function ViewEditorInner({
       },
     })
   }, [pushEditAction, refreshElements])
+
+  const pushPlacementRemoveBatchAction = useCallback((placements: PlacedElement[]) => {
+    if (placements.length === 0) return
+    pushEditAction({
+      undo: async () => {
+        await Promise.all(placements.map((placement) =>
+          api.workspace.views.placements.add(placement.view_id, placement.element_id, placement.position_x, placement.position_y)
+        ))
+        await refreshElements()
+      },
+      redo: async () => {
+        await Promise.all(placements.map((placement) =>
+          api.workspace.views.placements.remove(placement.view_id, placement.element_id)
+        ))
+        await refreshElements()
+      },
+    })
+  }, [pushEditAction, refreshElements])
+
+  const commitSelectionPlacementUpdates = useCallback(async (updates: SelectionNodeUpdate[]) => {
+    if (!canEdit || viewId === null || updates.length === 0) return
+    const updatesByElementId = new Map(updates.map((update) => [update.elementId, update]))
+    const updatesByNodeId = new Map(updates.map((update) => [update.id, update]))
+    const beforePlacements: PlacedElement[] = []
+    const afterPlacements: PlacedElement[] = []
+
+    viewElementsRef.current.forEach((placement) => {
+      const update = updatesByElementId.get(placement.element_id)
+      if (!update) return
+      const after = { ...placement, position_x: update.x, position_y: update.y }
+      if (placementSnapshotsEqual(placement, after)) return
+      beforePlacements.push({ ...placement })
+      afterPlacements.push(after)
+    })
+    if (afterPlacements.length === 0) return
+
+    setRfNodes((nodes) => nodes.map((node) => {
+      const update = updatesByNodeId.get(node.id)
+      return update ? { ...node, position: { x: update.x, y: update.y } } : node
+    }))
+    setViewElements((elements) => elements.map((element) => {
+      const update = updatesByElementId.get(element.element_id)
+      return update ? { ...element, position_x: update.x, position_y: update.y } : element
+    }))
+
+    try {
+      await Promise.all(afterPlacements.map((placement) =>
+        api.workspace.views.placements.updatePosition(placement.view_id, placement.element_id, placement.position_x, placement.position_y)
+      ))
+      afterPlacements.forEach((placement) => upsertPlacementGraphSnapshot(placement.view_id, placement))
+      pushPlacementMoveBatchAction(beforePlacements, afterPlacements)
+    } catch (err) {
+      toast({ status: 'error', title: 'Failed to update selection', description: String(err) })
+      await refreshElements()
+    }
+  }, [canEdit, pushPlacementMoveBatchAction, refreshElements, setRfNodes, setViewElements, toast, viewElementsRef, viewId])
+
+  const handleSelectionAlign = useCallback((align: SelectionAlign) => {
+    void commitSelectionPlacementUpdates(planSelectionAlignment(rfNodes, align))
+  }, [commitSelectionPlacementUpdates, rfNodes])
+
+  const handleSelectionDistribute = useCallback((direction: SelectionDistribute) => {
+    void commitSelectionPlacementUpdates(planSelectionDistribution(rfNodes, direction))
+  }, [commitSelectionPlacementUpdates, rfNodes])
+
+  const handleFitSelection = useCallback(() => {
+    const rects = elementSelectionRects(rfNodes)
+    const bounds = selectionBounds(rects)
+    if (!bounds) return
+    safeFitView({
+      nodes: rects.map((rect) => ({ id: rect.id })),
+      duration: 500,
+      padding: VIEW_EDITOR_FOCUS_FIT_PADDING,
+    })
+  }, [rfNodes, safeFitView])
+
+  const handleBulkRemoveFromView = useCallback(async () => {
+    if (!canEdit || selectedCanvasElements.length === 0) return
+    const placements = selectedCanvasElements.map((placement) => ({ ...placement }))
+    const selectedIds = new Set(placements.map((placement) => placement.element_id))
+
+    setViewElements((elements) => elements.filter((element) => !selectedIds.has(element.element_id)))
+    setRfNodes((nodes) => nodes.filter((node) => !selectedIds.has(Number(node.id))))
+    setSelectedElement(null)
+    setSelectedEdge(null)
+    elementPanel.onClose()
+    connectorPanel.onClose()
+
+    try {
+      await Promise.all(placements.map((placement) =>
+        api.workspace.views.placements.remove(placement.view_id, placement.element_id)
+      ))
+      placements.forEach((placement) => removePlacementGraphSnapshot(placement.view_id, placement.element_id))
+      pushPlacementRemoveBatchAction(placements)
+    } catch (err) {
+      toast({ status: 'error', title: 'Failed to remove selection', description: String(err) })
+      await refreshElements()
+    }
+  }, [canEdit, connectorPanel, elementPanel, pushPlacementRemoveBatchAction, refreshElements, selectedCanvasElements, setRfNodes, setViewElements, toast])
+
+  const handleBulkTagChange = useCallback(async (tag: string, mode: 'add' | 'remove') => {
+    if (!canEdit) return
+    const name = tag.trim()
+    if (!name) return
+    if (mode === 'add' && !tagColors[name]) await handleCreateTag(name)
+
+    const selectedIds = new Set(selectedCanvasElementIds)
+    const beforeElements = selectedCanvasElementIds
+      .map((elementId) => resolveElementForUpdate(elementId, selectedElement, allElements, viewElements))
+      .filter((element): element is WorkspaceElement => element !== null)
+    const afterElements = beforeElements
+      .filter((element) => selectedIds.has(element.id))
+      .map((element) => {
+        const tags = element.tags ?? []
+        const nextTags = mode === 'add'
+          ? Array.from(new Set([...tags, name]))
+          : tags.filter((existingTag) => existingTag !== name)
+        return { ...element, tags: nextTags }
+      })
+      .filter((element, index) => !elementSnapshotsEqual(beforeElements[index], element))
+
+    if (afterElements.length === 0) return
+    const beforeChanged = afterElements
+      .map((element) => beforeElements.find((before) => before.id === element.id))
+      .filter((element): element is WorkspaceElement => element !== undefined)
+
+    try {
+      const saved = await Promise.all(afterElements.map((element) =>
+        api.elements.update(element.id, elementUpdatePayload(element))
+      ))
+      saved.forEach(applyElementSaved)
+      pushElementEditBatchAction(beforeChanged, saved)
+    } catch (err) {
+      toast({ status: 'error', title: 'Failed to update tags', description: String(err) })
+      await refreshElements()
+    }
+  }, [
+    allElements,
+    applyElementSaved,
+    canEdit,
+    handleCreateTag,
+    pushElementEditBatchAction,
+    refreshElements,
+    selectedCanvasElementIds,
+    selectedElement,
+    tagColors,
+    toast,
+    viewElements,
+  ])
 
   const pushConnectorEditAction = useCallback((before: Connector, after: Connector) => {
     if (connectorSnapshotsEqual(before, after)) return
@@ -1062,9 +1294,11 @@ function ViewEditorInner({
       void refreshElementsRef.current()
     }, [removeStoreConnector, viewId]),
     onPlacementMoved: pushPlacementMoveAction,
+    onPlacementsMoved: pushPlacementMoveBatchAction,
     onPlacementRemoved: pushPlacementRemoveAction,
     onConnectorUpdated: pushConnectorEditAction,
     onConnectorDeleted: pushConnectorDeleteAction,
+    onSelectionRemoveFromView: handleBulkRemoveFromView,
     onUnsupportedMutation: handleUnsupportedMutation,
     handleUpdateTags,
     drawingCanvasRef,
@@ -1863,7 +2097,8 @@ function ViewEditorInner({
                 deleteKeyCode={null}
                 onlyRenderVisibleElements
                 autoPanOnNodeDrag={false}
-                panOnDrag={!drawingMode}
+                selectionOnDrag={canEdit && !drawingMode}
+                panOnDrag={drawingMode ? false : canEdit ? [1, 2] : true}
                 panOnScroll={!isMobileLayout} panOnScrollSpeed={1.2} panOnScrollMode={PanOnScrollMode.Free}
                 zoomOnScroll={false} zoomOnPinch
               >
@@ -2046,6 +2281,19 @@ function ViewEditorInner({
             )}
 
             <EmptyCanvasState isMobile={isMobileLayout} hasNodes={rfNodes.length > 0} />
+
+            <SelectionBulkBar
+              count={drawingMode ? 0 : selectedCanvasElementIds.length}
+              availableTags={availableTags}
+              selectedTagCounts={selectedCanvasTagCounts}
+              tagColors={tagColors}
+              onAlign={handleSelectionAlign}
+              onDistribute={handleSelectionDistribute}
+              onFitSelection={handleFitSelection}
+              onAddTag={(tag) => { void handleBulkTagChange(tag, 'add') }}
+              onRemoveTag={(tag) => { void handleBulkTagChange(tag, 'remove') }}
+              onRemoveFromView={() => { void handleBulkRemoveFromView() }}
+            />
 
             <ViewFloatingMenu
               handleAddElementAtCenter={handleAddElementAtCenter}
