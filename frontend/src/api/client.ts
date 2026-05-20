@@ -460,7 +460,7 @@ function protoDependencyConnector(e: Record<string, unknown>): DependencyConnect
     description: (e.description ?? null) as string | null,
     relationship_type: (e.relationship_type ?? e.relationshipType ?? e.relationship ?? null) as string | null,
     direction: String(e.direction ?? 'forward'),
-    connector_type: String(e.connector_type ?? e.connectorType ?? e.style ?? 'solid'),
+    connector_type: String(e.connector_type ?? e.connectorType ?? e.style ?? 'bezier'),
     url: (e.url ?? null) as string | null,
     source_handle: (e.source_handle ?? e.sourceHandle ?? null) as string | null,
     target_handle: (e.target_handle ?? e.targetHandle ?? null) as string | null,

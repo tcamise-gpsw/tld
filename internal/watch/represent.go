@@ -2593,7 +2593,7 @@ func (m *materializer) upsertConnectorDetailedWithDirection(ctx context.Context,
 		}
 		_, err = m.store.db.ExecContext(ctx, `
 			UPDATE connectors
-			SET view_id = ?, source_element_id = ?, target_element_id = ?, label = ?, description = ?, relationship = ?, direction = ?, style = 'solid', source_handle = ?, target_handle = ?, updated_at = ?
+			SET view_id = ?, source_element_id = ?, target_element_id = ?, label = ?, description = ?, relationship = ?, direction = ?, style = 'bezier', source_handle = ?, target_handle = ?, updated_at = ?
 			WHERE id = ?`, viewID, sourceElementID, targetElementID, label, nullString(description), relationship, direction, nullString(sourceHandle), nullString(targetHandle), nowString(), state.ResourceID)
 		if err != nil {
 			return err
@@ -2607,7 +2607,7 @@ func (m *materializer) upsertConnectorDetailedWithDirection(ctx context.Context,
 	now := nowString()
 	res, err := m.store.db.ExecContext(ctx, `
 		INSERT INTO connectors(view_id, source_element_id, target_element_id, label, description, relationship, direction, style, source_handle, target_handle, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'solid', ?, ?, ?, ?)`, viewID, sourceElementID, targetElementID, label, nullString(description), relationship, direction, nullString(sourceHandle), nullString(targetHandle), now, now)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'bezier', ?, ?, ?, ?)`, viewID, sourceElementID, targetElementID, label, nullString(description), relationship, direction, nullString(sourceHandle), nullString(targetHandle), now, now)
 	if err != nil {
 		return err
 	}

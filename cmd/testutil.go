@@ -194,7 +194,7 @@ func SuccessResponse(req *diagv1.ApplyPlanRequest) *diagv1.ApplyPlanResponse {
 			TargetElementId: 100,
 			Label:           connector.Label,
 			Direction:       ValueOr(connector.Direction, "forward"),
-			Style:           ValueOr(connector.Style, "solid"),
+			Style:           ValueOr(connector.Style, "bezier"),
 		})
 		resp.ConnectorMetadata[connector.Ref] = &diagv1.ResourceMetadata{Id: connectorID, UpdatedAt: timestamppb.Now()}
 	}

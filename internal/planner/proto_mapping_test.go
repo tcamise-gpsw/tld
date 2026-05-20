@@ -85,7 +85,7 @@ func TestProtoMapping_ConnectorFields(t *testing.T) {
 				Description:     "primary path",
 				Relationship:    "sync",
 				Direction:       "forward",
-				Style:           "solid",
+				Style:           "bezier",
 				URL:             "https://example.com/flow",
 				SourceHandle:    "right",
 				TargetHandle:    "left",

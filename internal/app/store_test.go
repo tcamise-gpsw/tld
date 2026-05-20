@@ -44,6 +44,13 @@ func TestConfigureSQLiteDBEnablesBusyTimeoutAndWAL(t *testing.T) {
 	}
 }
 
+func TestOpenStoreRegistersSQLiteVecBeforeOpeningConnections(t *testing.T) {
+	store := openAppStore(t)
+	if _, err := store.DB().Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS test_vec USING vec(id)`); err != nil {
+		t.Fatalf("create sqlite-vec virtual table: %v", err)
+	}
+}
+
 func TestStoreElementsSearchPaginationAndViewMetadata(t *testing.T) {
 	store := openAppStore(t)
 	ctx := context.Background()
@@ -402,7 +409,7 @@ func TestExploreLoadsWorkspaceDataInBatches(t *testing.T) {
 			(101, 100, 101, 30, 40, 'now', 'now'),
 			(102, 101, 101, 50, 60, 'now', 'now');
 		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, direction, style, created_at, updated_at)
-		VALUES (100, 100, 100, 101, 'reads', 'forward', 'solid', 'now', 'now');
+		VALUES (100, 100, 100, 101, 'reads', 'forward', 'bezier', 'now', 'now');
 	`); err != nil {
 		t.Fatal(err)
 	}

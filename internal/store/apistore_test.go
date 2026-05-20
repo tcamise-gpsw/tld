@@ -114,7 +114,7 @@ func TestGetWorkspaceResourceCountsUsesTableCounts(t *testing.T) {
 		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
 		VALUES (1, 1, 0, 0, 'now', 'now'), (2, 2, 10, 10, 'now', 'now');
 		INSERT INTO connectors(view_id, source_element_id, target_element_id, direction, style, created_at, updated_at)
-		VALUES (1, 1, 2, 'forward', 'solid', 'now', 'now');
+		VALUES (1, 1, 2, 'forward', 'bezier', 'now', 'now');
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -298,15 +298,15 @@ func TestConnectorAdapterPreservesHandlesDefaultsAndViewFiltering(t *testing.T) 
 		SourceID:     10,
 		TargetID:     11,
 		Label:        &label,
-		Style:        "solid",
+		Style:        "bezier",
 		SourceHandle: &sourceHandle,
 		TargetHandle: &targetHandle,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connector.GetDirection() != "forward" || connector.GetStyle() != "solid" {
-		t.Fatalf("connector defaults = direction:%q style:%q, want forward/solid", connector.GetDirection(), connector.GetStyle())
+	if connector.GetDirection() != "forward" || connector.GetStyle() != "bezier" {
+		t.Fatalf("connector defaults = direction:%q style:%q, want forward/bezier", connector.GetDirection(), connector.GetStyle())
 	}
 	if connector.GetSourceHandle() != "right" || connector.GetTargetHandle() != "left" {
 		t.Fatalf("connector handles = %q/%q, want right/left", connector.GetSourceHandle(), connector.GetTargetHandle())

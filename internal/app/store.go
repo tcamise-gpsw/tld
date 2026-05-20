@@ -96,13 +96,13 @@ func OpenStore(dbPath string, migrations embed.FS) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := configureSQLiteDB(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	if err := sqlitevec.Register(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("register sqlite-vec: %w", err)
+	}
+	if err := configureSQLiteDB(db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	if err := applyMigrations(db, migrations); err != nil {
 		_ = db.Close()
@@ -199,7 +199,7 @@ func normalizeDirection(value *string) string {
 
 func normalizeStyle(value *string) string {
 	if value == nil || strings.TrimSpace(*value) == "" {
-		return "solid"
+		return "bezier"
 	}
 	return *value
 }

@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS connectors (
   description TEXT NULL,
   relationship TEXT NULL,
   direction TEXT NOT NULL DEFAULT 'forward',
-  style TEXT NOT NULL DEFAULT 'solid',
+  style TEXT NOT NULL DEFAULT 'bezier',
   url TEXT NULL,
   source_handle TEXT NULL,
   target_handle TEXT NULL,

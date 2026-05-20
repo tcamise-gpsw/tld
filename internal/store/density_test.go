@@ -28,9 +28,9 @@ func seedDensityView(t *testing.T, sqliteStore *SQLiteStore) {
 			(1, 106, 50, 0, 'now', 'now');
 		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, direction, style, created_at, updated_at)
 		VALUES
-			(201, 1, 101, 102, 'important', 'forward', 'solid', 'now', 'now'),
-			(202, 1, 105, 106, NULL, 'forward', 'solid', 'now', 'now'),
-			(203, 1, 103, 104, 'important', 'forward', 'solid', 'now', 'now');
+			(201, 1, 101, 102, 'important', 'forward', 'bezier', 'now', 'now'),
+			(202, 1, 105, 106, NULL, 'forward', 'bezier', 'now', 'now'),
+			(203, 1, 103, 104, 'important', 'forward', 'bezier', 'now', 'now');
 	`); err != nil {
 		t.Fatal(err)
 	}
