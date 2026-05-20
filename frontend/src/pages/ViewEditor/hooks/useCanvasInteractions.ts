@@ -1377,6 +1377,7 @@ export function useCanvasInteractions({
         target?.tagName === 'SELECT' || target?.isContentEditable
       if (isInput) return
       if (e.key === 'Escape') {
+        e.preventDefault()
         if (selectedElement || selectedConnector) {
           setSelectedElement(null)
           setSelectedEdge(null)
@@ -1384,9 +1385,18 @@ export function useCanvasInteractions({
           closeConnectorPanel()
           closeProxyConnectorPanel()
         }
-        if (clickConnectMode) {
-          setClickConnectMode(null)
-        }
+        reconnectPickingRef.current = null
+        pendingConnectionSourceRef.current = null
+        pendingConnectionSourceHandleRef.current = null
+        interactionSourceIdRef.current = null
+        clickConnectModeRef.current = null
+        setReconnectPicking(null)
+        setConnectorLongPressMenu(null)
+        setAddingElementAt(null)
+        setPendingConnectionSource(null)
+        setClickConnectMode(null)
+        setClickConnectCursorPos(null)
+        setConnectGhostPos(null)
         setInteractionSourceId(null)
         return
       }
@@ -1456,10 +1466,13 @@ export function useCanvasInteractions({
           ? screenToFlowPositionRef.current({ x: cursor.clientX, y: cursor.clientY })
           : { x: node.position.x + (node.width ?? 180), y: node.position.y + (node.height ?? 80) / 2 }
         const { sourceHandle } = findClosestHandleToPoint(node, flowCursor.x, flowCursor.y)
-        setClickConnectMode({
+        const nextClickConnectMode = {
           sourceNodeId: node.id,
           sourceHandle: ensureVisualHandleId(sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? sourceHandle,
-        })
+        }
+        clickConnectModeRef.current = nextClickConnectMode
+        interactionSourceIdRef.current = selectedElement.id
+        setClickConnectMode(nextClickConnectMode)
         setInteractionSourceId(selectedElement.id)
         if (cursor) setClickConnectCursorPos({ x: cursor.clientX, y: cursor.clientY })
         return
@@ -1576,9 +1589,9 @@ export function useCanvasInteractions({
         }
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, onSelectionRemoveFromView, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, clickConnectMode, setClickConnectMode, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef, onFitView, setGlobalSnapToGrid, snapToGrid, libraryOpen, openLibrary, toggleLibrary, toggleExplorer, zoomIn, zoomOut])
+    window.addEventListener('keydown', handler, { capture: true })
+    return () => window.removeEventListener('keydown', handler, { capture: true })
+  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, onSelectionRemoveFromView, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, clickConnectMode, setClickConnectMode, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef, interactionSourceIdRef, onFitView, setGlobalSnapToGrid, snapToGrid, libraryOpen, openLibrary, toggleLibrary, toggleExplorer, zoomIn, zoomOut])
 
   // ── DnD handlers ──────────────────────────────────────────────────────────
   const onDragOver = useCallback((e: React.DragEvent) => {
