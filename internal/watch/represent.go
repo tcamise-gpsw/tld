@@ -3030,10 +3030,6 @@ func bestLanguage(counts map[string]int, fallback string) string {
 	return best
 }
 
-func dominantLanguage(symbols map[int64]Symbol) string {
-	return newSymbolLanguageIndex(symbols).repoLanguage
-}
-
 func (i symbolLanguageIndex) languageForFile(file string) string {
 	if i.byFile == nil {
 		return ""
@@ -3046,10 +3042,6 @@ func (m *materializer) languageForFile(file string) string {
 		return ""
 	}
 	return m.symbolLanguages.languageForFile(file)
-}
-
-func languageForFile(file string, symbols map[int64]Symbol) string {
-	return newSymbolLanguageIndex(symbols).languageForFile(file)
 }
 
 func languageFromStableKey(stableKey string) string {

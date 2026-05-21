@@ -47,6 +47,10 @@ type Scanner struct {
 	resolverFactory  func(rootDir string) definitionResolver
 	resolverMu       sync.Mutex
 	resolverRepoRoot string
+
+	expansionCache map[string]*analyzer.Result
+	locationsCache map[string][]analyzerlsp.DefinitionLocation
+	cacheMu        sync.Mutex
 }
 
 type definitionResolver interface {
@@ -115,6 +119,10 @@ func (s *Scanner) ScanFilesWithOptions(ctx context.Context, repo Repository, rel
 	if s == nil || s.Store == nil {
 		return ScanResult{}, fmt.Errorf("watch scanner requires a store")
 	}
+	s.cacheMu.Lock()
+	s.expansionCache = make(map[string]*analyzer.Result)
+	s.locationsCache = make(map[string][]analyzerlsp.DefinitionLocation)
+	s.cacheMu.Unlock()
 	if s.Analyzer == nil {
 		s.Analyzer = analyzer.NewService()
 	}
@@ -247,6 +255,10 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	if s == nil || s.Store == nil {
 		return ScanResult{}, fmt.Errorf("watch scanner requires a store")
 	}
+	s.cacheMu.Lock()
+	s.expansionCache = make(map[string]*analyzer.Result)
+	s.locationsCache = make(map[string][]analyzerlsp.DefinitionLocation)
+	s.cacheMu.Unlock()
 	if s.Analyzer == nil {
 		s.Analyzer = analyzer.NewService()
 	}
@@ -503,24 +515,6 @@ func changedScanFiles(repoRoot string, changes map[string]tldgit.WorktreeChange,
 	return files
 }
 
-func uniqueAbsFiles(files []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(files))
-	for _, file := range files {
-		file = filepath.Clean(file)
-		if file == "" {
-			continue
-		}
-		if _, ok := seen[file]; ok {
-			continue
-		}
-		seen[file] = struct{}{}
-		out = append(out, file)
-	}
-	sort.Strings(out)
-	return out
-}
-
 type limitedExpansion struct {
 	Files               []string
 	RecentFiles         int
@@ -697,10 +691,31 @@ func (s *Scanner) parseLimitedExpansionFiles(ctx context.Context, repoRoot strin
 		if !ok || !parseable {
 			continue
 		}
-		result, err := analyzerSvc.ExtractPath(ctx, absFile, rules, nil)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("could not parse %s for graph expansion: %v", rel, err))
-			continue
+		var result *analyzer.Result
+		s.cacheMu.Lock()
+		var cached *analyzer.Result
+		var exists bool
+		if s.expansionCache != nil {
+			cached, exists = s.expansionCache[absFile]
+		}
+		if exists {
+			result = cached
+			s.cacheMu.Unlock()
+		} else {
+			s.cacheMu.Unlock()
+			var err error
+			result, err = analyzerSvc.ExtractPath(ctx, absFile, rules, nil)
+			if err == nil {
+				s.cacheMu.Lock()
+				if s.expansionCache == nil {
+					s.expansionCache = make(map[string]*analyzer.Result)
+				}
+				s.expansionCache[absFile] = result
+				s.cacheMu.Unlock()
+			} else {
+				warnings = append(warnings, fmt.Sprintf("could not parse %s for graph expansion: %v", rel, err))
+				continue
+			}
 		}
 		parsed = append(parsed, limitedParsedFile{
 			AbsFile: absFile,
@@ -721,9 +736,28 @@ func (s *Scanner) expandReferenceNeighbors(ctx context.Context, repositoryID int
 			if resolver == nil {
 				continue
 			}
-			locations, err := resolver.ResolveDefinitions(ctx, ref)
-			if err != nil {
-				continue
+			key := ref.FilePath + ":" + fmt.Sprint(ref.Line) + ":" + fmt.Sprint(ref.Column)
+			s.cacheMu.Lock()
+			var locations []analyzerlsp.DefinitionLocation
+			var exists bool
+			if s.locationsCache != nil {
+				locations, exists = s.locationsCache[key]
+			}
+			s.cacheMu.Unlock()
+
+			if !exists {
+				var err error
+				locations, err = resolver.ResolveDefinitions(ctx, ref)
+				if err == nil {
+					s.cacheMu.Lock()
+					if s.locationsCache == nil {
+						s.locationsCache = make(map[string][]analyzerlsp.DefinitionLocation)
+					}
+					s.locationsCache[key] = locations
+					s.cacheMu.Unlock()
+				} else {
+					continue
+				}
 			}
 			for _, location := range locations {
 				absFile, _, ok := limitedCandidateFile(repoRoot, location.FilePath, settings, rules)
@@ -741,34 +775,53 @@ func (s *Scanner) expandStoredReferenceNeighbors(ctx context.Context, repository
 	if s == nil || s.Store == nil || len(parsed) == 0 {
 		return
 	}
-	symbols, err := s.Store.SymbolsForRepository(ctx, repositoryID)
+	var filePaths []string
+	for _, file := range parsed {
+		filePaths = append(filePaths, file.RelPath)
+	}
+	symbols, err := s.Store.QuerySymbolsByFiles(ctx, repositoryID, filePaths)
 	if err != nil {
 		return
 	}
-	byFile := map[string][]Symbol{}
-	byID := map[int64]Symbol{}
+	var sourceIDs []int64
+	sourceByID := map[int64]Symbol{}
 	for _, symbol := range symbols {
-		byFile[symbol.FilePath] = append(byFile[symbol.FilePath], symbol)
-		byID[symbol.ID] = symbol
+		sourceIDs = append(sourceIDs, symbol.ID)
+		sourceByID[symbol.ID] = symbol
 	}
+	refs, err := s.Store.QueryReferencesBySourceIDs(ctx, repositoryID, sourceIDs)
+	if err != nil {
+		return
+	}
+	var targetIDs []int64
+	for _, ref := range refs {
+		targetIDs = append(targetIDs, ref.TargetSymbolID)
+	}
+	targetSymbols, err := s.Store.QuerySymbolsByIDs(ctx, repositoryID, targetIDs)
+	if err != nil {
+		return
+	}
+	targetByID := map[int64]Symbol{}
+	for _, sym := range targetSymbols {
+		targetByID[sym.ID] = sym
+	}
+	fileRoots := map[string][]string{}
 	for _, file := range parsed {
-		var ids []int64
-		for _, symbol := range byFile[file.RelPath] {
-			ids = append(ids, symbol.ID)
-		}
-		refs, err := s.Store.QueryReferencesBySourceIDs(ctx, repositoryID, ids)
-		if err != nil {
+		fileRoots[file.RelPath] = file.Roots
+	}
+	for _, ref := range refs {
+		target, ok := targetByID[ref.TargetSymbolID]
+		if !ok {
 			continue
 		}
-		for _, ref := range refs {
-			target, ok := byID[ref.TargetSymbolID]
-			if !ok {
-				continue
-			}
-			absFile, _, ok := limitedCandidateFile(repoRoot, target.FilePath, settings, rules)
-			if ok {
-				expanded.add(absFile, "neighbor", file.Roots...)
-			}
+		srcSym, ok := sourceByID[ref.SourceSymbolID]
+		if !ok {
+			continue
+		}
+		roots := fileRoots[srcSym.FilePath]
+		absFile, _, ok := limitedCandidateFile(repoRoot, target.FilePath, settings, rules)
+		if ok {
+			expanded.add(absFile, "neighbor", roots...)
 		}
 	}
 }
@@ -777,13 +830,15 @@ func (s *Scanner) expandCallerAncestors(ctx context.Context, repositoryID int64,
 	if settings.Scale.MaxCallerDepth <= 0 || len(parsed) == 0 {
 		return
 	}
-	storedSymbols, _ := s.Store.SymbolsForRepository(ctx, repositoryID)
+	var seedFiles []string
+	for _, file := range parsed {
+		seedFiles = append(seedFiles, file.RelPath)
+	}
+	storedSymbols, _ := s.Store.QuerySymbolsByFiles(ctx, repositoryID, seedFiles)
 	storedByLocation := map[string]Symbol{}
-	storedByID := map[int64]Symbol{}
 	for _, symbol := range storedSymbols {
 		key := callerLocationKey(filepath.Join(repoRoot, filepath.FromSlash(symbol.FilePath)), symbol.StartLine, symbol.Name)
 		storedByLocation[key] = symbol
-		storedByID[symbol.ID] = symbol
 	}
 	var frontier []limitedCallerNode
 	for _, file := range parsed {
@@ -804,8 +859,80 @@ func (s *Scanner) expandCallerAncestors(ctx context.Context, repositoryID int64,
 	for depth := 1; depth <= settings.Scale.MaxCallerDepth && len(frontier) > 0; depth++ {
 		expanded.CallerDepthReached = depth
 		var next []limitedCallerNode
+
+		// 1. Batch query references and source symbols for DB candidates in the current frontier
+		var dbTargetIDs []int64
+		seenTargetIDs := map[int64]bool{}
 		for _, node := range frontier {
-			callers := s.incomingCallerNodes(ctx, repositoryID, repoRoot, resolver, node, storedByID)
+			if node.SymbolID > 0 && !seenTargetIDs[node.SymbolID] {
+				seenTargetIDs[node.SymbolID] = true
+				dbTargetIDs = append(dbTargetIDs, node.SymbolID)
+			}
+		}
+
+		var dbRefs []Reference
+		if len(dbTargetIDs) > 0 && s != nil && s.Store != nil {
+			dbRefs, _ = s.Store.QueryReferencesByTargetIDs(ctx, repositoryID, dbTargetIDs)
+		}
+
+		var dbSourceIDs []int64
+		seenSourceIDs := map[int64]bool{}
+		for _, ref := range dbRefs {
+			if !seenSourceIDs[ref.SourceSymbolID] {
+				seenSourceIDs[ref.SourceSymbolID] = true
+				dbSourceIDs = append(dbSourceIDs, ref.SourceSymbolID)
+			}
+		}
+
+		var sourceSymbols []Symbol
+		if len(dbSourceIDs) > 0 && s != nil && s.Store != nil {
+			sourceSymbols, _ = s.Store.QuerySymbolsByIDs(ctx, repositoryID, dbSourceIDs)
+		}
+
+		sourceByID := map[int64]Symbol{}
+		for _, sym := range sourceSymbols {
+			sourceByID[sym.ID] = sym
+		}
+
+		dbCallersByTargetID := map[int64][]Symbol{}
+		for _, ref := range dbRefs {
+			if srcSym, ok := sourceByID[ref.SourceSymbolID]; ok {
+				dbCallersByTargetID[ref.TargetSymbolID] = append(dbCallersByTargetID[ref.TargetSymbolID], srcSym)
+			}
+		}
+
+		// 2. Iterate through frontier nodes to find callers
+		for _, node := range frontier {
+			var callers []limitedCallerNode
+			var foundInDB bool
+
+			if node.SymbolID > 0 {
+				if dbSyms, ok := dbCallersByTargetID[node.SymbolID]; ok && len(dbSyms) > 0 {
+					foundInDB = true
+					for _, sym := range dbSyms {
+						callers = append(callers, limitedCallerNode{
+							FilePath: filepath.Join(repoRoot, filepath.FromSlash(sym.FilePath)),
+							Line:     sym.StartLine,
+							Name:     sym.Name,
+							SymbolID: sym.ID,
+						})
+					}
+				}
+			}
+
+			if !foundInDB && resolver != nil {
+				calls, err := resolver.IncomingCalls(ctx, node.FilePath, node.Line, 1)
+				if err == nil {
+					for _, call := range calls {
+						callers = append(callers, limitedCallerNode{
+							FilePath: call.FilePath,
+							Line:     call.Line,
+							Name:     call.Name,
+						})
+					}
+				}
+			}
+
 			for _, caller := range callers {
 				absFile, _, ok := limitedCandidateFile(repoRoot, caller.FilePath, settings, rules)
 				if !ok {
@@ -826,43 +953,49 @@ func (s *Scanner) expandCallerAncestors(ctx context.Context, repositoryID int64,
 				next = append(next, caller)
 			}
 		}
+
+		// 3. Deduplicate and build next level's frontier
 		frontier = dedupeCallerNodes(next)
+
+		// 4. Resolve SymbolIDs for the new frontier's unresolved nodes in batch
+		var unresolvedFiles []string
+		seenUnresolved := map[string]bool{}
+		for _, node := range frontier {
+			if node.SymbolID <= 0 {
+				rel, err := filepath.Rel(repoRoot, node.FilePath)
+				if err == nil {
+					rel = filepath.ToSlash(rel)
+					if !seenUnresolved[rel] {
+						seenUnresolved[rel] = true
+						unresolvedFiles = append(unresolvedFiles, rel)
+					}
+				}
+			}
+		}
+
+		if len(unresolvedFiles) > 0 && s != nil && s.Store != nil {
+			resolvedSyms, err := s.Store.QuerySymbolsByFiles(ctx, repositoryID, unresolvedFiles)
+			if err == nil {
+				resolvedByLoc := map[string]int64{}
+				for _, sym := range resolvedSyms {
+					locKey := callerLocationKey(filepath.Join(repoRoot, filepath.FromSlash(sym.FilePath)), sym.StartLine, sym.Name)
+					resolvedByLoc[locKey] = sym.ID
+				}
+				for i := range frontier {
+					if frontier[i].SymbolID <= 0 {
+						locKey := callerLocationKey(frontier[i].FilePath, frontier[i].Line, frontier[i].Name)
+						if id, ok := resolvedByLoc[locKey]; ok {
+							frontier[i].SymbolID = id
+						}
+					}
+				}
+			}
+		}
+
 		if expanded.CapReached {
 			return
 		}
 	}
-}
-
-func (s *Scanner) incomingCallerNodes(ctx context.Context, repositoryID int64, repoRoot string, resolver definitionResolver, node limitedCallerNode, storedByID map[int64]Symbol) []limitedCallerNode {
-	var out []limitedCallerNode
-	if resolver != nil {
-		calls, err := resolver.IncomingCalls(ctx, node.FilePath, node.Line, 1)
-		if err == nil {
-			for _, call := range calls {
-				out = append(out, limitedCallerNode{FilePath: call.FilePath, Line: call.Line, Name: call.Name})
-			}
-		}
-	}
-	if len(out) > 0 || s == nil || s.Store == nil || node.SymbolID <= 0 {
-		return out
-	}
-	refs, err := s.Store.QueryReferencesByTargetIDs(ctx, repositoryID, []int64{node.SymbolID})
-	if err != nil {
-		return out
-	}
-	for _, ref := range refs {
-		source, ok := storedByID[ref.SourceSymbolID]
-		if !ok {
-			continue
-		}
-		out = append(out, limitedCallerNode{
-			FilePath: filepath.Join(repoRoot, filepath.FromSlash(source.FilePath)),
-			Line:     source.StartLine,
-			Name:     source.Name,
-			SymbolID: source.ID,
-		})
-	}
-	return out
 }
 
 func callerLocationKey(filePath string, line int, name string) string {
@@ -1144,15 +1277,36 @@ func (s *Scanner) scanFile(ctx context.Context, workerAnalyzer analyzer.Service,
 		s.logScanFile(ctx, repositoryID, result, languageName, "metadata", started, nil)
 		return result, nil
 	}
-	extracted, err := workerAnalyzer.ExtractPath(ctx, absFile, rules, nil)
-	if err != nil {
-		_, _, upsertErr := s.Store.UpsertFile(ctx, repositoryID, rel, languageName, blobHash, worktreeHash, info.Size(), info.ModTime().UnixNano(), "error", err)
-		if upsertErr != nil {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, upsertErr)
+	var extracted *analyzer.Result
+	s.cacheMu.Lock()
+	var cached *analyzer.Result
+	var exists bool
+	if s.expansionCache != nil {
+		cached, exists = s.expansionCache[absFile]
+	}
+	if exists {
+		extracted = cached
+		s.cacheMu.Unlock()
+	} else {
+		s.cacheMu.Unlock()
+		var err error
+		extracted, err = workerAnalyzer.ExtractPath(ctx, absFile, rules, nil)
+		if err == nil {
+			s.cacheMu.Lock()
+			if s.expansionCache == nil {
+				s.expansionCache = make(map[string]*analyzer.Result)
+			}
+			s.expansionCache[absFile] = extracted
+			s.cacheMu.Unlock()
 		} else {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
+			_, _, upsertErr := s.Store.UpsertFile(ctx, repositoryID, rel, languageName, blobHash, worktreeHash, info.Size(), info.ModTime().UnixNano(), "error", err)
+			if upsertErr != nil {
+				s.logScanFile(ctx, repositoryID, result, languageName, "error", started, upsertErr)
+			} else {
+				s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
+			}
+			return result, upsertErr
 		}
-		return result, upsertErr
 	}
 	symbols := watchSymbolsFromAnalyzer(repositoryID, file.ID, rel, languageName, data, extracted.Symbols)
 	if err := s.Store.ReplaceFileSymbolsWithMissingCandidates(ctx, repositoryID, file.ID, symbols, missingIdentities); err != nil {
@@ -1210,9 +1364,27 @@ func (s *Scanner) backfillFactsForCachedFile(ctx context.Context, workerAnalyzer
 	}
 	var extracted *analyzer.Result
 	if parseable {
-		extracted, err = workerAnalyzer.ExtractPath(ctx, absFile, rules, nil)
-		if err != nil {
-			return err
+		s.cacheMu.Lock()
+		var cached *analyzer.Result
+		var exists bool
+		if s.expansionCache != nil {
+			cached, exists = s.expansionCache[absFile]
+		}
+		if exists {
+			extracted = cached
+			s.cacheMu.Unlock()
+		} else {
+			s.cacheMu.Unlock()
+			extracted, err = workerAnalyzer.ExtractPath(ctx, absFile, rules, nil)
+			if err != nil {
+				return err
+			}
+			s.cacheMu.Lock()
+			if s.expansionCache == nil {
+				s.expansionCache = make(map[string]*analyzer.Result)
+			}
+			s.expansionCache[absFile] = extracted
+			s.cacheMu.Unlock()
 		}
 	}
 	return s.enrichFile(ctx, repositoryID, file.ID, repoRoot, rel, absFile, language, data, extracted, repoSignals, result)
@@ -1249,6 +1421,10 @@ func (s *Scanner) enrichFile(ctx context.Context, repositoryID, fileID int64, re
 }
 
 func watchedFileLanguage(path string) (language string, parseable bool, ok bool) {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return "", false, false
+	}
 	if language, ok := analyzer.DetectLanguage(path); ok {
 		return string(language), true, true
 	}
@@ -1634,7 +1810,7 @@ func (s *Scanner) resolveReferences(ctx context.Context, repoRoot string, reposi
 			if parsedRef.Kind != "" && parsedRef.Kind != "call" {
 				continue
 			}
-			target, ok := resolveTargetSymbol(ctx, resolver, repoRoot, parsedRef, byName, symbols)
+			target, ok := resolveTargetSymbol(ctx, s, resolver, repoRoot, parsedRef, byName, symbols)
 			if !ok {
 				continue
 			}
@@ -1663,10 +1839,35 @@ func (s *Scanner) resolveReferences(ctx context.Context, repoRoot string, reposi
 	return refs, "", nil
 }
 
-func resolveTargetSymbol(ctx context.Context, resolver definitionResolver, repoRoot string, ref analyzer.Ref, byName map[string][]Symbol, symbols []Symbol) (Symbol, bool) {
+func resolveTargetSymbol(ctx context.Context, s *Scanner, resolver definitionResolver, repoRoot string, ref analyzer.Ref, byName map[string][]Symbol, symbols []Symbol) (Symbol, bool) {
 	if resolver != nil {
-		locations, err := resolver.ResolveDefinitions(ctx, ref)
-		if err == nil {
+		var locations []analyzerlsp.DefinitionLocation
+		var exists bool
+		if s != nil {
+			key := ref.FilePath + ":" + fmt.Sprint(ref.Line) + ":" + fmt.Sprint(ref.Column)
+			s.cacheMu.Lock()
+			if s.locationsCache != nil {
+				locations, exists = s.locationsCache[key]
+			}
+			s.cacheMu.Unlock()
+
+			if !exists {
+				var err error
+				locations, err = resolver.ResolveDefinitions(ctx, ref)
+				if err == nil {
+					s.cacheMu.Lock()
+					if s.locationsCache == nil {
+						s.locationsCache = make(map[string][]analyzerlsp.DefinitionLocation)
+					}
+					s.locationsCache[key] = locations
+					s.cacheMu.Unlock()
+				}
+			}
+		} else {
+			locations, _ = resolver.ResolveDefinitions(ctx, ref)
+		}
+
+		if len(locations) > 0 {
 			for _, location := range locations {
 				if sym, ok := symbolAtLocation(repoRoot, symbols, location); ok {
 					return sym, true

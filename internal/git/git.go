@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -181,14 +182,6 @@ func FileLastCommitAt(dir, filePath string) (time.Time, error) {
 // RecentChangedFiles returns unique repository-relative paths touched by local
 // commit history, newest commits first. It never contacts remotes.
 func RecentChangedFiles(dir string, limit int) ([]string, error) {
-	tracked, err := ListTrackedFiles(dir, 0)
-	if err != nil {
-		return nil, err
-	}
-	trackedSet := map[string]struct{}{}
-	for _, file := range tracked.Files {
-		trackedSet[file] = struct{}{}
-	}
 	cmd := exec.Command("git", "log", "--diff-filter=ACMR", "--name-only", "-z", "--format=", "--")
 	cmd.Dir = dir
 	stdout, err := cmd.StdoutPipe()
@@ -205,23 +198,16 @@ func RecentChangedFiles(dir string, limit int) ([]string, error) {
 		raw, readErr := reader.ReadString(0)
 		entry := filepath.ToSlash(strings.TrimSpace(strings.TrimSuffix(raw, "\x00")))
 		if entry != "" {
-			if _, ok := trackedSet[entry]; !ok {
-				if readErr == io.EOF {
-					break
-				}
-				if readErr != nil {
-					_ = cmd.Wait()
-					return nil, fmt.Errorf("git log recent files: %w", readErr)
-				}
-				continue
-			}
 			if _, ok := seen[entry]; !ok {
 				seen[entry] = struct{}{}
-				files = append(files, entry)
-				if limit > 0 && len(files) >= limit {
-					_ = cmd.Process.Kill()
-					_ = cmd.Wait()
-					return files, nil
+				// Verify if the file exists on disk.
+				if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(entry))); err == nil {
+					files = append(files, entry)
+					if limit > 0 && len(files) >= limit {
+						_ = cmd.Process.Kill()
+						_ = cmd.Wait()
+						return files, nil
+					}
 				}
 			}
 		}

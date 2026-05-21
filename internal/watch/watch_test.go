@@ -2550,7 +2550,7 @@ export function caller(): string {
 	if len(byName["shared"]) != 2 {
 		t.Fatalf("expected ambiguous shared symbols, got %+v", byName["shared"])
 	}
-	if _, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "shared", FilePath: filepath.Join(repo, "src", "b.ts"), Line: 6}, byName, symbols); ok {
+	if _, ok := resolveTargetSymbol(context.Background(), nil, nil, repo, analyzer.Ref{Name: "shared", FilePath: filepath.Join(repo, "src", "b.ts"), Line: 6}, byName, symbols); ok {
 		t.Fatal("name-only fallback should not resolve ambiguous shared symbols")
 	}
 
@@ -2588,10 +2588,10 @@ func TestResolveTargetSymbolDoesNotUseGlobalNameOnlyFallback(t *testing.T) {
 		"uniqueCoincidence": {symbols[0]},
 		"caller":            {symbols[1]},
 	}
-	if _, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "uniqueCoincidence", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); ok {
+	if _, ok := resolveTargetSymbol(context.Background(), nil, nil, repo, analyzer.Ref{Name: "uniqueCoincidence", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); ok {
 		t.Fatal("global unique name-only fallback should not create a cross-file reference")
 	}
-	if target, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "caller", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); !ok || target.ID != 2 {
+	if target, ok := resolveTargetSymbol(context.Background(), nil, nil, repo, analyzer.Ref{Name: "caller", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); !ok || target.ID != 2 {
 		t.Fatalf("same-file fallback should still resolve local references, target=%+v ok=%v", target, ok)
 	}
 }

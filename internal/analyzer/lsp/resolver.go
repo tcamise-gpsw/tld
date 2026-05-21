@@ -391,11 +391,11 @@ func (r *MultiLanguageResolver) openDocument(ctx context.Context, session *Sessi
 	return nil
 }
 
-func (r *MultiLanguageResolver) restartAfterFailure(ctx context.Context, language analyzer.Language, reason string, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.restartLocked(ctx, language, reason, err)
-}
+// func (r *MultiLanguageResolver) restartAfterFailure(ctx context.Context, language analyzer.Language, reason string, err error) {
+// 	r.mu.Lock()
+// 	defer r.mu.Unlock()
+// 	r.restartLocked(ctx, language, reason, err)
+// }
 
 func (r *MultiLanguageResolver) markFailed(ctx context.Context, language analyzer.Language, reason string, err error) {
 	r.mu.Lock()

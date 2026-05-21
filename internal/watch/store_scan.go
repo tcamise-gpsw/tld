@@ -1003,6 +1003,78 @@ func (s *Store) SymbolsForRepository(ctx context.Context, repositoryID int64) ([
 	return s.QuerySymbols(ctx, repositoryID, SymbolQuery{Limit: -1})
 }
 
+func (s *Store) querySymbolsWhere(ctx context.Context, repositoryID int64, whereClause string, args ...any) ([]Symbol, error) {
+	query := `
+		SELECT s.id, s.repository_id, s.file_id, f.path, s.stable_key, s.name, s.qualified_name, s.kind, s.start_line, s.end_line, s.signature_hash, s.content_hash, s.raw_json, s.created_at, s.updated_at
+		FROM watch_symbols s
+		JOIN watch_files f ON f.id = s.file_id
+		WHERE s.repository_id = ? AND ` + whereClause
+	fullArgs := append([]any{repositoryID}, args...)
+	rows, err := s.db.QueryContext(ctx, query, fullArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Symbol
+	for rows.Next() {
+		var sym Symbol
+		var endLine sql.NullInt64
+		if err := rows.Scan(&sym.ID, &sym.RepositoryID, &sym.FileID, &sym.FilePath, &sym.StableKey, &sym.Name, &sym.QualifiedName, &sym.Kind, &sym.StartLine, &endLine, &sym.SignatureHash, &sym.ContentHash, &sym.RawJSON, &sym.CreatedAt, &sym.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if endLine.Valid {
+			value := int(endLine.Int64)
+			sym.EndLine = &value
+		}
+		out = append(out, sym)
+	}
+	return out, rows.Err()
+}
+
+// QuerySymbolsByFiles returns symbols in the repository whose files match any of the given relative paths.
+func (s *Store) QuerySymbolsByFiles(ctx context.Context, repositoryID int64, filePaths []string) ([]Symbol, error) {
+	if len(filePaths) == 0 {
+		return nil, nil
+	}
+	var allSymbols []Symbol
+	for i := 0; i < len(filePaths); i += maxInClauseIDs {
+		end := i + maxInClauseIDs
+		if end > len(filePaths) {
+			end = len(filePaths)
+		}
+		batch := filePaths[i:end]
+		placeholders, inArgs := buildParameterListStrings(batch)
+		syms, err := s.querySymbolsWhere(ctx, repositoryID, "f.path IN ("+placeholders+")", inArgs...)
+		if err != nil {
+			return nil, err
+		}
+		allSymbols = append(allSymbols, syms...)
+	}
+	return allSymbols, nil
+}
+
+// QuerySymbolsByIDs returns symbols in the repository whose IDs match any of the given IDs.
+func (s *Store) QuerySymbolsByIDs(ctx context.Context, repositoryID int64, ids []int64) ([]Symbol, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var allSymbols []Symbol
+	for i := 0; i < len(ids); i += maxInClauseIDs {
+		end := i + maxInClauseIDs
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[i:end]
+		placeholders, inArgs := buildParameterList(batch)
+		syms, err := s.querySymbolsWhere(ctx, repositoryID, "s.id IN ("+placeholders+")", inArgs...)
+		if err != nil {
+			return nil, err
+		}
+		allSymbols = append(allSymbols, syms...)
+	}
+	return allSymbols, nil
+}
+
 func (s *Store) QuerySymbols(ctx context.Context, repositoryID int64, q SymbolQuery) ([]Symbol, error) {
 	query := `
 		SELECT s.id, s.repository_id, s.file_id, f.path, s.stable_key, s.name, s.qualified_name, s.kind, s.start_line, s.end_line, s.signature_hash, s.content_hash, s.raw_json, s.created_at, s.updated_at
