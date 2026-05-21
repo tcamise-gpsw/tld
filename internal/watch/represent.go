@@ -652,7 +652,8 @@ func buildSemanticTagPlan(repo Repository, filtered filterResult, thresholds Thr
 		candidates[key] = roleSemanticTags(uniqueSemanticTags(append(candidates[key], tags...)))
 	}
 
-	repoLanguage := dominantLanguage(filtered.VisibleSymbols)
+	languages := newSymbolLanguageIndex(filtered.VisibleSymbols)
+	repoLanguage := languages.repoLanguage
 	add("repository", fmt.Sprintf("repository:%d", repo.ID), semanticLanguageTag(repoLanguage))
 
 	visibleFiles := filesForSymbols(filtered.VisibleSymbols)
@@ -660,7 +661,7 @@ func buildSemanticTagPlan(repo Repository, filtered filterResult, thresholds Thr
 		add("folder", "folder:"+folder, append(semanticPathTags(folder, repoLanguage), ownerMatcher.TagsForPath(folder)...)...)
 	}
 	for file := range visibleFiles {
-		add("file", "file:"+file, append(semanticPathTags(file, languageForFile(file, filtered.VisibleSymbols)), ownerMatcher.TagsForPath(file)...)...)
+		add("file", "file:"+file, append(semanticPathTags(file, languages.languageForFile(file)), ownerMatcher.TagsForPath(file)...)...)
 	}
 
 	for file, symbols := range symbolsByFile(filtered.VisibleSymbols) {
@@ -1014,7 +1015,8 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 		return materializeStats{}, err
 	}
 	tagPlan := buildSemanticTagPlan(repo, filtered, thresholds, settingsHash, identityKeys, ownerMatcher, facts)
-	m := &materializer{store: r.Store, repo: repo, thresholds: thresholds, settingsHash: settingsHash, identityKeys: identityKeys, contextPolicies: filtered.ContextPolicies, tagPlan: tagPlan, initialLayout: initialLayout == 0, runMarker: time.Now().UTC().Format(time.RFC3339Nano), newPlacements: map[int64]map[int64]struct{}{}}
+	symbolLanguages := newSymbolLanguageIndex(filtered.VisibleSymbols)
+	m := &materializer{store: r.Store, repo: repo, thresholds: thresholds, settingsHash: settingsHash, identityKeys: identityKeys, contextPolicies: filtered.ContextPolicies, tagPlan: tagPlan, symbolLanguages: symbolLanguages, initialLayout: initialLayout == 0, runMarker: time.Now().UTC().Format(time.RFC3339Nano), newPlacements: map[int64]map[int64]struct{}{}}
 	if err := m.ensureTags(ctx); err != nil {
 		return m.stats, err
 	}
@@ -1022,7 +1024,7 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 	if err != nil {
 		return m.stats, err
 	}
-	repoLanguage := dominantLanguage(filtered.VisibleSymbols)
+	repoLanguage := symbolLanguages.repoLanguage
 	repoElem, err := m.upsertElement(ctx, "repository", fmt.Sprintf("repository:%d", repo.ID), elementInput{
 		Name:       repo.DisplayName,
 		Kind:       "repository",
@@ -1099,7 +1101,7 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 		return m.stats, err
 	}
 	for i, file := range sortedKeys(visibleFiles) {
-		fileLanguage := languageForFile(file, filtered.VisibleSymbols)
+		fileLanguage := m.languageForFile(file)
 		if language := strings.TrimSpace(fileLanguages[file]); language != "" {
 			fileLanguage = language
 		}
@@ -1365,6 +1367,7 @@ type materializer struct {
 	identityKeys    map[string]string
 	contextPolicies contextPolicySet
 	tagPlan         semanticTagPlan
+	symbolLanguages symbolLanguageIndex
 	initialLayout   bool
 	runMarker       string
 	newPlacements   map[int64]map[int64]struct{}
@@ -1785,7 +1788,7 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 				Repo:        repoIdentity(m.repo),
 				Branch:      nullStringValue(m.repo.Branch),
 				FilePath:    fact.FilePath,
-				Language:    languageForFile(fact.FilePath, symbols),
+				Language:    m.languageForFile(fact.FilePath),
 				Tags:        m.tagPlan.tagsFor("fact", factOwnerKey(fact)),
 			})
 			if err != nil {
@@ -1846,7 +1849,7 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 				Repo:        repoIdentity(m.repo),
 				Branch:      nullStringValue(m.repo.Branch),
 				FilePath:    fact.FilePath,
-				Language:    languageForFile(fact.FilePath, symbols),
+				Language:    m.languageForFile(fact.FilePath),
 				Tags:        m.tagPlan.tagsFor("fact", factOwnerKey(fact)),
 			})
 			if err != nil {
@@ -1913,7 +1916,7 @@ func (m *materializer) materializeDependencyImports(ctx context.Context, factsBy
 					Technology:  dependencyImportTechnology(fact),
 					Repo:        repoIdentity(m.repo),
 					Branch:      nullStringValue(m.repo.Branch),
-					Language:    languageForFile(fact.FilePath, symbols),
+					Language:    m.languageForFile(fact.FilePath),
 					Tags:        m.tagPlan.tagsFor("dependency-module", ownerKey),
 				})
 				if err != nil {
@@ -1962,7 +1965,7 @@ func (m *materializer) materializeRuntimeComponents(ctx context.Context, facts [
 			Repo:        repoIdentity(m.repo),
 			Branch:      nullStringValue(m.repo.Branch),
 			FilePath:    primary.FilePath,
-			Language:    languageForFile(primary.FilePath, symbols),
+			Language:    m.languageForFile(primary.FilePath),
 			Tags:        m.tagPlan.tagsFor("runtime-component", ownerKey),
 		})
 		if err != nil {
@@ -2987,18 +2990,39 @@ func folderSet(files map[string]struct{}) []string {
 	return out
 }
 
-func dominantLanguage(symbols map[int64]Symbol) string {
-	counts := map[string]int{}
+type symbolLanguageIndex struct {
+	repoLanguage string
+	byFile       map[string]string
+}
+
+func newSymbolLanguageIndex(symbols map[int64]Symbol) symbolLanguageIndex {
+	repoCounts := map[string]int{}
+	fileCounts := map[string]map[string]int{}
 	for _, sym := range symbols {
 		language := languageFromStableKey(sym.StableKey)
 		if language != "" {
-			counts[language]++
+			repoCounts[language]++
+			if fileCounts[sym.FilePath] == nil {
+				fileCounts[sym.FilePath] = map[string]int{}
+			}
+			fileCounts[sym.FilePath][language]++
 		}
 	}
-	best := "source"
+	index := symbolLanguageIndex{
+		repoLanguage: bestLanguage(repoCounts, "source"),
+		byFile:       make(map[string]string, len(fileCounts)),
+	}
+	for file, counts := range fileCounts {
+		index.byFile[file] = bestLanguage(counts, "")
+	}
+	return index
+}
+
+func bestLanguage(counts map[string]int, fallback string) string {
+	best := fallback
 	bestCount := 0
 	for language, count := range counts {
-		if count > bestCount || (count == bestCount && language < best) {
+		if count > bestCount || (count == bestCount && (best == "" || language < best)) {
 			best = language
 			bestCount = count
 		}
@@ -3006,29 +3030,26 @@ func dominantLanguage(symbols map[int64]Symbol) string {
 	return best
 }
 
-func languageForFile(file string, symbols map[int64]Symbol) string {
-	counts := map[string]int{}
-	for _, sym := range symbols {
-		if sym.FilePath != file {
-			continue
-		}
-		language := languageFromStableKey(sym.StableKey)
-		if language != "" {
-			counts[language]++
-		}
-	}
-	if len(counts) == 0 {
+func dominantLanguage(symbols map[int64]Symbol) string {
+	return newSymbolLanguageIndex(symbols).repoLanguage
+}
+
+func (i symbolLanguageIndex) languageForFile(file string) string {
+	if i.byFile == nil {
 		return ""
 	}
-	best := dominantLanguage(symbols)
-	bestCount := 0
-	for language, count := range counts {
-		if count > bestCount || (count == bestCount && language < best) {
-			best = language
-			bestCount = count
-		}
+	return i.byFile[file]
+}
+
+func (m *materializer) languageForFile(file string) string {
+	if m == nil {
+		return ""
 	}
-	return best
+	return m.symbolLanguages.languageForFile(file)
+}
+
+func languageForFile(file string, symbols map[int64]Symbol) string {
+	return newSymbolLanguageIndex(symbols).languageForFile(file)
 }
 
 func languageFromStableKey(stableKey string) string {

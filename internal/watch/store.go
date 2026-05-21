@@ -1545,6 +1545,7 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 	if err := symRows.Close(); err != nil {
 		return nil, err
 	}
+	sourceCache.buildFolderLineCounts()
 	factRows, err := s.db.QueryContext(ctx, `
 		SELECT enricher, stable_key, type, fact_hash, name, file_path, start_line, end_line
 		FROM watch_facts
@@ -1621,12 +1622,13 @@ type materializedSourceSnapshot struct {
 }
 
 type materializedSnapshotCache struct {
-	owners         map[string]materializedSourceSnapshot
-	fileLineCounts map[string]int
+	owners           map[string]materializedSourceSnapshot
+	fileLineCounts   map[string]int
+	folderLineCounts map[string]int
 }
 
 func newMaterializedSnapshotCache() *materializedSnapshotCache {
-	return &materializedSnapshotCache{owners: map[string]materializedSourceSnapshot{}, fileLineCounts: map[string]int{}}
+	return &materializedSnapshotCache{owners: map[string]materializedSourceSnapshot{}, fileLineCounts: map[string]int{}, folderLineCounts: map[string]int{}}
 }
 
 func (c *materializedSnapshotCache) key(ownerType, ownerKey string) string {
@@ -1657,12 +1659,33 @@ func (c *materializedSnapshotCache) lineCount(ctx context.Context, db *sql.DB, r
 	case "file":
 		path := filepathToSlash(strings.TrimPrefix(ownerKey, "file:"))
 		return c.fileLineCounts[path]
+	case "folder":
+		path := strings.TrimSuffix(filepathToSlash(strings.TrimPrefix(ownerKey, "folder:")), "/")
+		return c.folderLineCounts[path]
 	case "fact-import-connector":
 		if snapshot, ok := c.get("fact", importConnectorFactOwnerKey(ownerKey)); ok {
 			return snapshot.lineCount
 		}
 	}
 	return materializedLineCount(ctx, db, repositoryID, ownerType, ownerKey, filePath)
+}
+
+func (c *materializedSnapshotCache) buildFolderLineCounts() {
+	if c == nil {
+		return
+	}
+	c.folderLineCounts = map[string]int{}
+	for filePath, lineCount := range c.fileLineCounts {
+		dir := filepathToSlash(path.Dir(filePath))
+		for dir != "" && dir != "." && dir != "/" {
+			c.folderLineCounts[dir] += lineCount
+			parent := filepathToSlash(path.Dir(dir))
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
 }
 
 func (c *materializedSnapshotCache) sourceRange(ctx context.Context, db *sql.DB, repositoryID int64, ownerType, ownerKey, fallbackFilePath string) (string, int, int) {

@@ -83,6 +83,28 @@ func TestListTrackedFilesStopsAtLimit(t *testing.T) {
 	}
 }
 
+func TestFileBlobHashesIncludesTrackedFiles(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{
+		"a.go":             "package main\n",
+		"dir/file name.go": "package main\n",
+	})
+
+	hashes, err := FileBlobHashes(dir)
+	if err != nil {
+		t.Fatalf("FileBlobHashes: %v", err)
+	}
+	for _, path := range []string{"a.go", "dir/file name.go"} {
+		want, err := FileBlobHash(dir, path)
+		if err != nil {
+			t.Fatalf("FileBlobHash(%s): %v", path, err)
+		}
+		if hashes[path] != want {
+			t.Fatalf("hashes[%q] = %q, want %q", path, hashes[path], want)
+		}
+	}
+}
+
 func TestEnsureDetachedWorktreeCreatesReusableCheckout(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir, map[string]string{"main.go": "package main\nfunc Main() {}\n"})

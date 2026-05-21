@@ -32,10 +32,11 @@ type EventLogger interface {
 }
 
 type ResolverConfig struct {
-	Enabled          bool
-	HealthInterval   time.Duration
-	MemoryLimitBytes int64
-	Logger           EventLogger
+	Enabled           bool
+	HealthInterval    time.Duration
+	DefinitionTimeout time.Duration
+	MemoryLimitBytes  int64
+	Logger            EventLogger
 }
 
 type DefinitionLocation struct {
@@ -79,15 +80,19 @@ type MultiLanguageResolver struct {
 
 func NewMultiLanguageResolver(rootDir string) *MultiLanguageResolver {
 	return NewMultiLanguageResolverWithConfig(rootDir, ResolverConfig{
-		Enabled:          true,
-		HealthInterval:   time.Minute,
-		MemoryLimitBytes: 4294967296,
+		Enabled:           true,
+		HealthInterval:    time.Minute,
+		DefinitionTimeout: 10 * time.Second,
+		MemoryLimitBytes:  4294967296,
 	})
 }
 
 func NewMultiLanguageResolverWithConfig(rootDir string, cfg ResolverConfig) *MultiLanguageResolver {
 	if cfg.HealthInterval <= 0 {
 		cfg.HealthInterval = time.Minute
+	}
+	if cfg.DefinitionTimeout <= 0 {
+		cfg.DefinitionTimeout = 10 * time.Second
 	}
 	if cfg.MemoryLimitBytes <= 0 {
 		cfg.MemoryLimitBytes = 4294967296
@@ -135,7 +140,13 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 	if ref.Column > 0 {
 		column = ref.Column - 1
 	}
-	locations, err := session.Definition(ctx, &protocol.DefinitionParams{
+	definitionCtx := ctx
+	cancel := func() {}
+	if r.cfg.DefinitionTimeout > 0 {
+		definitionCtx, cancel = context.WithTimeout(ctx, r.cfg.DefinitionTimeout)
+	}
+	defer cancel()
+	locations, err := session.Definition(definitionCtx, &protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(ref.FilePath)},
 			Position: protocol.Position{
@@ -145,7 +156,7 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 		},
 	})
 	if err != nil {
-		r.restartAfterFailure(ctx, language, "definition", err)
+		r.markFailed(ctx, language, "definition", err)
 		return nil, err
 	}
 	resolved := make([]DefinitionLocation, 0, len(locations))
@@ -199,7 +210,7 @@ func (r *MultiLanguageResolver) sessionForLanguage(ctx context.Context, language
 		return nil, false, nil
 	}
 	status := r.ensureRequestedLocked(language)
-	if status.State == StateUnavailable || status.State == StateDisabled {
+	if status.State == StateUnavailable || status.State == StateDisabled || status.State == StateFailed || status.State == StateMemoryLimited {
 		r.mu.Unlock()
 		return nil, false, nil
 	}

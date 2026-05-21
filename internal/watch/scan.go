@@ -185,6 +185,7 @@ func (s *Scanner) ScanFilesWithOptions(ctx context.Context, repo Repository, rel
 		scanErr = err
 		return result, err
 	}
+	cache.blobHashesByPath = s.loadBlobHashes(ctx, repoRoot)
 	identityStarted := time.Now()
 	missingIdentities, err := s.Store.replacementMissingIdentityCandidates(ctx, repo.ID)
 	if err != nil {
@@ -371,6 +372,7 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 		scanErr = err
 		return result, err
 	}
+	cache.blobHashesByPath = s.loadBlobHashes(ctx, repoRoot)
 	identityStarted := time.Now()
 	missingIdentities, err := s.Store.replacementMissingIdentityCandidates(ctx, repo.ID)
 	if err != nil {
@@ -555,6 +557,7 @@ type scanFileResult struct {
 type scanCache struct {
 	filesByPath            map[string]File
 	currentEnrichmentPaths map[string]struct{}
+	blobHashesByPath       map[string]string
 }
 
 func (s *Scanner) loadScanCache(ctx context.Context, repositoryID int64, force bool, progress ProgressSink) (scanCache, error) {
@@ -590,6 +593,23 @@ func (c scanCache) hasCurrentEnrichment(rel string) bool {
 	}
 	_, ok := c.currentEnrichmentPaths[rel]
 	return ok
+}
+
+func (c scanCache) blobHash(repoRoot, rel string) string {
+	if c.blobHashesByPath != nil {
+		return c.blobHashesByPath[rel]
+	}
+	return detectString(func() (string, error) { return tldgit.FileBlobHash(repoRoot, rel) })
+}
+
+func (s *Scanner) loadBlobHashes(ctx context.Context, repoRoot string) map[string]string {
+	hashes, err := tldgit.FileBlobHashes(repoRoot)
+	if err != nil {
+		logError(ctx, s.Logger, "watch.scan.git_blob_hashes.failed", err, "repo_root", repoRoot)
+		return nil
+	}
+	logInfo(ctx, s.Logger, "watch.scan.git_blob_hashes.completed", "repo_root", repoRoot, "files", len(hashes))
+	return hashes
 }
 
 func (s *Scanner) scanFiles(ctx context.Context, repositoryID int64, repoRoot string, files []string, workers int, progress ProgressSink, force bool, rules *ignore.Rules, repoSignals []enrich.ActivationSignal, cache scanCache, missingIdentities []storedSymbolIdentity) ([]scanFileResult, error) {
@@ -714,7 +734,7 @@ func (s *Scanner) scanFile(ctx context.Context, workerAnalyzer analyzer.Service,
 		s.logScanFile(ctx, repositoryID, result, languageName, decision, started, nil)
 		return result, nil
 	}
-	blobHash := detectString(func() (string, error) { return tldgit.FileBlobHash(repoRoot, rel) })
+	blobHash := cache.blobHash(repoRoot, rel)
 	file, skipped, err := s.Store.UpsertFile(ctx, repositoryID, rel, languageName, blobHash, worktreeHash, info.Size(), info.ModTime().UnixNano(), "parsed", nil)
 	if err != nil {
 		s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)

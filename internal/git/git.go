@@ -3,7 +3,9 @@
 package git
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -115,6 +117,47 @@ func FileBlobHash(dir, filePath string) (string, error) {
 		return "", fmt.Errorf("file blob hash: %q is not tracked", rel)
 	}
 	return fields[1], nil
+}
+
+// FileBlobHashes returns git blob hashes for tracked files at HEAD/index,
+// keyed by repository-relative slash paths.
+func FileBlobHashes(dir string) (map[string]string, error) {
+	cmd := exec.Command("git", "ls-files", "-s", "-z")
+	cmd.Dir = dir
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files -s: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git ls-files -s: %w", err)
+	}
+	hashes := map[string]string{}
+	reader := bufio.NewReader(stdout)
+	for {
+		raw, readErr := reader.ReadString(0)
+		entry := strings.TrimSuffix(raw, "\x00")
+		if entry != "" {
+			meta, path, ok := strings.Cut(entry, "\t")
+			fields := strings.Fields(meta)
+			if ok && len(fields) >= 2 {
+				hashes[filepath.ToSlash(path)] = fields[1]
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("git ls-files -s: %w", readErr)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("git ls-files -s: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, fmt.Errorf("git ls-files -s: %w", err)
+	}
+	return hashes, nil
 }
 
 // FileLastCommitAt returns the timestamp of the most recent commit that touched filePath
