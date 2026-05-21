@@ -108,9 +108,11 @@ Secondary actions:
   export      Export all diagrams from an organization to the local workspace
   help        Help about any command
   init        Initialize a new tld workspace
+  kinds       List canonical element kinds
   login       Authenticate the CLI with a tlDiagram server
   plan        Show what would be applied
   pull        Pull the current server state into local YAML files
+  render      Render a workspace view to text output formats
   serve       Start the local tlDiagram web server
   status      Show running local tlDiagram processes
   stop        Stop the local tlDiagram web server
@@ -136,6 +138,21 @@ Use "tld [command] --help" for more information about a command
 - `elements.yaml`: Definitions for all components and their placements.
 - `connectors.yaml`: Connection and relationship definitions.
 - `.tld.lock`: Tracks sync state and versioning.
+
+## Terminal Rendering
+
+Use Mermaid output for terminal, CI, and remote workflows without launching the web UI.
+
+```bash
+tld render root > architecture.mmd
+tld render platform --format mermaid -o platform.mmd
+
+# Explicitly use automatic deepest-common-view placement
+tld connect --view auto --from api --to db --label reads
+
+# List canonical kinds for --kind
+tld kinds
+```
 
 
 

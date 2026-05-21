@@ -99,6 +99,33 @@ func TestConnectCmd_TwoCallsTwoEntries(t *testing.T) {
 	}
 }
 
+func TestConnectCmd_DryRunDoesNotMutateWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	setupWorkspaceForLinks(t, dir)
+
+	connectorsPath := filepath.Join(dir, "connectors.yaml")
+	before, err := os.ReadFile(connectorsPath)
+	if err != nil {
+		t.Fatalf("read connectors before: %v", err)
+	}
+
+	stdout, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db", "--dry-run")
+	if err != nil {
+		t.Fatalf("connect --dry-run: %v", err)
+	}
+	if !strings.Contains(stdout, "dry-run: connect: api -> db") {
+		t.Fatalf("missing dry-run output:\n%s", stdout)
+	}
+
+	after, err := os.ReadFile(connectorsPath)
+	if err != nil {
+		t.Fatalf("read connectors after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("connectors.yaml changed during dry-run\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
 func TestConnectCmd_ElementsInDifferentViewsSucceeds(t *testing.T) {
 	dir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
@@ -190,5 +217,45 @@ func TestConnectCmd_MissingToFlag(t *testing.T) {
 	_, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api")
 	if err == nil {
 		t.Fatal("expected error for missing --to")
+	}
+}
+
+func TestConnectCmd_InfersDeepestCommonAncestorView(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+
+	cmd.MustRunCmd(t, dir, "add", "System", "--ref", "system", "--kind", "workspace")
+	cmd.MustRunCmd(t, dir, "add", "Payments", "--ref", "payments", "--kind", "workspace", "--parent", "system")
+	cmd.MustRunCmd(t, dir, "add", "Billing", "--ref", "billing", "--kind", "workspace", "--parent", "payments")
+	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "service", "--parent", "billing")
+	cmd.MustRunCmd(t, dir, "add", "DB", "--ref", "db", "--kind", "database", "--parent", "payments")
+
+	stdout, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if !strings.Contains(stdout, "connector view: payments") {
+		t.Fatalf("expected deepest shared ancestor view 'payments', got:\n%s", stdout)
+	}
+
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+	if ws.Connectors["payments:api:db:"] == nil {
+		t.Fatalf("expected connector in payments view, connectors=%+v", ws.Connectors)
+	}
+}
+
+func TestConnectCmd_ViewAutoUsesInference(t *testing.T) {
+	dir := t.TempDir()
+	setupWorkspaceForLinks(t, dir)
+
+	stdout, _, err := cmd.RunCmd(t, dir, "connect", "--view", "auto", "--from", "api", "--to", "db")
+	if err != nil {
+		t.Fatalf("connect --view auto: %v", err)
+	}
+	if !strings.Contains(stdout, "connector view: platform") {
+		t.Fatalf("expected auto inference to resolve platform, got:\n%s", stdout)
 	}
 }

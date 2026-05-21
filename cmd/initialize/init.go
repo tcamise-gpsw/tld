@@ -3,6 +3,7 @@ package initialize
 import (
 	"bufio"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,32 +15,167 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var defaultWorkspaceExclude = []string{
-	"vendor/",
-	"node_modules/",
-	".venv/",
-	".git/",
-	"**/*_test.go",
-	"**/*.pb.go",
+var defaultWorkspaceExcludeProfiles = map[string][]string{
+	"go": {
+		".git/",
+		"vendor/",
+		"node_modules/",
+		"**/*_test.go",
+		"**/*.pb.go",
+	},
+	"python": {
+		".git/",
+		".venv/",
+		"venv/",
+		"__pycache__/",
+		"**/*.pyc",
+		".pytest_cache/",
+		".mypy_cache/",
+	},
+	"rust": {
+		".git/",
+		"target/",
+	},
+	"cpp": {
+		".git/",
+		"build/",
+		"cmake-build-*/",
+		"CMakeFiles/",
+		"out/",
+		"bin/",
+	},
+	"default": {
+		".git/",
+		"node_modules/",
+		".venv/",
+		"build/",
+		"dist/",
+	},
 }
 
-func generateDefaultWorkspaceConfig(dir string) ([]byte, error) {
+var dominantLanguagePriority = []string{"go", "python", "rust", "cpp"}
+
+var languageExtensions = map[string]map[string]bool{
+	"go": {
+		".go": true,
+	},
+	"python": {
+		".py": true,
+	},
+	"rust": {
+		".rs": true,
+	},
+	"cpp": {
+		".c":   true,
+		".cc":  true,
+		".cpp": true,
+		".cxx": true,
+		".h":   true,
+		".hh":  true,
+		".hpp": true,
+		".hxx": true,
+	},
+}
+
+var initLanguageScanSkipDirs = map[string]bool{
+	".git":         true,
+	"node_modules": true,
+	"vendor":       true,
+	".venv":        true,
+	"venv":         true,
+	"target":       true,
+	"build":        true,
+	"dist":         true,
+	"__pycache__":  true,
+}
+
+type workspaceInitDefaults struct {
+	projectName string
+	exclude     []string
+	repoRoot    string
+}
+
+func detectWorkspaceInitDefaults(dir string) (*workspaceInitDefaults, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
 	parentDir := filepath.Dir(absDir)
-	defaultProjectName := filepath.Base(parentDir)
+	repoRoot := parentDir
+	if detectedRepoRoot, err := git.RepoRoot(parentDir); err == nil {
+		repoRoot = detectedRepoRoot
+	}
+	projectName := filepath.Base(repoRoot)
+	if projectName == "." || projectName == string(filepath.Separator) || projectName == "" {
+		projectName = filepath.Base(parentDir)
+	}
+	language := detectDominantLanguage(repoRoot)
+	return &workspaceInitDefaults{
+		projectName: projectName,
+		exclude:     defaultWorkspaceExclude(language),
+		repoRoot:    repoRoot,
+	}, nil
+}
+
+func defaultWorkspaceExclude(language string) []string {
+	profile := defaultWorkspaceExcludeProfiles[language]
+	if len(profile) == 0 {
+		profile = defaultWorkspaceExcludeProfiles["default"]
+	}
+	return append([]string{}, profile...)
+}
+
+func detectDominantLanguage(root string) string {
+	counts := map[string]int{}
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if initLanguageScanSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == "" {
+			return nil
+		}
+		for language, extensions := range languageExtensions {
+			if extensions[ext] {
+				counts[language]++
+				break
+			}
+		}
+		return nil
+	})
+
+	dominant := ""
+	maxCount := 0
+	for _, language := range dominantLanguagePriority {
+		if count := counts[language]; count > maxCount {
+			dominant = language
+			maxCount = count
+		}
+	}
+	return dominant
+}
+
+func generateDefaultWorkspaceConfig(dir string) ([]byte, error) {
+	defaults, err := detectWorkspaceInitDefaults(dir)
+	if err != nil {
+		return nil, err
+	}
 
 	config := workspace.WorkspaceConfig{
-		ProjectName: defaultProjectName,
-		Exclude:     append([]string{}, defaultWorkspaceExclude...),
+		ProjectName: defaults.projectName,
+		Exclude:     defaults.exclude,
 	}
 
 	// Attempt to detect git remote
-	if remoteURL, err := git.DetectRemoteURL(parentDir); err == nil {
+	if remoteURL, err := git.DetectRemoteURL(defaults.repoRoot); err == nil {
 		config.Repositories = map[string]workspace.Repository{
-			defaultProjectName: {
+			defaults.projectName: {
 				URL:      remoteURL,
 				LocalDir: "", // Assumes parent directory
 				Config: &workspace.RepositoryConfig{
@@ -129,14 +265,12 @@ func NewInitCmd() *cobra.Command {
 func runInitWizard(cmd *cobra.Command, dir string) error {
 	scanner := bufio.NewScanner(cmd.InOrStdin())
 
-	absDir, err := filepath.Abs(dir)
+	defaults, err := detectWorkspaceInitDefaults(dir)
 	if err != nil {
 		return err
 	}
-	parentDir := filepath.Dir(absDir)
-	defaultProjectName := filepath.Base(parentDir)
 
-	projectName, err := promptWithDefault(scanner, cmd.OutOrStdout(), "Project name", defaultProjectName)
+	projectName, err := promptWithDefault(scanner, cmd.OutOrStdout(), "Project name", defaults.projectName)
 	if err != nil {
 		return err
 	}
@@ -145,8 +279,8 @@ func runInitWizard(cmd *cobra.Command, dir string) error {
 
 	// Attempt to detect git remote
 	defaultRepoURL := ""
-	defaultRepoName := defaultProjectName
-	if remoteURL, err := git.DetectRemoteURL(parentDir); err == nil {
+	defaultRepoName := defaults.projectName
+	if remoteURL, err := git.DetectRemoteURL(defaults.repoRoot); err == nil {
 		defaultRepoURL = remoteURL
 	} else {
 		term.Warn(cmd.OutOrStdout(), "Current folder is not a git repository. Automatic source linking requires manual configuration of repository URL and localDir in .tld.yaml.")
@@ -189,7 +323,7 @@ func runInitWizard(cmd *cobra.Command, dir string) error {
 
 	config := workspace.WorkspaceConfig{
 		ProjectName:  projectName,
-		Exclude:      append([]string{}, defaultWorkspaceExclude...),
+		Exclude:      defaults.exclude,
 		Repositories: repositories,
 	}
 	data, err := yaml.Marshal(&config)

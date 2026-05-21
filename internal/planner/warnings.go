@@ -52,6 +52,9 @@ var warningRules = []warningRule{
 		Mediation:   "Explore its relationships further and add connectors in the view where it appears.",
 		Level:       1,
 		Check: func(ctx *warningContext, rule warningRule) {
+			if ctx.isSingleSystemRootContext() {
+				return
+			}
 			for elementRef, element := range ctx.ws.Elements {
 				if element == nil || len(element.Placements) != 1 {
 					continue
@@ -276,6 +279,38 @@ var warningRules = []warningRule{
 			}
 		},
 	},
+}
+
+func (ctx *warningContext) isSingleSystemRootContext() bool {
+	if ctx == nil || ctx.ws == nil {
+		return false
+	}
+	rootElements := make([]string, 0, len(ctx.ws.Elements))
+	for ref, element := range ctx.ws.Elements {
+		if element == nil {
+			continue
+		}
+		for _, placement := range element.Placements {
+			if normalizeWarningViewRef(placement.ParentRef) == syntheticRootViewRef {
+				rootElements = append(rootElements, ref)
+				break
+			}
+		}
+	}
+	if len(rootElements) != 1 {
+		return false
+	}
+	rootViewConnectorCount := ctx.viewConnectors[syntheticRootViewRef]
+	if rootViewConnectorCount != 0 {
+		return false
+	}
+	rootRef := rootElements[0]
+	rootElement := ctx.ws.Elements[rootRef]
+	if rootElement == nil {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(rootElement.Kind))
+	return kind == "system" || kind == "workspace"
 }
 
 type warningContext struct {

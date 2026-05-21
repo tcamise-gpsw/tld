@@ -26,6 +26,28 @@ func TestRemoveElementCmd_LocalOnly(t *testing.T) {
 	}
 }
 
+func TestRemoveElementCmd_DryRunDoesNotDelete(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "service")
+
+	stdout, _, err := cmd.RunCmd(t, dir, "remove", "element", "api", "--dry-run")
+	if err != nil {
+		t.Fatalf("remove element --dry-run: %v", err)
+	}
+	if !strings.Contains(stdout, "dry-run: del: api") {
+		t.Fatalf("missing dry-run output: %s", stdout)
+	}
+
+	ws, loadErr := workspace.Load(dir)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if ws.Elements["api"] == nil {
+		t.Fatal("api should not be deleted during dry-run")
+	}
+}
+
 func TestRemoveElementCmd_ReferencedElementFails(t *testing.T) {
 	dir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
@@ -73,6 +95,32 @@ func TestRemoveConnectorCmd(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "del: 1") {
 		t.Errorf("stdout %q does not contain success message", stdout)
+	}
+}
+
+func TestRemoveConnectorCmd_DryRunDoesNotDelete(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+
+	cmd.MustRunCmd(t, dir, "add", "Platform", "--ref", "platform", "--kind", "workspace")
+	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "service", "--parent", "platform")
+	cmd.MustRunCmd(t, dir, "add", "DB", "--ref", "db", "--kind", "database", "--parent", "platform")
+	cmd.MustRunCmd(t, dir, "connect", "--view", "platform", "--from", "api", "--to", "db", "--label", "reads")
+
+	stdout, _, err := cmd.RunCmd(t, dir, "remove", "connector", "--view", "platform", "--from", "api", "--to", "db", "--dry-run")
+	if err != nil {
+		t.Fatalf("remove connector --dry-run: %v", err)
+	}
+	if !strings.Contains(stdout, "dry-run: del: 1") {
+		t.Fatalf("missing dry-run delete count: %s", stdout)
+	}
+
+	ws, loadErr := workspace.Load(dir)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if ws.Connectors["platform:api:db:reads"] == nil {
+		t.Fatal("connector should remain after dry-run")
 	}
 }
 

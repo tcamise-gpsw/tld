@@ -119,6 +119,7 @@ func printWarningSummary(cmd *cobra.Command, ws *workspace.Workspace, warnings [
 		}
 		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "To suppress specific rule codes, use .tld.yaml: validation.exclude_rules: [ARC002]")
 }
 
 func printRuleViolations(cmd *cobra.Command, code string, warnings []planner.WarningGroup) error {

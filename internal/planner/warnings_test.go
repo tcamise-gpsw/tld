@@ -1,6 +1,7 @@
 package planner_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mertcikla/tld/v2/internal/planner"
@@ -145,5 +146,72 @@ func TestAnalyzePlan_DeadEndDrilldownUsesOwnedViews(t *testing.T) {
 
 	if !found {
 		t.Fatalf("expected ARC006 warning for owned view with no content, warnings=%+v", warnings)
+	}
+}
+
+func TestAnalyzePlan_ARC002ExemptsRootSingleSystemContext(t *testing.T) {
+	ws := &workspace.Workspace{
+		Elements: map[string]*workspace.Element{
+			"catch2": {
+				Name:       "Catch2",
+				Kind:       "system",
+				Placements: []workspace.ViewPlacement{{ParentRef: "root"}},
+			},
+		},
+		Connectors: map[string]*workspace.Connector{},
+		Config: workspace.Config{
+			Validation: workspace.ValidationConfig{Level: 1},
+		},
+	}
+
+	warnings := planner.AnalyzePlan(ws)
+	for _, warning := range warnings {
+		if warning.RuleCode == "ARC002" {
+			t.Fatalf("expected ARC002 to be exempt for root single-system context, got %+v", warning)
+		}
+	}
+}
+
+func TestAnalyzePlan_ARC002StillFlagsNonRootIsolatedElement(t *testing.T) {
+	ws := &workspace.Workspace{
+		Elements: map[string]*workspace.Element{
+			"platform": {
+				Name:       "Platform",
+				Kind:       "workspace",
+				HasView:    true,
+				Placements: []workspace.ViewPlacement{{ParentRef: "root"}},
+			},
+			"other": {
+				Name:       "Other",
+				Kind:       "workspace",
+				HasView:    true,
+				Placements: []workspace.ViewPlacement{{ParentRef: "root"}},
+			},
+			"api": {
+				Name:       "API",
+				Kind:       "service",
+				Placements: []workspace.ViewPlacement{{ParentRef: "platform"}},
+			},
+		},
+		Connectors: map[string]*workspace.Connector{},
+		Config: workspace.Config{
+			Validation: workspace.ValidationConfig{Level: 1},
+		},
+	}
+
+	warnings := planner.AnalyzePlan(ws)
+	found := false
+	for _, warning := range warnings {
+		if warning.RuleCode != "ARC002" {
+			continue
+		}
+		for _, violation := range warning.Violations {
+			if strings.Contains(violation, "\"api\"") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected ARC002 violation for isolated non-root element, warnings=%+v", warnings)
 	}
 }
