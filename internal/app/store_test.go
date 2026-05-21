@@ -83,8 +83,8 @@ func TestStoreElementsSearchPaginationAndViewMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 2 || len(results) != 1 || results[0].ID != api.ID {
-		t.Fatalf("paginated results = total:%d elements:%+v, want second inserted API after Worker", total, results)
+	if total != 2 || len(results) != 1 || results[0].ID != worker.ID {
+		t.Fatalf("paginated results = total:%d elements:%+v, want Worker after API in name order", total, results)
 	}
 
 	tags, err := store.Tags(ctx)

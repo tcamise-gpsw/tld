@@ -110,6 +110,7 @@ function ElementLibrary({
 
   const isFetching = useRef(false)
   const searchRef = useRef(search)
+  const fetchedSearchRef = useRef(search)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [listScrollTop, setListScrollTop] = useState(0)
   const [listViewportHeight, setListViewportHeight] = useState(600)
@@ -139,14 +140,22 @@ function ElementLibrary({
 
   useEffect(() => {
     if (isOpen) {
-      fetchElements(0, searchRef.current, true)
+      const currentSearch = searchRef.current
+      fetchedSearchRef.current = currentSearch
+      setListScrollTop(0)
+      scrollContainerRef.current?.scrollTo({ top: 0 })
+      fetchElements(0, currentSearch, true)
     }
   }, [isOpen, fetchElements])
 
   // Debounced search
   useEffect(() => {
     if (!isOpen) return
+    if (search === fetchedSearchRef.current) return
     const timer = setTimeout(() => {
+      fetchedSearchRef.current = search
+      setListScrollTop(0)
+      scrollContainerRef.current?.scrollTo({ top: 0 })
       fetchElements(0, search, true)
       setFocusedIdx(-1)
     }, 300)
@@ -165,19 +174,23 @@ function ElementLibrary({
       )
     }
 
-    // Combine fetched elements with existing elements from the view to ensure they're always visible and sorted first.
-    let result = mergeUniqueElements(searchResults, elements)
-    if (hideExisting) {
-      result = result.filter((o) => !existingElementIds.has(o.id))
+    // Combine fetched elements with existing elements from the view to ensure they're always visible and listed first.
+    const result = mergeUniqueElements(searchResults, elements)
+    const existing: LibraryElement[] = []
+    const available: LibraryElement[] = []
+    for (const element of result) {
+      if (existingElementIds.has(element.id)) {
+        existing.push(element)
+      } else {
+        available.push(element)
+      }
     }
 
-    return result.sort((a, b) => {
-      const aExists = existingElementIds.has(a.id)
-      const bExists = existingElementIds.has(b.id)
-      if (aExists && !bExists) return -1
-      if (!aExists && bExists) return 1
-      return (a.name || '').localeCompare(b.name || '')
-    })
+    if (hideExisting) {
+      return available
+    }
+
+    return [...existing, ...available]
   }, [existingElementIds, existingElements, hideExisting, elements, search])
 
   const virtualItems = useMemo(() => {
@@ -201,16 +214,6 @@ function ElementLibrary({
     if (!el) return
     setListViewportHeight(el.clientHeight || 600)
   }, [filtered.length, isOpen])
-
-  // If a fetch completes but the container still isn't scrollable, keep loading
-  useEffect(() => {
-    if (!hasMore || loading || !isOpen) return
-    const el = scrollContainerRef.current
-    if (!el) return
-    if (el.scrollHeight <= el.clientHeight) {
-      fetchElements(elements.length, search)
-    }
-  }, [elements, hasMore, loading, isOpen, search, fetchElements])
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
@@ -586,7 +589,7 @@ function ElementLibrary({
     >
       <PanelHeader title="Element Library" onClose={onClose} hasCloseButton={isMobile} />
 
-      <Box p={0} display="flex" flexDir="column" overflow="hidden" flex={1}>
+      <Box p={0} display="flex" flexDir="column" overflow="hidden" flex={1} minH={0}>
         {listContent}
       </Box>
     </SlidingPanel>

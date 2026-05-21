@@ -125,7 +125,7 @@ func (s *Store) Elements(ctx context.Context, limit, offset int, search string) 
 	}
 
 	query := `SELECT id, name, kind, description, technology, url, logo_url, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at FROM elements` + where
-	query += ` ORDER BY updated_at DESC`
+	query += ` ORDER BY LOWER(name) ASC, id ASC`
 	if limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
 		args = append(args, limit, offset)

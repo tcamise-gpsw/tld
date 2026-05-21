@@ -108,8 +108,21 @@ export default function SlidingPanel({
               borderColor="whiteAlpha.100"
               rounded="xl"
               shadow="panel"
+              sx={{
+                '& > div:not([data-focus-guard])': {
+                  display: 'flex',
+                  flexDirection: 'column',
+                  flex: '1 1 auto',
+                  minHeight: 0,
+                  height: '100%',
+                },
+              }}
             >
-              <FocusLock isDisabled={!isOpen || noFocusLock} autoFocus={autoFocus} restoreFocus>
+              <FocusLock
+                isDisabled={!isOpen || noFocusLock}
+                autoFocus={autoFocus}
+                restoreFocus
+              >
                 {children}
               </FocusLock>
             </Box>

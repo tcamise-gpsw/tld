@@ -272,8 +272,8 @@ func TestListElementsMapsSearchPaginationAndViewMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 2 || len(items) != 1 || items[0].GetId() != 10 {
-		t.Fatalf("paginated elements = total:%d items:%+v, want API as second updated item", total, items)
+	if total != 2 || len(items) != 1 || items[0].GetId() != 11 {
+		t.Fatalf("paginated elements = total:%d items:%+v, want Worker after API in name order", total, items)
 	}
 }
 
