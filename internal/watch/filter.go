@@ -432,18 +432,19 @@ func scoreFacts(ctx context.Context, store *Store, runID int64, facts []Fact, vi
 		score := visibilityScore{}
 		if highSignalFact(fact) {
 			score.add("fact.high_signal", cfg.Weights.HighSignalFact*fact.Confidence, "high-signal fact "+fact.Type)
-				} else if dependencyFact(fact) {
+		} else if dependencyFact(fact) {
 			score.add("fact.dependency", cfg.Weights.DependencyFact*fact.Confidence, "dependency fact")
 		}
 		if dependencyImportFact(fact) {
 			score.add("noise.dependency_import", cfg.Weights.UtilityNoise, "dependency import fact is low-signal")
 		}
+		_, sourceFileVisible := visibleFiles[fact.FilePath]
 		if fact.SubjectKind == "symbol" {
 			if _, ok := visibleSymbolStable[fact.SubjectStableKey]; ok {
 				score.add("fact.subject_visible", cfg.Weights.RelationshipProximity, "subject symbol is visible")
 			}
 		}
-		if _, ok := visibleFiles[fact.FilePath]; ok {
+		if sourceFileVisible {
 			score.add("fact.file_visible", cfg.Weights.RelationshipProximity, "source file is visible")
 		}
 		if tier := expansions.fileTier(fact.FilePath); tier > 0 {
@@ -455,7 +456,8 @@ func scoreFacts(ctx context.Context, store *Store, runID int64, facts []Fact, vi
 			score.add("fact.hint", hintWeight, "enricher visibility hint")
 		}
 		decision := "hidden"
-		if (highSignalFact(fact) || dependencyFact(fact)) && (score.Forced || !cfg.CoreThresholdEnabled || score.Score >= cfg.CoreThreshold) {
+		dependencyImportVisible := dependencyImportFact(fact) && (score.Forced || sourceFileVisible)
+		if (highSignalFact(fact) || dependencyFact(fact)) && (dependencyImportVisible || score.Forced || !cfg.CoreThresholdEnabled || score.Score >= cfg.CoreThreshold) {
 			decision = "visible"
 			if dependencyImportFact(fact) {
 				decision = "low-signal"
@@ -496,7 +498,6 @@ func highSignalFact(fact Fact) bool {
 func dependencyFact(fact Fact) bool {
 	return strings.HasPrefix(fact.Type, "dependency.")
 }
-
 
 func factOwnerKey(fact Fact) string {
 	return "fact:" + fact.Enricher + ":" + fact.StableKey
