@@ -20,7 +20,7 @@ const (
 
 	defaultMaxTrackedFiles = 20000
 	defaultMaxLimitedFiles = 2000
-	defaultLSPMemoryLimit  = 1073741824
+	defaultLSPMemoryLimit  = 4294967296
 )
 
 func DefaultSettings() Settings {

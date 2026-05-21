@@ -81,7 +81,7 @@ func NewMultiLanguageResolver(rootDir string) *MultiLanguageResolver {
 	return NewMultiLanguageResolverWithConfig(rootDir, ResolverConfig{
 		Enabled:          true,
 		HealthInterval:   time.Minute,
-		MemoryLimitBytes: 1073741824,
+		MemoryLimitBytes: 4294967296,
 	})
 }
 
@@ -90,7 +90,7 @@ func NewMultiLanguageResolverWithConfig(rootDir string, cfg ResolverConfig) *Mul
 		cfg.HealthInterval = time.Minute
 	}
 	if cfg.MemoryLimitBytes <= 0 {
-		cfg.MemoryLimitBytes = 1073741824
+		cfg.MemoryLimitBytes = 4294967296
 	}
 	return &MultiLanguageResolver{
 		RootDir:  rootDir,

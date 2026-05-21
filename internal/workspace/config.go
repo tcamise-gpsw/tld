@@ -230,7 +230,7 @@ func DefaultConfig() *Config {
 			LSP: WatchLSPConfig{
 				Enabled:          true,
 				HealthInterval:   "1m",
-				MemoryLimitBytes: 1073741824,
+				MemoryLimitBytes: 4294967296,
 			},
 		},
 		Updates: UpdatesConfig{
