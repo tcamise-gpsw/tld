@@ -64,20 +64,21 @@ test('builds parent and child views and navigates through editor controls', asyn
 })
 
 test('places an existing imported element in another diagram and finds it from the library', async ({ page }) => {
-  const source = await createAndLoadDiagramWithNodes(page, 0, 'Imported Placement Source')
+  await createAndLoadDiagramWithNodes(page, 0, 'Imported Placement Source')
   await page.getByTestId('vieweditor-toolbar-extras').click()
   await page.getByTestId('vieweditor-toolbar-import').click()
   await page.getByTestId('import-mermaid-textarea').fill('flowchart LR\n  CrossImportA --> CrossImportB')
   await page.getByTestId('import-next').click()
   await page.getByTestId('import-confirm').click()
   await expect(page.getByText('CrossImportA').first()).toBeVisible()
+  const importedViewURL = page.url()
 
   const target = await createApiView(page, uniqueName('Imported Placement Target'))
   await page.goto(`/views/${target.id}`)
   await addExistingFromLibrary(page, 'CrossImportA')
 
   await expect(nodeByName(page, 'CrossImportA')).toBeVisible()
-  await page.goto(`/views/${source.diagram.id}`)
+  await page.goto(importedViewURL)
   await expect(page.getByText('CrossImportA').first()).toBeVisible()
 })
 
