@@ -53,6 +53,44 @@ func TestAddCmd_CustomKindSucceeds(t *testing.T) {
 	}
 }
 
+func TestAddCmd_TrimsKind(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+
+	if _, _, err := cmd.RunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "  custom kind  "); err != nil {
+		t.Fatalf("add with spaced kind: %v", err)
+	}
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+	if got := ws.Elements["api"].Kind; got != "custom kind" {
+		t.Fatalf("kind = %q, want trimmed value", got)
+	}
+}
+
+func TestAddCmd_InvalidKindFails(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+	}{
+		{name: "empty", kind: "   "},
+		{name: "control", kind: "service\nkind"},
+		{name: "too long", kind: strings.Repeat("a", 65)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cmd.MustInitWorkspace(t, dir)
+
+			if _, _, err := cmd.RunCmd(t, dir, "add", "API", "--ref", "api", "--kind", tt.kind); err == nil {
+				t.Fatal("expected invalid kind error")
+			}
+		})
+	}
+}
+
 func TestAddCmd_ShowsNormalizedTechnology(t *testing.T) {
 	dir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)

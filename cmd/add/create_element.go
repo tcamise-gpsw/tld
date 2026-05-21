@@ -32,9 +32,11 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := validateKind(kind); err != nil {
+			normalizedKind, err := validateKind(kind)
+			if err != nil {
 				return err
 			}
+			kind = normalizedKind
 			r := ref
 			if r == "" {
 				r = workspace.Slugify(name)

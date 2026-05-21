@@ -40,9 +40,11 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := validateKind(kind); err != nil {
+			normalizedKind, err := validateKind(kind)
+			if err != nil {
 				return err
 			}
+			kind = normalizedKind
 			r := ref
 			if r == "" {
 				r = workspace.Slugify(name)
@@ -146,26 +148,23 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 	_ = c.RegisterFlagCompletionFunc("parent", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return completion.ParentRefs(wdir)
 	})
-	_ = c.RegisterFlagCompletionFunc("kind", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return completion.ElementKinds(), cobra.ShellCompDirectiveNoFileComp
-	})
 	return c
 }
 
-func validateKind(kind string) error {
+func validateKind(kind string) (string, error) {
 	trimmed := strings.TrimSpace(kind)
 	if trimmed == "" {
-		return fmt.Errorf("--kind is required")
+		return "", fmt.Errorf("--kind is invalid: cannot be empty or whitespace")
 	}
-	if len(trimmed) > 64 {
-		return fmt.Errorf("--kind %q is too long: use 64 characters or fewer", kind)
+	if len([]rune(trimmed)) > 64 {
+		return "", fmt.Errorf("--kind %q is too long: use 64 characters or fewer", kind)
 	}
 	for _, r := range trimmed {
 		if r < 32 || r == 127 {
-			return fmt.Errorf("--kind contains control characters")
+			return "", fmt.Errorf("--kind contains control characters")
 		}
 	}
-	return nil
+	return trimmed, nil
 }
 
 func normalizeTechnology(input string) (string, bool) {

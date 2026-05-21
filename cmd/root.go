@@ -14,7 +14,6 @@ import (
 	"github.com/mertcikla/tld/v2/cmd/export"
 	"github.com/mertcikla/tld/v2/cmd/initialize"
 	inspectcmd "github.com/mertcikla/tld/v2/cmd/inspect"
-	"github.com/mertcikla/tld/v2/cmd/kinds"
 	"github.com/mertcikla/tld/v2/cmd/login"
 	"github.com/mertcikla/tld/v2/cmd/mcp"
 	"github.com/mertcikla/tld/v2/cmd/plan"
@@ -166,9 +165,6 @@ and apply them atomically with 'tld apply'.`,
 	configCmd := configcmd.NewConfigCmd()
 	configCmd.GroupID = secondaryGroup.ID
 
-	kindsCmd := kinds.NewKindsCmd()
-	kindsCmd.GroupID = secondaryGroup.ID
-
 	techCmd := techcmd.NewTechCmd()
 	techCmd.GroupID = secondaryGroup.ID
 
@@ -206,7 +202,6 @@ and apply them atomically with 'tld apply'.`,
 		analyzeCmd,
 		checkCmd,
 		configCmd,
-		kindsCmd,
 		techCmd,
 		watchCmd,
 		serveCmd,

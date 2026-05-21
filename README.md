@@ -108,7 +108,6 @@ Secondary actions:
   export      Export all diagrams from an organization to the local workspace
   help        Help about any command
   init        Initialize a new tld workspace
-  kinds       List common element kind suggestions
   login       Authenticate the CLI with a tlDiagram server
   plan        Show what would be applied
   pull        Pull the current server state into local YAML files
@@ -150,8 +149,7 @@ tld render platform --format mermaid -o platform.mmd
 # By default, connectors are placed in the source element's view.
 tld connect --from api --to db --label reads
 
-# --kind is short custom metadata. These are suggestions, not a closed set.
-tld kinds
+# --kind is short custom metadata, not a closed set.
 ```
 
 

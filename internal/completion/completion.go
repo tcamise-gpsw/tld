@@ -194,11 +194,6 @@ func ConnectorFields() []string {
 	return workspace.ConnectorFieldNames()
 }
 
-// ElementKinds are the built-in element kinds offered for --kind.
-func ElementKinds() []string {
-	return []string{"service", "database", "person", "system", "container", "component", "external", "workspace"}
-}
-
 // ConnectorDirections are the valid values for --direction.
 func ConnectorDirections() []string {
 	return []string{"forward", "backward", "both", "none"}
