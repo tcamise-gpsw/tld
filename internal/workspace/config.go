@@ -1,3 +1,5 @@
+//go:build !tldlocal
+
 package workspace
 
 import (
