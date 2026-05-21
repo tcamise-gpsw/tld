@@ -20,6 +20,8 @@ const (
 
 	defaultMaxTrackedFiles = 20000
 	defaultMaxLimitedFiles = 2000
+	defaultMaxRecentFiles  = 1000
+	defaultMaxCallerDepth  = 10
 	defaultLSPMemoryLimit  = 4294967296
 )
 
@@ -40,6 +42,8 @@ func DefaultSettings() Settings {
 			Strategy:        ScanStrategyAuto,
 			MaxTrackedFiles: defaultMaxTrackedFiles,
 			MaxLimitedFiles: defaultMaxLimitedFiles,
+			MaxRecentFiles:  defaultMaxRecentFiles,
+			MaxCallerDepth:  defaultMaxCallerDepth,
 		},
 		LSP: LSPConfig{
 			Enabled:          true,
@@ -103,6 +107,12 @@ func defaultScaleConfig(cfg ScaleConfig) ScaleConfig {
 	}
 	if cfg.MaxLimitedFiles <= 0 {
 		cfg.MaxLimitedFiles = defaultMaxLimitedFiles
+	}
+	if cfg.MaxRecentFiles <= 0 {
+		cfg.MaxRecentFiles = defaultMaxRecentFiles
+	}
+	if cfg.MaxCallerDepth <= 0 {
+		cfg.MaxCallerDepth = defaultMaxCallerDepth
 	}
 	return cfg
 }

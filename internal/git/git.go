@@ -178,6 +178,70 @@ func FileLastCommitAt(dir, filePath string) (time.Time, error) {
 	return time.Unix(unix, 0).UTC(), nil
 }
 
+// RecentChangedFiles returns unique repository-relative paths touched by local
+// commit history, newest commits first. It never contacts remotes.
+func RecentChangedFiles(dir string, limit int) ([]string, error) {
+	tracked, err := ListTrackedFiles(dir, 0)
+	if err != nil {
+		return nil, err
+	}
+	trackedSet := map[string]struct{}{}
+	for _, file := range tracked.Files {
+		trackedSet[file] = struct{}{}
+	}
+	cmd := exec.Command("git", "log", "--diff-filter=ACMR", "--name-only", "-z", "--format=", "--")
+	cmd.Dir = dir
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git log recent files: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git log recent files: %w", err)
+	}
+	seen := map[string]struct{}{}
+	var files []string
+	reader := bufio.NewReader(stdout)
+	for {
+		raw, readErr := reader.ReadString(0)
+		entry := filepath.ToSlash(strings.TrimSpace(strings.TrimSuffix(raw, "\x00")))
+		if entry != "" {
+			if _, ok := trackedSet[entry]; !ok {
+				if readErr == io.EOF {
+					break
+				}
+				if readErr != nil {
+					_ = cmd.Wait()
+					return nil, fmt.Errorf("git log recent files: %w", readErr)
+				}
+				continue
+			}
+			if _, ok := seen[entry]; !ok {
+				seen[entry] = struct{}{}
+				files = append(files, entry)
+				if limit > 0 && len(files) >= limit {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+					return files, nil
+				}
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("git log recent files: %w", readErr)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("git log recent files: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, fmt.Errorf("git log recent files: %w", err)
+	}
+	return files, nil
+}
+
 func StatusSnapshot(dir string) (Status, error) {
 	status := Status{
 		Branch:      detectBestEffort(func() (string, error) { return DetectBranch(dir) }),

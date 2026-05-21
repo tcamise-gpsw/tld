@@ -5086,6 +5086,7 @@ func symbolsByName(ctx context.Context, store *Store, repositoryID int64, name s
 
 type fakeDefinitionResolver struct {
 	locationsByName map[string][]analyzerlsp.DefinitionLocation
+	incomingByKey   map[string][]analyzerlsp.CallLocation
 	calls           int
 	refs            []analyzer.Ref
 }
@@ -5093,7 +5094,23 @@ type fakeDefinitionResolver struct {
 func (r *fakeDefinitionResolver) ResolveDefinitions(_ context.Context, ref analyzer.Ref) ([]analyzerlsp.DefinitionLocation, error) {
 	r.calls++
 	r.refs = append(r.refs, ref)
-	return append([]analyzerlsp.DefinitionLocation(nil), r.locationsByName[ref.Name]...), nil
+	if locations, ok := r.locationsByName[ref.Name]; ok {
+		return append([]analyzerlsp.DefinitionLocation(nil), locations...), nil
+	}
+	return append([]analyzerlsp.DefinitionLocation(nil), r.locationsByName["*"]...), nil
+}
+
+func (r *fakeDefinitionResolver) IncomingCalls(_ context.Context, filePath string, line, _ int) ([]analyzerlsp.CallLocation, error) {
+	if r == nil {
+		return nil, nil
+	}
+	if calls, ok := r.incomingByKey[callerLocationKey(filePath, line, "")]; ok {
+		return append([]analyzerlsp.CallLocation(nil), calls...), nil
+	}
+	if calls, ok := r.incomingByKey[callerLocationKey(filePath, line, "*")]; ok {
+		return append([]analyzerlsp.CallLocation(nil), calls...), nil
+	}
+	return append([]analyzerlsp.CallLocation(nil), r.incomingByKey["*"]...), nil
 }
 
 func (r *fakeDefinitionResolver) Close() error {
@@ -5827,12 +5844,99 @@ func TestPlanScanAutoChoosesLimitedAboveTrackedThreshold(t *testing.T) {
 		t.Fatalf("expected limited plan, got %+v", plan)
 	}
 	got := relTestFiles(t, repo, plan.Files)
-	want := []string{"cmd/api/main.go", "deploy/k8s/service.yaml"}
+	want := []string{"cmd/api/main.go", "deploy/k8s/service.yaml", "internal/noise/helper.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("limited files = %+v, want %+v", got, want)
 	}
 	if plan.TrackedFiles != 3 {
 		t.Fatalf("TrackedFiles = %d, want 3", plan.TrackedFiles)
+	}
+}
+
+func TestPlanScanLimitedCapsRecentSeeds(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "a.go", "package main\nfunc A() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "a")
+	writeFile(t, repo, "b.go", "package main\nfunc B() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "b")
+	writeFile(t, repo, "c.go", "package main\nfunc C() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "c")
+
+	settings := DefaultSettings()
+	settings.Scale.Strategy = ScanStrategyLimited
+	settings.Scale.MaxRecentFiles = 2
+	settings.Scale.MaxLimitedFiles = 1
+	plan, err := planScan(repo, settings, nil)
+	if err != nil {
+		t.Fatalf("planScan: %v", err)
+	}
+	got := relTestFiles(t, repo, plan.Files)
+	want := []string{"c.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("limited files = %+v, want %+v", got, want)
+	}
+}
+
+func TestScannerLimitedModeExpandsImmediateDefinitionNeighbors(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := t.TempDir()
+	writeFile(t, repo, "a.go", "package main\nfunc A() { B() }\n")
+	writeFile(t, repo, "b.go", "package main\nfunc B() {}\n")
+
+	store := NewStore(db)
+	scanner := NewScanner(store)
+	settings := DefaultSettings()
+	settings.Scale.MaxLimitedFiles = 10
+	settings.LSP.Enabled = true
+	scanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{locationsByName: map[string][]analyzerlsp.DefinitionLocation{
+			"*": {{FilePath: filepath.Join(repo, "b.go"), Line: 2}},
+		}}
+	}
+
+	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "a.go")}, nil, settings, &ignore.Rules{})
+	if err != nil {
+		t.Fatalf("expandLimitedFiles: %v", err)
+	}
+	if len(result.Files) != 2 || result.RecentFiles != 1 || result.NeighborFiles != 1 {
+		t.Fatalf("expansion = %+v, want one recent seed and one neighbor", result)
+	}
+}
+
+func TestScannerLimitedModeStopsAtSharedCallerAncestor(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := t.TempDir()
+	writeFile(t, repo, "leaf_one.go", "package main\nfunc LeafOne() {}\n")
+	writeFile(t, repo, "leaf_two.go", "package main\nfunc LeafTwo() {}\n")
+	writeFile(t, repo, "caller.go", "package main\nfunc Common() { LeafOne(); LeafTwo() }\n")
+
+	store := NewStore(db)
+	scanner := NewScanner(store)
+	settings := DefaultSettings()
+	settings.Scale.MaxLimitedFiles = 10
+	settings.Scale.MaxCallerDepth = 10
+	settings.LSP.Enabled = true
+	caller := analyzerlsp.CallLocation{FilePath: filepath.Join(repo, "caller.go"), Line: 2, Name: "Common"}
+	scanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{incomingByKey: map[string][]analyzerlsp.CallLocation{
+			"*": {caller},
+		}}
+	}
+
+	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "leaf_one.go"), filepath.Join(repo, "leaf_two.go")}, nil, settings, &ignore.Rules{})
+	if err != nil {
+		t.Fatalf("expandLimitedFiles: %v", err)
+	}
+	if !result.SharedAncestorFound || result.CallerFiles != 1 || result.CallerDepthReached != 1 {
+		t.Fatalf("expansion = %+v, want shared caller ancestor at depth 1", result)
+	}
+	if len(result.Files) != 3 {
+		t.Fatalf("files = %d, want 3", len(result.Files))
 	}
 }
 

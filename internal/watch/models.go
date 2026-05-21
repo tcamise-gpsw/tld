@@ -135,6 +135,14 @@ type ScanResult struct {
 	SelectedFiles       int       `json:"selected_files,omitempty"`
 	SkippedTrackedFiles int       `json:"skipped_tracked_files,omitempty"`
 	BaselineWorktree    string    `json:"baseline_worktree,omitempty"`
+	RecentFiles         int       `json:"recent_files,omitempty"`
+	AnchorFiles         int       `json:"anchor_files,omitempty"`
+	NeighborFiles       int       `json:"neighbor_files,omitempty"`
+	CallerFiles         int       `json:"caller_files,omitempty"`
+	CallerDepthReached  int       `json:"caller_depth_reached,omitempty"`
+	SharedAncestorFound bool      `json:"shared_ancestor_found,omitempty"`
+	LimitedCapReached   bool      `json:"limited_cap_reached,omitempty"`
+	LimitedFallback     string    `json:"limited_fallback,omitempty"`
 	Warning             string    `json:"warning,omitempty"`
 	Warnings            []string  `json:"warnings,omitempty"`
 }
@@ -227,6 +235,8 @@ type ScaleConfig struct {
 	Strategy        string `json:"strategy" yaml:"strategy"`
 	MaxTrackedFiles int    `json:"max_tracked_files" yaml:"max_tracked_files"`
 	MaxLimitedFiles int    `json:"max_limited_files" yaml:"max_limited_files"`
+	MaxRecentFiles  int    `json:"max_recent_files" yaml:"max_recent_files"`
+	MaxCallerDepth  int    `json:"max_caller_depth" yaml:"max_caller_depth"`
 }
 
 type LSPConfig struct {

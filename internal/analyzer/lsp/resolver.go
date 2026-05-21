@@ -44,6 +44,12 @@ type DefinitionLocation struct {
 	Line     int
 }
 
+type CallLocation struct {
+	FilePath string
+	Line     int
+	Name     string
+}
+
 type StatusSnapshot struct {
 	Enabled               bool           `json:"enabled"`
 	HealthIntervalSeconds int            `json:"health_interval_seconds,omitempty"`
@@ -171,6 +177,69 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 		})
 	}
 	return resolved, nil
+}
+
+func (r *MultiLanguageResolver) IncomingCalls(ctx context.Context, filePath string, line, column int) ([]CallLocation, error) {
+	if r == nil || r.RootDir == "" || filePath == "" || line <= 0 {
+		return nil, nil
+	}
+	language, ok := analyzer.DetectLanguage(filePath)
+	if !ok {
+		return nil, nil
+	}
+	session, ok, err := r.sessionForLanguage(ctx, language)
+	if err != nil || !ok {
+		return nil, err
+	}
+	if !session.SupportsCallHierarchy() {
+		return nil, nil
+	}
+	if err := r.openDocument(ctx, session, filePath); err != nil {
+		r.markFailed(ctx, language, "open_document", err)
+		return nil, err
+	}
+	if column <= 0 {
+		column = 1
+	}
+	callCtx := ctx
+	cancel := func() {}
+	if r.cfg.DefinitionTimeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, r.cfg.DefinitionTimeout)
+	}
+	defer cancel()
+	items, err := session.PrepareCallHierarchy(callCtx, &protocol.CallHierarchyPrepareParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(filePath)},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),
+				Character: uint32(column - 1),
+			},
+		},
+	})
+	if err != nil {
+		r.markFailed(ctx, language, "call_hierarchy_prepare", err)
+		return nil, err
+	}
+	var calls []CallLocation
+	for _, item := range items {
+		incoming, err := session.IncomingCalls(callCtx, item)
+		if err != nil {
+			r.markFailed(ctx, language, "incoming_calls", err)
+			return nil, err
+		}
+		for _, call := range incoming {
+			filePath := filepath.Clean(call.From.URI.Filename())
+			if filePath == "" {
+				continue
+			}
+			calls = append(calls, CallLocation{
+				FilePath: filePath,
+				Line:     int(call.From.Range.Start.Line) + 1,
+				Name:     call.From.Name,
+			})
+		}
+	}
+	return calls, nil
 }
 
 func (r *MultiLanguageResolver) Snapshot() StatusSnapshot {

@@ -51,6 +51,7 @@ type Scanner struct {
 
 type definitionResolver interface {
 	ResolveDefinitions(context.Context, analyzer.Ref) ([]analyzerlsp.DefinitionLocation, error)
+	IncomingCalls(context.Context, string, int, int) ([]analyzerlsp.CallLocation, error)
 	Close() error
 }
 
@@ -330,20 +331,38 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	progress := &synchronizedProgress{sink: s.Progress}
 	var files []string
 	if plan.Limited {
-		files = append(files, plan.Files...)
+		seeds := append([]string{}, plan.RecentFiles...)
 		committed, err := gitChangesSinceLatestWatchVersion(ctx, s.Store, repo.ID, repoRoot)
 		if err != nil {
 			result.Warnings = append(result.Warnings, "limited view: committed change detection failed: "+err.Error())
 		} else {
-			files = append(files, changedScanFiles(repoRoot, committed, settings, effectiveRules)...)
+			seeds = append(seeds, changedScanFiles(repoRoot, committed, settings, effectiveRules)...)
 		}
 		changed, err := tldgit.WorktreeChangesAgainstHead(repoRoot)
 		if err != nil {
 			result.Warnings = append(result.Warnings, "limited view: git change detection failed: "+err.Error())
 		} else {
-			files = append(files, changedScanFiles(repoRoot, changed, settings, effectiveRules)...)
+			seeds = append(seeds, changedScanFiles(repoRoot, changed, settings, effectiveRules)...)
 		}
-		files = uniqueAbsFiles(files)
+		expanded, err := s.expandLimitedFiles(ctx, repo.ID, repoRoot, seeds, plan.AnchorFiles, settings, effectiveRules)
+		if err != nil {
+			result.Warnings = append(result.Warnings, "limited view: graph expansion failed: "+err.Error())
+			files = uniqueLimitedAbsFiles(append(append([]string{}, seeds...), plan.AnchorFiles...), settings.Scale.MaxLimitedFiles)
+			result.LimitedFallback = "graph expansion failed"
+		} else {
+			files = expanded.Files
+			result.RecentFiles = expanded.RecentFiles
+			result.AnchorFiles = expanded.AnchorFiles
+			result.NeighborFiles = expanded.NeighborFiles
+			result.CallerFiles = expanded.CallerFiles
+			result.CallerDepthReached = expanded.CallerDepthReached
+			result.SharedAncestorFound = expanded.SharedAncestorFound
+			result.LimitedCapReached = expanded.CapReached
+			result.LimitedFallback = expanded.Fallback
+			if expanded.Fallback != "" {
+				result.Warnings = append(result.Warnings, "limited view: "+expanded.Fallback)
+			}
+		}
 		logInfo(ctx, s.Logger, "watch.scan.source_discovery.completed", "repository_id", repo.ID, "files", len(files), "tracked_files", result.TrackedFiles, "selected_files", result.SelectedFiles, "mode", result.Mode, "strategy", result.Strategy)
 	} else {
 		discoveryStarted := time.Now()
@@ -499,6 +518,373 @@ func uniqueAbsFiles(files []string) []string {
 		out = append(out, file)
 	}
 	sort.Strings(out)
+	return out
+}
+
+type limitedExpansion struct {
+	Files               []string
+	RecentFiles         int
+	AnchorFiles         int
+	NeighborFiles       int
+	CallerFiles         int
+	CallerDepthReached  int
+	SharedAncestorFound bool
+	CapReached          bool
+	Fallback            string
+
+	capacity int
+	seen     map[string]string
+	roots    map[string]map[string]struct{}
+}
+
+type limitedParsedFile struct {
+	AbsFile string
+	RelPath string
+	Roots   []string
+	Result  analyzer.Result
+}
+
+type limitedCallerNode struct {
+	FilePath string
+	Line     int
+	Name     string
+	Root     string
+	SymbolID int64
+}
+
+func newLimitedExpansion(capacity int) limitedExpansion {
+	return limitedExpansion{
+		capacity: capacity,
+		seen:     map[string]string{},
+		roots:    map[string]map[string]struct{}{},
+	}
+}
+
+func (e *limitedExpansion) add(absFile, reason string, roots ...string) bool {
+	absFile = filepath.Clean(absFile)
+	if absFile == "" {
+		return false
+	}
+	if e.capacity > 0 && len(e.Files) >= e.capacity {
+		e.CapReached = true
+		return false
+	}
+	if _, ok := e.seen[absFile]; ok {
+		e.addRoots(absFile, roots...)
+		return false
+	}
+	e.seen[absFile] = reason
+	e.Files = append(e.Files, absFile)
+	e.addRoots(absFile, roots...)
+	switch reason {
+	case "recent":
+		e.RecentFiles++
+	case "anchor":
+		e.AnchorFiles++
+	case "neighbor":
+		e.NeighborFiles++
+	case "caller":
+		e.CallerFiles++
+	}
+	return true
+}
+
+func (e *limitedExpansion) addRoots(absFile string, roots ...string) {
+	if len(roots) == 0 {
+		return
+	}
+	if e.roots[absFile] == nil {
+		e.roots[absFile] = map[string]struct{}{}
+	}
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root != "" {
+			e.roots[absFile][root] = struct{}{}
+		}
+	}
+}
+
+func (e limitedExpansion) fileRoots(absFile string) []string {
+	rootSet := e.roots[filepath.Clean(absFile)]
+	if len(rootSet) == 0 {
+		return nil
+	}
+	roots := make([]string, 0, len(rootSet))
+	for root := range rootSet {
+		roots = append(roots, root)
+	}
+	sort.Strings(roots)
+	return roots
+}
+
+func (s *Scanner) expandLimitedFiles(ctx context.Context, repositoryID int64, repoRoot string, seeds, anchors []string, settings Settings, rules *ignore.Rules) (limitedExpansion, error) {
+	settings = NormalizeSettings(settings)
+	expanded := newLimitedExpansion(settings.Scale.MaxLimitedFiles)
+	for _, file := range seeds {
+		absFile, rel, ok := limitedCandidateFile(repoRoot, file, settings, rules)
+		if !ok {
+			continue
+		}
+		expanded.add(absFile, "recent", rel)
+	}
+	for _, file := range anchors {
+		absFile, _, ok := limitedCandidateFile(repoRoot, file, settings, rules)
+		if !ok {
+			continue
+		}
+		expanded.add(absFile, "anchor")
+	}
+	if len(expanded.Files) == 0 {
+		expanded.Fallback = "no parseable recent or anchor files selected"
+		return expanded, nil
+	}
+
+	parsed, parseWarnings := s.parseLimitedExpansionFiles(ctx, repoRoot, expanded.Files, rules, expanded)
+	if len(parseWarnings) > 0 {
+		expanded.Fallback = strings.Join(parseWarnings, "; ")
+	}
+	resolver := s.getOrCreateResolver(repoRoot, settings)
+	s.expandReferenceNeighbors(ctx, repositoryID, repoRoot, settings, rules, resolver, parsed, &expanded)
+	s.expandCallerAncestors(ctx, repositoryID, repoRoot, settings, rules, resolver, parsed, &expanded)
+	return expanded, nil
+}
+
+func limitedCandidateFile(repoRoot, file string, settings Settings, rules *ignore.Rules) (string, string, bool) {
+	settings = NormalizeSettings(settings)
+	allowed := map[string]struct{}{}
+	for _, language := range settings.Languages {
+		allowed[language] = struct{}{}
+	}
+	absFile := filepath.Clean(file)
+	if !filepath.IsAbs(absFile) {
+		absFile = filepath.Join(repoRoot, filepath.FromSlash(file))
+	}
+	rel, err := filepath.Rel(repoRoot, absFile)
+	if err != nil {
+		return "", "", false
+	}
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+		return "", "", false
+	}
+	if rules != nil && rules.ShouldIgnorePath(rel) {
+		return "", "", false
+	}
+	if info, err := os.Stat(absFile); err != nil || info.IsDir() {
+		return "", "", false
+	}
+	language, parseable, ok := watchedFileLanguage(absFile)
+	if !ok || (parseable && !languageAllowed(language, allowed)) {
+		return "", "", false
+	}
+	return absFile, rel, true
+}
+
+func (s *Scanner) parseLimitedExpansionFiles(ctx context.Context, repoRoot string, files []string, rules *ignore.Rules, expanded limitedExpansion) ([]limitedParsedFile, []string) {
+	var parsed []limitedParsedFile
+	var warnings []string
+	analyzerSvc := s.Analyzer
+	if analyzerSvc == nil {
+		analyzerSvc = analyzer.NewService()
+	}
+	for _, absFile := range files {
+		rel, err := filepath.Rel(repoRoot, absFile)
+		if err != nil {
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		_, parseable, ok := watchedFileLanguage(absFile)
+		if !ok || !parseable {
+			continue
+		}
+		result, err := analyzerSvc.ExtractPath(ctx, absFile, rules, nil)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("could not parse %s for graph expansion: %v", rel, err))
+			continue
+		}
+		parsed = append(parsed, limitedParsedFile{
+			AbsFile: absFile,
+			RelPath: rel,
+			Roots:   expanded.fileRoots(absFile),
+			Result:  *result,
+		})
+	}
+	return parsed, warnings
+}
+
+func (s *Scanner) expandReferenceNeighbors(ctx context.Context, repositoryID int64, repoRoot string, settings Settings, rules *ignore.Rules, resolver definitionResolver, parsed []limitedParsedFile, expanded *limitedExpansion) {
+	for _, file := range parsed {
+		for _, ref := range file.Result.Refs {
+			if ref.Kind != "" && ref.Kind != "call" {
+				continue
+			}
+			if resolver == nil {
+				continue
+			}
+			locations, err := resolver.ResolveDefinitions(ctx, ref)
+			if err != nil {
+				continue
+			}
+			for _, location := range locations {
+				absFile, _, ok := limitedCandidateFile(repoRoot, location.FilePath, settings, rules)
+				if !ok {
+					continue
+				}
+				expanded.add(absFile, "neighbor", file.Roots...)
+			}
+		}
+	}
+	s.expandStoredReferenceNeighbors(ctx, repositoryID, repoRoot, settings, rules, parsed, expanded)
+}
+
+func (s *Scanner) expandStoredReferenceNeighbors(ctx context.Context, repositoryID int64, repoRoot string, settings Settings, rules *ignore.Rules, parsed []limitedParsedFile, expanded *limitedExpansion) {
+	if s == nil || s.Store == nil || len(parsed) == 0 {
+		return
+	}
+	symbols, err := s.Store.SymbolsForRepository(ctx, repositoryID)
+	if err != nil {
+		return
+	}
+	byFile := map[string][]Symbol{}
+	byID := map[int64]Symbol{}
+	for _, symbol := range symbols {
+		byFile[symbol.FilePath] = append(byFile[symbol.FilePath], symbol)
+		byID[symbol.ID] = symbol
+	}
+	for _, file := range parsed {
+		var ids []int64
+		for _, symbol := range byFile[file.RelPath] {
+			ids = append(ids, symbol.ID)
+		}
+		refs, err := s.Store.QueryReferencesBySourceIDs(ctx, repositoryID, ids)
+		if err != nil {
+			continue
+		}
+		for _, ref := range refs {
+			target, ok := byID[ref.TargetSymbolID]
+			if !ok {
+				continue
+			}
+			absFile, _, ok := limitedCandidateFile(repoRoot, target.FilePath, settings, rules)
+			if ok {
+				expanded.add(absFile, "neighbor", file.Roots...)
+			}
+		}
+	}
+}
+
+func (s *Scanner) expandCallerAncestors(ctx context.Context, repositoryID int64, repoRoot string, settings Settings, rules *ignore.Rules, resolver definitionResolver, parsed []limitedParsedFile, expanded *limitedExpansion) {
+	if settings.Scale.MaxCallerDepth <= 0 || len(parsed) == 0 {
+		return
+	}
+	storedSymbols, _ := s.Store.SymbolsForRepository(ctx, repositoryID)
+	storedByLocation := map[string]Symbol{}
+	storedByID := map[int64]Symbol{}
+	for _, symbol := range storedSymbols {
+		key := callerLocationKey(filepath.Join(repoRoot, filepath.FromSlash(symbol.FilePath)), symbol.StartLine, symbol.Name)
+		storedByLocation[key] = symbol
+		storedByID[symbol.ID] = symbol
+	}
+	var frontier []limitedCallerNode
+	for _, file := range parsed {
+		if len(file.Roots) == 0 {
+			continue
+		}
+		for _, symbol := range file.Result.Symbols {
+			for _, root := range file.Roots {
+				node := limitedCallerNode{FilePath: file.AbsFile, Line: symbol.Line, Name: symbol.Name, Root: root}
+				if stored, ok := storedByLocation[callerLocationKey(file.AbsFile, symbol.Line, symbol.Name)]; ok {
+					node.SymbolID = stored.ID
+				}
+				frontier = append(frontier, node)
+			}
+		}
+	}
+	ancestorRoots := map[string]map[string]struct{}{}
+	for depth := 1; depth <= settings.Scale.MaxCallerDepth && len(frontier) > 0; depth++ {
+		expanded.CallerDepthReached = depth
+		var next []limitedCallerNode
+		for _, node := range frontier {
+			callers := s.incomingCallerNodes(ctx, repositoryID, repoRoot, resolver, node, storedByID)
+			for _, caller := range callers {
+				absFile, _, ok := limitedCandidateFile(repoRoot, caller.FilePath, settings, rules)
+				if !ok {
+					continue
+				}
+				caller.FilePath = absFile
+				caller.Root = node.Root
+				expanded.add(absFile, "caller", node.Root)
+				key := callerLocationKey(caller.FilePath, caller.Line, caller.Name)
+				if ancestorRoots[key] == nil {
+					ancestorRoots[key] = map[string]struct{}{}
+				}
+				ancestorRoots[key][node.Root] = struct{}{}
+				if len(ancestorRoots[key]) >= 2 {
+					expanded.SharedAncestorFound = true
+					return
+				}
+				next = append(next, caller)
+			}
+		}
+		frontier = dedupeCallerNodes(next)
+		if expanded.CapReached {
+			return
+		}
+	}
+}
+
+func (s *Scanner) incomingCallerNodes(ctx context.Context, repositoryID int64, repoRoot string, resolver definitionResolver, node limitedCallerNode, storedByID map[int64]Symbol) []limitedCallerNode {
+	var out []limitedCallerNode
+	if resolver != nil {
+		calls, err := resolver.IncomingCalls(ctx, node.FilePath, node.Line, 1)
+		if err == nil {
+			for _, call := range calls {
+				out = append(out, limitedCallerNode{FilePath: call.FilePath, Line: call.Line, Name: call.Name})
+			}
+		}
+	}
+	if len(out) > 0 || s == nil || s.Store == nil || node.SymbolID <= 0 {
+		return out
+	}
+	refs, err := s.Store.QueryReferencesByTargetIDs(ctx, repositoryID, []int64{node.SymbolID})
+	if err != nil {
+		return out
+	}
+	for _, ref := range refs {
+		source, ok := storedByID[ref.SourceSymbolID]
+		if !ok {
+			continue
+		}
+		out = append(out, limitedCallerNode{
+			FilePath: filepath.Join(repoRoot, filepath.FromSlash(source.FilePath)),
+			Line:     source.StartLine,
+			Name:     source.Name,
+			SymbolID: source.ID,
+		})
+	}
+	return out
+}
+
+func callerLocationKey(filePath string, line int, name string) string {
+	return filepath.Clean(filePath) + ":" + fmt.Sprint(line) + ":" + name
+}
+
+func dedupeCallerNodes(nodes []limitedCallerNode) []limitedCallerNode {
+	seen := map[string]struct{}{}
+	out := make([]limitedCallerNode, 0, len(nodes))
+	for _, node := range nodes {
+		key := callerLocationKey(node.FilePath, node.Line, node.Name) + ":" + node.Root
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, node)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := callerLocationKey(out[i].FilePath, out[i].Line, out[i].Name) + ":" + out[i].Root
+		right := callerLocationKey(out[j].FilePath, out[j].Line, out[j].Name) + ":" + out[j].Root
+		return left < right
+	})
 	return out
 }
 

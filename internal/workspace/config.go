@@ -135,6 +135,8 @@ type WatchScaleConfig struct {
 	Strategy        string `yaml:"strategy"`
 	MaxTrackedFiles int    `yaml:"max_tracked_files"`
 	MaxLimitedFiles int    `yaml:"max_limited_files"`
+	MaxRecentFiles  int    `yaml:"max_recent_files"`
+	MaxCallerDepth  int    `yaml:"max_caller_depth"`
 }
 
 type WatchLSPConfig struct {
@@ -226,6 +228,8 @@ func DefaultConfig() *Config {
 				Strategy:        "auto",
 				MaxTrackedFiles: 15000,
 				MaxLimitedFiles: 2000,
+				MaxRecentFiles:  1000,
+				MaxCallerDepth:  10,
 			},
 			LSP: WatchLSPConfig{
 				Enabled:          true,
