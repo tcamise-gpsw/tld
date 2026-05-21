@@ -111,6 +111,7 @@ Secondary actions:
   login       Authenticate the CLI with a tlDiagram server
   plan        Show what would be applied
   pull        Pull the current server state into local YAML files
+  render      Render a workspace view to text output formats
   serve       Start the local tlDiagram web server
   status      Show running local tlDiagram processes
   stop        Stop the local tlDiagram web server
@@ -136,6 +137,20 @@ Use "tld [command] --help" for more information about a command
 - `elements.yaml`: Definitions for all components and their placements.
 - `connectors.yaml`: Connection and relationship definitions.
 - `.tld.lock`: Tracks sync state and versioning.
+
+## Terminal Rendering
+
+Use Mermaid output for terminal, CI, and remote workflows without launching the web UI.
+
+```bash
+tld render root > architecture.mmd
+tld render platform --format mermaid -o platform.mmd
+
+# By default, connectors are placed in the source element's view.
+tld connect --from api --to db --label reads
+
+# --kind is short custom metadata, not a closed set.
+```
 
 
 

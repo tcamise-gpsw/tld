@@ -163,6 +163,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 				}
 			} else {
 				term.Separator(cmd.OutOrStdout())
+				printAnalyzeScanModeWarning(cmd.OutOrStdout(), once.Scan)
 				term.Successf(cmd.OutOrStdout(), "%d elements written to elements.yaml", exportResult.ElementsWritten)
 				term.Successf(cmd.OutOrStdout(), "%d connectors written to connectors.yaml", exportResult.ConnectorsWritten)
 				term.Successf(cmd.OutOrStdout(), "1 repository scanned")
@@ -329,6 +330,24 @@ func hasAnalyzeDrift(diffs []watchpkg.RepresentationDiff) bool {
 		}
 	}
 	return false
+}
+
+func printAnalyzeScanModeWarning(out io.Writer, scan watchpkg.ScanResult) {
+	if scan.Mode != watchpkg.ScanStrategyLimited {
+		return
+	}
+	reason := strings.TrimSpace(scan.StrategyReason)
+	if reason == "" {
+		reason = "repository exceeded the configured scale threshold"
+	}
+	term.Warnf(out, "Limited scan mode active: %s.", reason)
+	if scan.TrackedFiles > 0 {
+		term.Hint(out, "Scanned selected high-signal files only; source symbols and connectors may be omitted.")
+		term.Hint(out, fmt.Sprintf("Selected %d file(s) out of %d tracked file(s); skipped %d tracked file(s).", scan.FilesSeen, scan.TrackedFiles, scan.SkippedTrackedFiles))
+	} else {
+		term.Hint(out, "Scanned selected high-signal files only; source symbols and connectors may be omitted.")
+	}
+	term.Hint(out, "Use `tld config set watch.scale.strategy full` or raise `watch.scale.max_tracked_files` for a full scan.")
 }
 
 func formatLSPStatus(status watchpkg.LSPStatus) string {

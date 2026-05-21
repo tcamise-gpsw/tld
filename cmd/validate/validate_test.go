@@ -139,3 +139,19 @@ func TestValidateCmd_VerboseFlag(t *testing.T) {
 		t.Errorf("stdout %q does not contain 'Workspace valid'", stdout)
 	}
 }
+
+func TestValidateCmd_ShowsSuppressionGuidance(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	if _, _, err := cmd.RunCmd(t, dir, "add", "System", "--ref", "sys", "--kind", "workspace"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	stdout, _, err := cmd.RunCmd(t, dir, "validate")
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if !strings.Contains(stdout, "validation.exclude_rules") {
+		t.Fatalf("expected suppression guidance in output, got:\n%s", stdout)
+	}
+}

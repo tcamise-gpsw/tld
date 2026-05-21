@@ -126,9 +126,6 @@ func TestStaticSetsNonEmpty(t *testing.T) {
 	if len(completion.ConnectorFields()) == 0 {
 		t.Fatal("ConnectorFields empty")
 	}
-	if len(completion.ElementKinds()) == 0 {
-		t.Fatal("ElementKinds empty")
-	}
 	if len(completion.ConnectorDirections()) == 0 {
 		t.Fatal("ConnectorDirections empty")
 	}

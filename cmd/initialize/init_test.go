@@ -84,6 +84,61 @@ func TestInitCmd_DetectsGit(t *testing.T) {
 	}
 }
 
+func TestInitCmd_ProjectNameUsesGitRepoRootForNestedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+
+	repoRoot := filepath.Join(dir, "my-repo")
+	cmd.InitGitRepo(t, repoRoot, "README.md", "# nested")
+
+	nestedWorkspace := filepath.Join(repoRoot, "sub", "nested", ".tld")
+	if _, _, err := cmd.RunCmd(t, ".", "init", nestedWorkspace); err != nil {
+		t.Fatalf("init nested workspace: %v", err)
+	}
+
+	workspaceCfgPath := filepath.Join(nestedWorkspace, ".tld.yaml")
+	data, err := os.ReadFile(workspaceCfgPath)
+	if err != nil {
+		t.Fatalf("read .tld.yaml: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "project_name: my-repo") {
+		t.Fatalf("project_name should come from git repo root, got:\n%s", content)
+	}
+}
+
+func TestInitCmd_CPPWorkspaceUsesLanguageAwareExcludes(t *testing.T) {
+	dir := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+
+	repoRoot := filepath.Join(dir, "cpp-repo")
+	cmd.InitGitRepo(t, repoRoot, "src/main.cpp", "int main() { return 0; }\n")
+
+	workspaceDir := filepath.Join(repoRoot, ".tld")
+	if _, _, err := cmd.RunCmd(t, ".", "init", workspaceDir); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	workspaceCfgPath := filepath.Join(workspaceDir, ".tld.yaml")
+	data, err := os.ReadFile(workspaceCfgPath)
+	if err != nil {
+		t.Fatalf("read .tld.yaml: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{"- cmake-build-*/", "- CMakeFiles/", "- build/"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected C++ exclusion %q in:\n%s", want, content)
+		}
+	}
+	for _, unwanted := range []string{"**/*_test.go", "**/*.pb.go"} {
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("unexpected Go-specific exclusion %q in:\n%s", unwanted, content)
+		}
+	}
+}
+
 func TestInitCmd_AlreadyInitialized(t *testing.T) {
 	dir := t.TempDir()
 	configDir := t.TempDir()

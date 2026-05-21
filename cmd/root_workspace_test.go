@@ -60,3 +60,14 @@ func TestRootWorkspaceDefaultPrecedence(t *testing.T) {
 		}
 	})
 }
+
+func TestRootCmd_IncludesRenderCommand(t *testing.T) {
+	root := NewRootCmd()
+	cmd, _, err := root.Find([]string{"render"})
+	if err != nil {
+		t.Fatalf("find render command: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "render" {
+		t.Fatalf("render command not registered")
+	}
+}

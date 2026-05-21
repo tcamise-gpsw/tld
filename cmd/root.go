@@ -20,6 +20,7 @@ import (
 	"github.com/mertcikla/tld/v2/cmd/pull"
 	"github.com/mertcikla/tld/v2/cmd/remove"
 	"github.com/mertcikla/tld/v2/cmd/rename"
+	"github.com/mertcikla/tld/v2/cmd/render"
 	"github.com/mertcikla/tld/v2/cmd/serve"
 	"github.com/mertcikla/tld/v2/cmd/status"
 	"github.com/mertcikla/tld/v2/cmd/stop"
@@ -143,6 +144,9 @@ and apply them atomically with 'tld apply'.`,
 	viewsCmd := views.NewViewsCmd(&wdir)
 	viewsCmd.GroupID = secondaryGroup.ID
 
+	renderCmd := render.NewRenderCmd(&wdir)
+	renderCmd.GroupID = secondaryGroup.ID
+
 	diffCmd := diff.NewDiffCmd(&wdir)
 	diffCmd.GroupID = secondaryGroup.ID
 
@@ -187,6 +191,7 @@ and apply them atomically with 'tld apply'.`,
 		statusCmd,
 		syncCmd,
 		viewsCmd,
+		renderCmd,
 		diffCmd,
 		inspectCmd,
 		addCmd,

@@ -2,7 +2,7 @@ package connect
 
 import (
 	"fmt"
-	"slices"
+	"strings"
 
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
 	"github.com/mertcikla/tld/v2/internal/completion"
@@ -15,6 +15,7 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 	var (
 		from         string
 		to           string
+		dryRun       bool
 		label        string
 		description  string
 		relationship string
@@ -40,9 +41,11 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				return err
 			}
 			view := legacyView
-			rootFallback := false
+			if strings.EqualFold(strings.TrimSpace(view), "auto") {
+				view = ""
+			}
 			if view == "" {
-				view, rootFallback, err = inferConnectorView(ws, from, to)
+				view, err = inferConnectorView(ws, from, to)
 				if err != nil {
 					return err
 				}
@@ -60,6 +63,22 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				Style:        style,
 				URL:          url,
 			}
+			if dryRun {
+				if err := cmdutil.WithWorkspaceDryRun(*wdir, func(cloneDir string) error {
+					return workspace.AppendConnector(cloneDir, spec)
+				}); err != nil {
+					if cmdutil.WantsJSON(*format) {
+						return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "connect", err)
+					}
+					return fmt.Errorf("dry-run connect: %w", err)
+				}
+				if cmdutil.WantsJSON(*format) {
+					return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "connect", "dry-run", fmt.Sprintf("%s:%s", from, to))
+				}
+				term.Successf(cmd.OutOrStdout(), "dry-run: connect: %s -> %s", from, to)
+				term.Infof(cmd.OutOrStdout(), "connector view: %s", view)
+				return nil
+			}
 			if err := workspace.AppendConnector(*wdir, spec); err != nil {
 				if cmdutil.WantsJSON(*format) {
 					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "connect", err)
@@ -71,9 +90,6 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 			}
 			term.Successf(cmd.OutOrStdout(), "ok")
 			term.Infof(cmd.OutOrStdout(), "connector view: %s", view)
-			if rootFallback {
-				term.Warn(cmd.OutOrStdout(), "No shared parent found; connector was placed in root. Use --view to choose a specific view.")
-			}
 			return nil
 		},
 	}
@@ -86,7 +102,8 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 	c.Flags().StringVar(&direction, "direction", "forward", "forward|backward|both|none")
 	c.Flags().StringVar(&style, "style", "bezier", "bezier|straight|step|smoothstep")
 	c.Flags().StringVar(&url, "url", "", "external URL")
-	c.Flags().StringVar(&legacyView, "view", "", "explicit view ref for the connector")
+	c.Flags().StringVar(&legacyView, "view", "", "explicit connector view ref (default: source element's view)")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "preview the change without writing files")
 	_ = c.Flags().MarkHidden("style")
 	_ = c.MarkFlagRequired("from")
 	_ = c.MarkFlagRequired("to")
@@ -100,24 +117,10 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 		return completion.ConnectorDirections(), cobra.ShellCompDirectiveNoFileComp
 	})
 	_ = c.RegisterFlagCompletionFunc("view", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return completion.ViewRefs(wdir)
+		refs, directive := completion.ViewRefs(wdir)
+		return append([]string{"auto"}, refs...), directive
 	})
 	return c
-}
-
-func elementParentRefs(element *workspace.Element) []string {
-	if element == nil || len(element.Placements) == 0 {
-		return []string{"root"}
-	}
-	refs := make([]string, 0, len(element.Placements))
-	for _, p := range element.Placements {
-		parent := p.ParentRef
-		if parent == "" {
-			parent = "root"
-		}
-		refs = append(refs, parent)
-	}
-	return refs
 }
 
 func validateConnectorRefs(from, to, view string) error {
@@ -161,27 +164,35 @@ func validateConnectorEndpointsExist(ws *workspace.Workspace, from, to string) e
 	return nil
 }
 
-func inferConnectorView(ws *workspace.Workspace, from, to string) (string, bool, error) {
+func inferConnectorView(ws *workspace.Workspace, from, to string) (string, error) {
 	if ws == nil {
-		return "", false, fmt.Errorf("workspace is required")
+		return "", fmt.Errorf("workspace is required")
 	}
 	fromElement, ok := ws.Elements[from]
 	if !ok {
-		return "", false, fmt.Errorf("source element %q not found", from)
+		return "", fmt.Errorf("source element %q not found", from)
 	}
-	toElement, ok := ws.Elements[to]
-	if !ok {
-		return "", false, fmt.Errorf("target element %q not found", to)
+	return parentOfElement(fromElement), nil
+}
+
+func parentOfElement(element *workspace.Element) string {
+	if element == nil || len(element.Placements) == 0 {
+		return workspace.RootRef
 	}
-
-	fromParents := elementParentRefs(fromElement)
-	toParents := elementParentRefs(toElement)
-
-	for _, f := range fromParents {
-		if slices.Contains(toParents, f) {
-			return f, false, nil
+	best := workspace.RootRef
+	for _, placement := range element.Placements {
+		candidate := normalizeParentRef(placement.ParentRef)
+		if candidate != workspace.RootRef {
+			best = candidate
+			break
 		}
 	}
+	return best
+}
 
-	return workspace.RootRef, true, nil
+func normalizeParentRef(ref string) string {
+	if ref == "" {
+		return workspace.RootRef
+	}
+	return ref
 }

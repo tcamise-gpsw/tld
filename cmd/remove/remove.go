@@ -27,7 +27,8 @@ func NewRemoveCmd(wdir, format *string, compact *bool) *cobra.Command {
 }
 
 func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+	c := &cobra.Command{
 		Use:   "element <ref>",
 		Short: "Remove an element from elements.yaml",
 		Args:  cobra.ExactArgs(1),
@@ -39,6 +40,22 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref := args[0]
+			if dryRun {
+				err := cmdutil.WithWorkspaceDryRun(*wdir, func(cloneDir string) error {
+					return workspace.RemoveElement(cloneDir, ref)
+				})
+				if err != nil {
+					if cmdutil.WantsJSON(*format) {
+						return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "remove element", err)
+					}
+					return fmt.Errorf("dry-run remove element: %w", err)
+				}
+				if cmdutil.WantsJSON(*format) {
+					return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "remove element", "dry-run", ref)
+				}
+				term.Successf(cmd.OutOrStdout(), "dry-run: del: %s", ref)
+				return nil
+			}
 			if err := workspace.RemoveElement(*wdir, ref); err != nil {
 				if cmdutil.WantsJSON(*format) {
 					return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "remove element", err)
@@ -52,14 +69,17 @@ func newElementCmd(wdir, format *string, compact *bool) *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "preview the change without writing files")
+	return c
 }
 
 func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 	var (
-		view  string
-		from  string
-		to    string
-		label string
+		view   string
+		from   string
+		to     string
+		label  string
+		dryRun bool
 	)
 
 	c := &cobra.Command{
@@ -67,6 +87,29 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 		Short: "Remove matching connector(s) from connectors.yaml",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if dryRun {
+				var n int
+				err := cmdutil.WithWorkspaceDryRun(*wdir, func(cloneDir string) error {
+					var runErr error
+					n, runErr = workspace.RemoveConnectorWithLabel(cloneDir, view, from, to, label)
+					return runErr
+				})
+				if err != nil {
+					if cmdutil.WantsJSON(*format) {
+						return cmdutil.WriteCommandError(cmd.OutOrStdout(), *compact, "remove connector", err)
+					}
+					return fmt.Errorf("dry-run remove connector: %w", err)
+				}
+				if cmdutil.WantsJSON(*format) {
+					return cmdutil.WriteMutation(cmd.OutOrStdout(), *compact, "remove connector", "dry-run", fmt.Sprintf("%s:%s:%s", view, from, to))
+				}
+				if n == 0 {
+					term.Info(cmd.OutOrStdout(), "Dry-run: no matching connectors found — nothing would be removed.")
+				} else {
+					term.Successf(cmd.OutOrStdout(), "dry-run: del: %d", n)
+				}
+				return nil
+			}
 			n, err := workspace.RemoveConnectorWithLabel(*wdir, view, from, to, label)
 			if err != nil {
 				if cmdutil.WantsJSON(*format) {
@@ -90,6 +133,7 @@ func newConnectorCmd(wdir, format *string, compact *bool) *cobra.Command {
 	c.Flags().StringVar(&from, "from", "", "source element ref (required)")
 	c.Flags().StringVar(&to, "to", "", "target element ref (required)")
 	c.Flags().StringVar(&label, "label", "", "connector label")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "preview the change without writing files")
 	_ = c.MarkFlagRequired("view")
 	_ = c.MarkFlagRequired("from")
 	_ = c.MarkFlagRequired("to")
