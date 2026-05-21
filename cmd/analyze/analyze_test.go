@@ -3,6 +3,7 @@ package analyze_test
 import (
 	"encoding/json"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -449,6 +450,32 @@ func TestAnalyzeCmd_DryRunDoesNotWriteYAML(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCmd_WarnsWhenLimitedScanModeIsActive(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("TLD_WATCH_SCALE_MAX_TRACKED_FILES", "1")
+	t.Setenv("TLD_WATCH_SCALE_MAX_LIMITED_FILES", "10")
+	cmd.MustInitWorkspace(t, dir)
+	repoDir := filepath.Join(dir, "app")
+	cmd.InitGitRepo(t, repoDir, "build.gradle", "plugins { id 'java' }\n")
+	writeAnalyzeTestFile(t, repoDir, "src/main/java/example/App.java", "package example;\nclass App { void run() {} }\n")
+	commitAnalyzeTestFiles(t, repoDir)
+
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	for _, want := range []string{
+		"Limited scan mode active: tracked files exceed 1.",
+		"Scanned selected high-signal files only; source symbols and connectors may be omitted.",
+		"Use `tld config set watch.scale.strategy full` or raise `watch.scale.max_tracked_files` for a full scan.",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("limited scan warning missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
 func TestAnalyzeCmd_WritesPipelineLogWithoutBanner(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := t.TempDir()
@@ -575,6 +602,17 @@ func writeAnalyzeTestFile(t *testing.T, root, name, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func commitAnalyzeTestFiles(t *testing.T, repoDir string) {
+	t.Helper()
+	for _, args := range [][]string{{"add", "."}, {"commit", "-m", "update"}} {
+		command := osexec.Command("git", args...)
+		command.Dir = repoDir
+		if out, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
 	}
 }
 
