@@ -432,8 +432,11 @@ func scoreFacts(ctx context.Context, store *Store, runID int64, facts []Fact, vi
 		score := visibilityScore{}
 		if highSignalFact(fact) {
 			score.add("fact.high_signal", cfg.Weights.HighSignalFact*fact.Confidence, "high-signal fact "+fact.Type)
-		} else if dependencyFact(fact) {
+				} else if dependencyFact(fact) {
 			score.add("fact.dependency", cfg.Weights.DependencyFact*fact.Confidence, "dependency fact")
+		}
+		if dependencyImportFact(fact) {
+			score.add("noise.dependency_import", cfg.Weights.UtilityNoise, "dependency import fact is low-signal")
 		}
 		if fact.SubjectKind == "symbol" {
 			if _, ok := visibleSymbolStable[fact.SubjectStableKey]; ok {
@@ -454,6 +457,9 @@ func scoreFacts(ctx context.Context, store *Store, runID int64, facts []Fact, vi
 		decision := "hidden"
 		if (highSignalFact(fact) || dependencyFact(fact)) && (score.Forced || !cfg.CoreThresholdEnabled || score.Score >= cfg.CoreThreshold) {
 			decision = "visible"
+			if dependencyImportFact(fact) {
+				decision = "low-signal"
+			}
 			visible = append(visible, fact)
 		}
 		scoreValue := score.Score
@@ -490,6 +496,7 @@ func highSignalFact(fact Fact) bool {
 func dependencyFact(fact Fact) bool {
 	return strings.HasPrefix(fact.Type, "dependency.")
 }
+
 
 func factOwnerKey(fact Fact) string {
 	return "fact:" + fact.Enricher + ":" + fact.StableKey
