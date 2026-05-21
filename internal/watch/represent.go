@@ -688,6 +688,16 @@ func buildSemanticTagPlan(repo Repository, filtered filterResult, thresholds Thr
 
 	addFactSemanticTags(facts, filtered.VisibleSymbols, identityKeys, add)
 
+	for _, fact := range facts {
+		if dependencyImportFact(fact) {
+			module := dependencyImportName(fact)
+			if strings.TrimSpace(module) != "" {
+				ownerKey := dependencyModuleOwnerKey(module)
+				add("dependency-module", ownerKey, "role:dependency")
+			}
+		}
+	}
+
 	counts := map[string]int{}
 	forced := map[string]struct{}{}
 	for _, tags := range candidates {
@@ -791,7 +801,8 @@ func forceFactSemanticTag(tag string) bool {
 		strings.HasPrefix(tag, "orm:") ||
 		strings.HasPrefix(tag, "technology:") ||
 		tag == "http:route" ||
-		tag == "frontend:route"
+		tag == "frontend:route" ||
+		tag == "role:dependency"
 }
 
 func hasStringPrefix(values []string, prefix string) bool {
