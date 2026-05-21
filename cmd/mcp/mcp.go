@@ -296,6 +296,13 @@ func registerTools(server *mcpsdk.Server, cmd *cobra.Command, wdir *string, data
 			return errResult(fmt.Errorf("%s%d symbol error(s)", out, len(broken)))
 		}
 		out += fmt.Sprintf("Workspace valid: %d elements, %d connectors\n", len(ws.Elements), len(ws.Connectors))
+		validationWarnings := ws.ValidateWarnings()
+		if len(validationWarnings) > 0 {
+			out += "\nValidation warnings:\n"
+			for _, warning := range validationWarnings {
+				out += "  - " + warning.Error() + "\n"
+			}
+		}
 		warnings := planner.AnalyzePlan(ws)
 		if len(warnings) > 0 {
 			out += "\nArchitectural warnings:\n"

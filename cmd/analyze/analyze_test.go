@@ -51,6 +51,104 @@ func TestAnalyzeCmd_WatchPipelineWritesYAML(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCmd_QualifiesCollidingGeneratedSymbolNames(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	repoDir := filepath.Join(dir, "app")
+	cmd.InitGitRepo(t, repoDir, "alpha/handler.go", "package alpha\nfunc Shared() {}\n")
+	writeAnalyzeTestFile(t, repoDir, "beta/handler.go", "package beta\nfunc Shared() {}\n")
+
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := ws.ValidateWithOpts(workspace.ValidationOptions{SkipSymbols: true}); len(errs) > 0 {
+		t.Fatalf("analyze generated invalid workspace: %v", errs)
+	}
+	if countElementName(ws, "alpha.handler.Shared") != 1 || countElementName(ws, "beta.handler.Shared") != 1 {
+		t.Fatalf("expected colliding generated symbol names to include file context: %+v", ws.Elements)
+	}
+	if countElementName(ws, "Shared") != 0 {
+		t.Fatalf("expected unqualified duplicate generated symbol name to be removed: %+v", ws.Elements)
+	}
+}
+
+func TestAnalyzeCmd_MaterializesSharedDependencyModules(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	repoDir := filepath.Join(dir, "app")
+	cmd.InitGitRepo(t, repoDir, "alpha.go", "package app\n\nimport \"fmt\"\n\nfunc Alpha() { fmt.Println(\"alpha\") }\n")
+	writeAnalyzeTestFile(t, repoDir, "beta.go", "package app\n\nimport \"fmt\"\n\nfunc Beta() { fmt.Println(\"beta\") }\n")
+
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countElementName(ws, "fmt") != 1 {
+		t.Fatalf("expected one shared fmt dependency module, got %+v", ws.Elements)
+	}
+	if countKind(ws, "dependency") != 1 {
+		t.Fatalf("expected dependency imports to share one dependency element, got %+v", ws.Elements)
+	}
+	if countConnectorsToName(ws, "fmt", "imports") != 2 {
+		t.Fatalf("expected both files to connect to shared fmt module, got %+v", ws.Connectors)
+	}
+}
+
+func TestAnalyzeCmd_TechnologyMetadataFactsDoNotMaterializeStandaloneElements(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	repoDir := filepath.Join(dir, "app")
+	cmd.InitGitRepo(t, repoDir, "model.py", "import sqlalchemy\n\ndef load():\n    return sqlalchemy.text('select 1')\n")
+
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countElementName(ws, "Python SQLAlchemy") != 0 {
+		t.Fatalf("expected orm.query fact not to materialize as standalone element: %+v", ws.Elements)
+	}
+	if !anyElementTechnologyContains(ws, "sqlalchemy") {
+		t.Fatalf("expected SQLAlchemy metadata to be attached as element technology: %+v", ws.Elements)
+	}
+}
+
+func TestAnalyzeCmd_MergesDuplicateComposeRuntimeComponents(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	repoDir := filepath.Join(dir, "app")
+	cmd.InitGitRepo(t, repoDir, "docker-compose.yaml", "services:\n  redis:\n    image: redis:7\n")
+	writeAnalyzeTestFile(t, repoDir, "docker-compose.prod.yml", "services:\n  redis:\n    image: redis:7\n")
+
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countElementName(ws, "redis") != 1 {
+		t.Fatalf("expected duplicate runtime components to merge, got %+v", ws.Elements)
+	}
+}
+
 func TestAnalyzeCmd_RuntimeArtifactsUseArchitectureView(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := t.TempDir()
@@ -514,6 +612,37 @@ func refByKindAndFilePath(ws *workspace.Workspace, kind, filePath string) string
 		}
 	}
 	return ""
+}
+
+func countElementName(ws *workspace.Workspace, name string) int {
+	count := 0
+	for _, element := range ws.Elements {
+		if element.Name == name {
+			count++
+		}
+	}
+	return count
+}
+
+func countConnectorsToName(ws *workspace.Workspace, targetName, label string) int {
+	targetRef := refByElementName(ws, targetName)
+	count := 0
+	for _, connector := range ws.Connectors {
+		if connector.Target == targetRef && connector.Label == label {
+			count++
+		}
+	}
+	return count
+}
+
+func anyElementTechnologyContains(ws *workspace.Workspace, value string) bool {
+	value = strings.ToLower(value)
+	for _, element := range ws.Elements {
+		if strings.Contains(strings.ToLower(element.Technology), value) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasPlacementParent(ws *workspace.Workspace, ref, parentRef string) bool {

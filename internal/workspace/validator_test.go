@@ -35,6 +35,15 @@ func containsValidationMessage(errs []workspace.ValidationError, message string)
 	return false
 }
 
+func containsValidationWarning(warnings []workspace.ValidationWarning, location, message string) bool {
+	for _, warning := range warnings {
+		if warning.Location == location && strings.Contains(warning.Message, message) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestValidate_EmptyWorkspace(t *testing.T) {
 	if errs := buildWorkspace(nil, nil).Validate(); len(errs) != 0 {
 		t.Fatalf("expected 0 errors, got %v", errs)
@@ -55,13 +64,17 @@ func TestValidate_ElementKindRequired(t *testing.T) {
 	}
 }
 
-func TestValidate_DuplicateElementNames(t *testing.T) {
-	err := buildWorkspace(map[string]*workspace.Element{
+func TestValidate_DuplicateElementNamesAreWarnings(t *testing.T) {
+	ws := buildWorkspace(map[string]*workspace.Element{
 		"api":     {Name: "API", Kind: "service"},
 		"api-dup": {Name: "API", Kind: "service"},
-	}, nil).Validate()
-	if !containsValidationMessage(err, "duplicate element name") {
-		t.Fatalf("expected duplicate name error, got %v", err)
+	}, nil)
+	if errs := ws.Validate(); len(errs) != 0 {
+		t.Fatalf("expected duplicate names to be non-blocking, got %v", errs)
+	}
+	warnings := ws.ValidateWarnings()
+	if !containsValidationWarning(warnings, "elements.yaml[api-dup]", "duplicate element name") {
+		t.Fatalf("expected duplicate name warning, got %v", warnings)
 	}
 }
 

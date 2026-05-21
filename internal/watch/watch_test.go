@@ -375,7 +375,7 @@ export async function Users() {
 		t.Fatalf("expected dependency/import facts not to surface as tags, found on %d elements", deps)
 	}
 	if deps := elementKindCount(t, db, "dependency"); deps == 0 {
-		t.Fatal("expected dependency/import facts to materialize as one dependency node per import")
+		t.Fatal("expected dependency/import facts to materialize as shared dependency module nodes")
 	}
 	if !connectorExistsBetween(t, db, "main.go", "github.com/go-chi/chi/v5") {
 		t.Fatal("expected importing file to connect to imported dependency")
@@ -2022,23 +2022,18 @@ func TestOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	factOwner := "fact:dependency.inventory:dependency.import:internal/order/order.go:example.com/tldwatchfixture/internal/catalog:3"
-	factDiff := findDiffByOwner(diffs, "fact", factOwner, "element", "added")
-	if factDiff == nil {
-		t.Fatalf("expected changed import fact to be a standalone element diff, got %+v", diffs)
+	moduleOwner := "dependency.module:example.com/tldwatchfixture/internal/catalog"
+	moduleDiff := findDiffByOwner(diffs, "dependency-module", moduleOwner, "element", "added")
+	if moduleDiff == nil {
+		t.Fatalf("expected changed import to create a shared dependency module element diff, got %+v", diffs)
 		return
 	}
-	if factDiff.AddedLines != 1 || factDiff.RemovedLines != 0 {
-		t.Fatalf("expected changed import fact to carry a +1 line delta, got %+v", factDiff)
-	}
-	connectorOwner := factOwner + ":file"
+	factOwner := "fact:dependency.inventory:dependency.import:internal/order/order.go:example.com/tldwatchfixture/internal/catalog:3"
+	connectorOwner := factOwner + ":module"
 	connectorDiff := findDiffByOwner(diffs, "fact-import-connector", connectorOwner, "connector", "added")
 	if connectorDiff == nil {
 		t.Fatalf("expected changed import to create a file-to-dependency connector diff, got %+v", diffs)
 		return
-	}
-	if connectorDiff.AddedLines != 1 || connectorDiff.RemovedLines != 0 {
-		t.Fatalf("expected import connector to carry a +1 line delta, got %+v", connectorDiff)
 	}
 	folderDiff := findDiffByOwner(diffs, "folder", "folder:internal/order", "element", "added")
 	orderFileDiff := findDiffByOwner(diffs, "file", "file:internal/order/order.go", "element", "added")
@@ -2122,19 +2117,14 @@ func main() {
 	}
 
 	removedOwner := "fact:dependency.inventory:dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"
-	removedDiff := findDiffByOwner(diffs, "fact", removedOwner, "element", "deleted")
+	removedModuleOwner := "dependency.module:example.com/tldwatchfixture/internal/pricing"
+	removedDiff := findDiffByOwner(diffs, "dependency-module", removedModuleOwner, "element", "deleted")
 	if removedDiff == nil {
-		t.Fatalf("expected removed dependency import to delete its exact element, got %+v", diffs)
+		t.Fatalf("expected removed dependency import to delete its shared module element when unused, got %+v", diffs)
 	}
-	if removedDiff.AddedLines != 0 || removedDiff.RemovedLines != 1 {
-		t.Fatalf("expected removed import element to carry -1 line delta, got %+v", removedDiff)
-	}
-	connectorDiff := findDiffByOwner(diffs, "fact-import-connector", removedOwner+":file", "connector", "deleted")
+	connectorDiff := findDiffByOwner(diffs, "fact-import-connector", removedOwner+":module", "connector", "deleted")
 	if connectorDiff == nil {
 		t.Fatalf("expected removed dependency import to delete its file connector, got %+v", diffs)
-	}
-	if connectorDiff.AddedLines != 0 || connectorDiff.RemovedLines != 1 {
-		t.Fatalf("expected removed import connector to carry -1 line delta, got %+v", connectorDiff)
 	}
 	for _, diff := range diffs {
 		if diff.OwnerType == "fact-summary" && strings.Contains(diff.OwnerKey, "dependency.import") {
@@ -2158,10 +2148,10 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := findDiffByOwner(cleanDiffs, "fact", removedOwner, "element", "deleted"); diff != nil {
+	if diff := findDiffByOwner(cleanDiffs, "dependency-module", removedModuleOwner, "element", "deleted"); diff != nil {
 		t.Fatalf("removed import should not keep producing element diffs after version capture, got %+v", diff)
 	}
-	if count := countRows(t, db, `SELECT COUNT(*) FROM watch_materialization WHERE repository_id = ? AND owner_key = ?`, scan.RepositoryID, removedOwner); count != 0 {
+	if count := countRows(t, db, `SELECT COUNT(*) FROM watch_materialization WHERE repository_id = ? AND owner_key = ?`, scan.RepositoryID, removedModuleOwner); count != 0 {
 		t.Fatalf("removed import materialization should be pruned after commit, found %d rows", count)
 	}
 	if count := countRows(t, db, `SELECT COUNT(*) FROM watch_facts WHERE repository_id = ? AND stable_key = ?`, scan.RepositoryID, "dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"); count != 0 {

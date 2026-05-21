@@ -2,6 +2,7 @@ package python
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/mertcikla/tld/v2/internal/watch/enrich"
 )
@@ -20,8 +21,39 @@ func PythonFlask() Enricher {
 		{Kind: SignalImport, Value: "flask"},
 		{Kind: SignalDependency, Value: "flask"},
 	}, []*RoutePattern{
-		{Re: regexp.MustCompile(`@(?:[A-Za-z_][A-Za-z0-9_]*\.)?route\(\s*["']([^"']+)["']`), FactType: "http.route", Framework: "flask", Tags: []string{"http:route", "framework:flask"}},
+		{Re: regexp.MustCompile(`@(?:[A-Za-z_][A-Za-z0-9_]*\.)?route\(\s*["']([^"']+)["']([^)]*)\)`), FactType: "http.route", Framework: "flask", Tags: []string{"http:route", "framework:flask"}, Custom: flaskRouteValues},
 	})
+}
+
+func flaskRouteValues(match []string) (string, map[string]string, []string) {
+	routePath := ""
+	if len(match) > 1 {
+		routePath = match[1]
+	}
+	attrs := map[string]string{"framework": "flask", "path": routePath}
+	if method := flaskRouteMethod(match); method != "" {
+		attrs["method"] = method
+		return method + " " + routePath, attrs, []string{"http:route", "framework:flask"}
+	}
+	return routePath, attrs, []string{"http:route", "framework:flask"}
+}
+
+func flaskRouteMethod(match []string) string {
+	if len(match) < 3 {
+		return ""
+	}
+	args := match[2]
+	methodsIndex := strings.Index(args, "methods")
+	if methodsIndex < 0 {
+		return ""
+	}
+	args = args[methodsIndex:]
+	for _, method := range []string{"GET", "POST", "PUT", "DELETE", "PATCH"} {
+		if strings.Contains(strings.ToUpper(args), `"`+method+`"`) || strings.Contains(strings.ToUpper(args), `'`+method+`'`) {
+			return method
+		}
+	}
+	return ""
 }
 
 func PythonFastAPI() Enricher {

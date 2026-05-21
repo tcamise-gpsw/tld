@@ -1126,6 +1126,7 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 	symbolElements := map[int64]int64{}
 	symbolViews := map[int64]int64{}
 	symbolPositions := map[int64]layoutPoint{}
+	symbolDisplayNames := collidingSymbolDisplayNames(filtered.VisibleSymbols)
 	occupied := map[int64]map[string]struct{}{}
 	detailedSymbols := len(filtered.VisibleSymbols) <= maxDetailedSymbolElements
 	for file, symbols := range symbolsByFile(filtered.VisibleSymbols) {
@@ -1177,7 +1178,7 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 			for i, sym := range chunk {
 				language := languageFromStableKey(sym.StableKey)
 				elem, err := m.upsertElement(ctx, "symbol", symbolOwnerKey(sym, m.identityKeys), elementInput{
-					Name:        sym.QualifiedName,
+					Name:        symbolDisplayNames[sym.ID],
 					Kind:        sym.Kind,
 					Description: fmt.Sprintf("%s:%d", sym.FilePath, sym.StartLine),
 					Technology:  technologyLabel(language),
@@ -1202,7 +1203,7 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 			}
 		}
 	}
-	if err := m.materializeFacts(ctx, filtered.VisibleFacts, filtered.VisibleSymbols, fileElements, fileViews, symbolElements, symbolViews, symbolPositions, occupied, filtered); err != nil {
+	if err := m.materializeFacts(ctx, filtered.VisibleFacts, filtered.VisibleSymbols, structuralView, fileElements, fileViews, symbolElements, symbolViews, symbolPositions, occupied, filtered); err != nil {
 		return m.stats, err
 	}
 
@@ -1368,6 +1369,45 @@ type factPlacement struct {
 	Point        layoutPoint
 	SourceHandle string
 	TargetHandle string
+}
+
+func collidingSymbolDisplayNames(symbols map[int64]Symbol) map[int64]string {
+	counts := map[string]int{}
+	for _, sym := range symbols {
+		counts[sym.QualifiedName]++
+	}
+	out := map[int64]string{}
+	nameCounts := map[string]int{}
+	for id, sym := range symbols {
+		name := sym.QualifiedName
+		if counts[name] > 1 {
+			if file := symbolFileQualifier(sym.FilePath); file != "" {
+				name = file + "." + name
+			}
+		}
+		out[id] = name
+		nameCounts[name]++
+	}
+	for id, sym := range symbols {
+		if nameCounts[out[id]] <= 1 || counts[sym.QualifiedName] <= 1 {
+			continue
+		}
+		if file := symbolPathQualifier(sym.FilePath); file != "" {
+			out[id] = file + "." + sym.QualifiedName
+		}
+	}
+	return out
+}
+
+func symbolFileQualifier(filePath string) string {
+	base := strings.TrimSuffix(path.Base(filepathToSlash(filePath)), path.Ext(filePath))
+	return strings.TrimSpace(base)
+}
+
+func symbolPathQualifier(filePath string) string {
+	clean := filepathToSlash(strings.TrimSuffix(filePath, path.Ext(filePath)))
+	clean = strings.Trim(clean, "/.")
+	return strings.ReplaceAll(clean, "/", ".")
 }
 
 type elementInput struct {
@@ -1645,7 +1685,7 @@ type filePairReference struct {
 	Count int
 }
 
-func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbols map[int64]Symbol, fileElements map[string]int64, fileViews map[string]int64, symbolElements map[int64]int64, symbolViews map[int64]int64, symbolPositions map[int64]layoutPoint, occupied map[int64]map[string]struct{}, filtered filterResult) error {
+func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbols map[int64]Symbol, structuralView int64, fileElements map[string]int64, fileViews map[string]int64, symbolElements map[int64]int64, symbolViews map[int64]int64, symbolPositions map[int64]layoutPoint, occupied map[int64]map[string]struct{}, filtered filterResult) error {
 	if len(facts) == 0 {
 		return nil
 	}
@@ -1657,8 +1697,13 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 	summaryFactsByFile := map[string][]Fact{}
 	dependencyImportFactsByFile := map[string][]Fact{}
 	connectionFactsByFile := map[string][]Fact{}
+	metadataFactsByFile := map[string][]Fact{}
 	for _, fact := range facts {
 		if strings.TrimSpace(fact.FilePath) == "" || fileViews[fact.FilePath] == 0 {
+			continue
+		}
+		if technologyMetadataFact(fact) {
+			metadataFactsByFile[fact.FilePath] = append(metadataFactsByFile[fact.FilePath], fact)
 			continue
 		}
 		if dependencyImportFact(fact) {
@@ -1690,7 +1735,19 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 	}
 	changedFactLines := changedLineSetForFacts(m.repo.RepoRoot, filtered.ChangedFiles)
 	componentFactsByFile := runtimeComponentFactsByFile(facts)
+	componentElementsByName, err := m.materializeRuntimeComponents(ctx, facts, structuralView, fileViews, symbols, occupied)
+	if err != nil {
+		return err
+	}
 	componentElementsByFile := map[string]map[string]int64{}
+	for file, factsByName := range componentFactsByFile {
+		componentElementsByFile[file] = map[string]int64{}
+		for name := range factsByName {
+			if elem := componentElementsByName[name]; elem != 0 {
+				componentElementsByFile[file][name] = elem
+			}
+		}
+	}
 	volumeFactsByFile := map[string][]Fact{}
 	volumeElementsByFile := map[string]map[string]int64{}
 	endpointFactsByFile := map[string][]Fact{}
@@ -1706,6 +1763,9 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 		limit := min(factNodeLimitForFile(m.thresholds, filtered.Visibility, filtered.ContextExpansions.fileTier(file)), len(items))
 		subjectFactCounts := map[int64]int{}
 		for i, fact := range items[:limit] {
+			if runtimeComponentFact(fact) {
+				continue
+			}
 			elem, err := m.upsertElement(ctx, "fact", factOwnerKey(fact), elementInput{
 				Name:        m.factNodeName(fact),
 				Kind:        factNodeKind(fact),
@@ -1719,16 +1779,6 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 			})
 			if err != nil {
 				return err
-			}
-			if runtimeComponentFact(fact) {
-				attrs := factAttributes(fact)
-				name := normalizeFactEndpoint(firstNonEmpty(attrs["name"], fact.Name, fact.ObjectName))
-				if name != "" {
-					if componentElementsByFile[file] == nil {
-						componentElementsByFile[file] = map[string]int64{}
-					}
-					componentElementsByFile[file][name] = elem
-				}
 			}
 			if storageVolumeFact(fact) {
 				volumeFactsByFile[file] = append(volumeFactsByFile[file], fact)
@@ -1774,6 +1824,9 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 		var extractedFacts []Fact
 		summaryFacts, extractedFacts = extractStandaloneSummaryFacts(summaryFacts, filtered.ChangedFiles, changedFactLines)
 		for i, fact := range extractedFacts {
+			if runtimeComponentFact(fact) || technologyMetadataFact(fact) {
+				continue
+			}
 			elem, err := m.upsertElement(ctx, "fact", factOwnerKey(fact), elementInput{
 				Name:        m.factNodeName(fact),
 				Kind:        factNodeKind(fact),
@@ -1799,9 +1852,12 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 				return err
 			}
 		}
-		if err := m.materializeDependencyImports(ctx, file, dependencyImportFactsByFile[file], fileElements[file], fileViews[file], symbols, occupied); err != nil {
-			return err
-		}
+	}
+	if err := m.materializeDependencyImports(ctx, dependencyImportFactsByFile, structuralView, fileElements, symbols, occupied); err != nil {
+		return err
+	}
+	if err := m.applyTechnologyMetadataFacts(ctx, metadataFactsByFile, fileElements, symbolElements, symbolIDByStable); err != nil {
+		return err
 	}
 	if err := m.materializeRuntimeFactConnectors(ctx, connectionFactsByFile, componentFactsByFile, componentElementsByFile, fileViews); err != nil {
 		return err
@@ -1815,47 +1871,231 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 	return nil
 }
 
-func (m *materializer) materializeDependencyImports(ctx context.Context, file string, facts []Fact, fileElementID, viewID int64, symbols map[int64]Symbol, occupied map[int64]map[string]struct{}) error {
-	if len(facts) == 0 || viewID == 0 {
+func (m *materializer) materializeDependencyImports(ctx context.Context, factsByFile map[string][]Fact, structuralView int64, fileElements map[string]int64, symbols map[int64]Symbol, occupied map[int64]map[string]struct{}) error {
+	if len(factsByFile) == 0 || structuralView == 0 {
 		return nil
 	}
-	sort.SliceStable(facts, func(i, j int) bool {
-		leftName, rightName := dependencyImportName(facts[i]), dependencyImportName(facts[j])
-		if leftName == rightName {
-			return factOwnerKey(facts[i]) < factOwnerKey(facts[j])
-		}
-		return leftName < rightName
-	})
-	for i, fact := range facts {
-		ownerKey := factOwnerKey(fact)
-		elem, err := m.upsertElement(ctx, "fact", ownerKey, elementInput{
-			Name:        dependencyImportName(fact),
-			Kind:        "dependency",
-			Description: factNodeDescription(fact),
-			Technology:  dependencyImportTechnology(fact),
-			Repo:        repoIdentity(m.repo),
-			Branch:      nullStringValue(m.repo.Branch),
-			FilePath:    fact.FilePath,
-			Language:    languageForFile(fact.FilePath, symbols),
-			Tags:        m.tagPlan.tagsFor("fact", ownerKey),
+	moduleElements := map[string]int64{}
+	moduleIndex := 0
+	for _, file := range sortedKeysFromFactGroups(factsByFile) {
+		facts := append([]Fact(nil), factsByFile[file]...)
+		sort.SliceStable(facts, func(i, j int) bool {
+			leftName, rightName := dependencyImportName(facts[i]), dependencyImportName(facts[j])
+			if leftName == rightName {
+				return factOwnerKey(facts[i]) < factOwnerKey(facts[j])
+			}
+			return leftName < rightName
 		})
-		if err != nil {
-			return err
-		}
-		point := nextOpenGridPoint(viewID, occupied, 700+i)
-		if err := m.upsertPlacement(ctx, viewID, elem, point.X, point.Y); err != nil {
-			return err
-		}
-		markOccupied(occupied, viewID, point)
-		if fileElementID == 0 {
-			continue
-		}
-		label := firstNonEmpty(fact.Relationship, "imports")
-		if err := m.upsertConnectorDetailed(ctx, "fact-import-connector", ownerKey+":file", viewID, fileElementID, elem, label, label, ""); err != nil {
-			return err
+		for _, fact := range facts {
+			module := dependencyImportName(fact)
+			if strings.TrimSpace(module) == "" {
+				continue
+			}
+			elem := moduleElements[module]
+			if elem == 0 {
+				ownerKey := dependencyModuleOwnerKey(module)
+				var err error
+				elem, err = m.upsertElement(ctx, "dependency-module", ownerKey, elementInput{
+					Name:        module,
+					Kind:        "dependency",
+					Description: "Imported dependency module",
+					Technology:  dependencyImportTechnology(fact),
+					Repo:        repoIdentity(m.repo),
+					Branch:      nullStringValue(m.repo.Branch),
+					Language:    languageForFile(fact.FilePath, symbols),
+					Tags:        m.tagPlan.tagsFor("dependency-module", ownerKey),
+				})
+				if err != nil {
+					return err
+				}
+				point := nextOpenGridPoint(structuralView, occupied, 700+moduleIndex)
+				moduleIndex++
+				if err := m.upsertPlacement(ctx, structuralView, elem, point.X, point.Y); err != nil {
+					return err
+				}
+				markOccupied(occupied, structuralView, point)
+				moduleElements[module] = elem
+			}
+			fileElementID := fileElements[file]
+			if fileElementID == 0 {
+				continue
+			}
+			if err := m.upsertConnectorDetailed(ctx, "fact-import-connector", factOwnerKey(fact)+":module", structuralView, fileElementID, elem, "imports", firstNonEmpty(fact.Relationship, "imports"), factNodeDescription(fact)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func dependencyModuleOwnerKey(module string) string {
+	return "dependency.module:" + strings.TrimSpace(module)
+}
+
+func (m *materializer) materializeRuntimeComponents(ctx context.Context, facts []Fact, structuralView int64, fileViews map[string]int64, symbols map[int64]Symbol, occupied map[int64]map[string]struct{}) (map[string]int64, error) {
+	grouped := runtimeComponentFactsByName(facts)
+	out := map[string]int64{}
+	index := 0
+	for _, name := range sortedKeys(grouped) {
+		items := grouped[name]
+		if len(items) == 0 {
+			continue
+		}
+		primary := runtimePrimaryFact(items)
+		ownerKey := runtimeComponentOwnerKey(name)
+		elem, err := m.upsertElement(ctx, "runtime-component", ownerKey, elementInput{
+			Name:        name,
+			Kind:        factNodeKind(primary),
+			Description: runtimeComponentDescription(items),
+			Technology:  factTechnology(primary),
+			Repo:        repoIdentity(m.repo),
+			Branch:      nullStringValue(m.repo.Branch),
+			FilePath:    primary.FilePath,
+			Language:    languageForFile(primary.FilePath, symbols),
+			Tags:        m.tagPlan.tagsFor("runtime-component", ownerKey),
+		})
+		if err != nil {
+			return nil, err
+		}
+		point := nextOpenGridPoint(structuralView, occupied, 900+index)
+		index++
+		if err := m.upsertPlacement(ctx, structuralView, elem, point.X, point.Y); err != nil {
+			return nil, err
+		}
+		markOccupied(occupied, structuralView, point)
+		for _, fact := range items {
+			viewID := fileViews[fact.FilePath]
+			if viewID == 0 {
+				continue
+			}
+			point := nextOpenGridPoint(viewID, occupied, 900+index)
+			if err := m.upsertPlacement(ctx, viewID, elem, point.X, point.Y); err != nil {
+				return nil, err
+			}
+			markOccupied(occupied, viewID, point)
+		}
+		out[name] = elem
+	}
+	return out, nil
+}
+
+func runtimeComponentFactsByName(facts []Fact) map[string][]Fact {
+	out := map[string][]Fact{}
+	for _, fact := range facts {
+		if !runtimeComponentFact(fact) {
+			continue
+		}
+		name := runtimeComponentName(fact)
+		if name == "" {
+			continue
+		}
+		out[name] = append(out[name], fact)
+	}
+	return out
+}
+
+func runtimePrimaryFact(facts []Fact) Fact {
+	sort.SliceStable(facts, func(i, j int) bool {
+		return factOwnerKey(facts[i]) < factOwnerKey(facts[j])
+	})
+	return facts[0]
+}
+
+func runtimeComponentName(fact Fact) string {
+	attrs := factAttributes(fact)
+	return normalizeFactEndpoint(firstNonEmpty(attrs["name"], fact.Name, fact.ObjectName))
+}
+
+func runtimeComponentOwnerKey(name string) string {
+	return "runtime.component:" + strings.TrimSpace(name)
+}
+
+func runtimeComponentDescription(facts []Fact) string {
+	var evidence []string
+	for _, fact := range facts {
+		if desc := factNodeDescription(fact); desc != "" {
+			evidence = append(evidence, desc)
+		}
+	}
+	sort.Strings(evidence)
+	return strings.Join(evidence, "\n")
+}
+
+func (m *materializer) applyTechnologyMetadataFacts(ctx context.Context, factsByFile map[string][]Fact, fileElements map[string]int64, symbolElements map[int64]int64, symbolIDByStable map[string]int64) error {
+	for _, file := range sortedKeysFromFactGroups(factsByFile) {
+		for _, fact := range factsByFile[file] {
+			targetID := int64(0)
+			if fact.SubjectKind == "symbol" {
+				targetID = symbolElements[symbolIDByStable[fact.SubjectStableKey]]
+			}
+			if targetID == 0 {
+				targetID = fileElements[file]
+			}
+			if targetID == 0 {
+				continue
+			}
+			if err := m.mergeElementTechnology(ctx, targetID, technologyMetadataLabel(fact)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m *materializer) mergeElementTechnology(ctx context.Context, elementID int64, label string) error {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return nil
+	}
+	var current, language sql.NullString
+	if err := m.store.db.QueryRowContext(ctx, `SELECT technology, language FROM elements WHERE id = ?`, elementID).Scan(&current, &language); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	technology := mergeTechnologyLabel(current.String, label)
+	techLinks, _ := json.Marshal(technologyLinksForElement(technology, language.String))
+	_, err := m.store.db.ExecContext(ctx, `
+		UPDATE elements
+		SET technology = ?, technology_connectors = ?, updated_at = ?
+		WHERE id = ?`, nullString(technology), string(techLinks), nowString(), elementID)
+	return err
+}
+
+func mergeTechnologyLabel(current, next string) string {
+	parts := technologyLabelParts(current)
+	for _, part := range technologyLabelParts(next) {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, part := range parts {
+		key := strings.ToLower(strings.TrimSpace(part))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, strings.TrimSpace(part))
+	}
+	return strings.Join(out, " / ")
+}
+
+func technologyMetadataLabel(fact Fact) string {
+	attrs := factAttributes(fact)
+	switch fact.Type {
+	case "orm.query":
+		return firstNonEmpty(attrs["orm"], attrs["dependency"], fact.Name)
+	case "cache.key", "auth.issuer":
+		return firstNonEmpty(attrs["dependency"], fact.Name)
+	default:
+		return factTechnology(fact)
+	}
 }
 
 func changedLineSetForFacts(repoRoot string, changedFiles map[string]struct{}) map[string]map[int]struct{} {
@@ -2073,8 +2313,7 @@ func runtimeComponentFactsByFile(facts []Fact) map[string]map[string]Fact {
 		if !runtimeComponentFact(fact) {
 			continue
 		}
-		attrs := factAttributes(fact)
-		name := normalizeFactEndpoint(firstNonEmpty(attrs["name"], fact.Name, fact.ObjectName))
+		name := runtimeComponentName(fact)
 		if name == "" {
 			continue
 		}
@@ -2100,6 +2339,15 @@ func storageVolumeFact(fact Fact) bool {
 
 func dependencyImportFact(fact Fact) bool {
 	return fact.Type == "dependency.import"
+}
+
+func technologyMetadataFact(fact Fact) bool {
+	switch fact.Type {
+	case "orm.query", "cache.key", "auth.issuer":
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeEndpointFact(fact Fact) bool {

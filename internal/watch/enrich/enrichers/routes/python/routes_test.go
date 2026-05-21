@@ -21,6 +21,17 @@ func TestPythonRouteEnrichers(t *testing.T) {
 			Want:    enrichertest.Fact{Type: "http.route", Tag: "framework:flask", Name: "/users/<id>"},
 		},
 		enrichertest.Case{
+			Name:     "flask route includes method when provided",
+			Enricher: PythonFlask(),
+			Input: enrich.FileInput{
+				RelPath:  "app.py",
+				Language: "python",
+				Source:   []byte(`@app.route("/users/<id>", methods=["PUT"])`),
+			},
+			Signals: []enrich.ActivationSignal{{Kind: enrich.SignalDependency, Value: "flask"}},
+			Want:    enrichertest.Fact{Type: "http.route", Tag: "framework:flask", Name: "PUT /users/<id>"},
+		},
+		enrichertest.Case{
 			Name:     "fastapi route",
 			Enricher: PythonFastAPI(),
 			Input: enrich.FileInput{

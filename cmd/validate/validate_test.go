@@ -44,6 +44,29 @@ func TestValidateCmd_InvalidWorkspace(t *testing.T) {
 	}
 }
 
+func TestValidateCmd_DuplicateNamesAreWarnings(t *testing.T) {
+	dir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "elements.yaml"), []byte(`
+api:
+  name: API
+  kind: service
+api-dup:
+  name: API
+  kind: service
+`), 0600); err != nil {
+		t.Fatalf("write elements: %v", err)
+	}
+
+	stdout, stderr, err := cmd.RunCmd(t, dir, "validate")
+	if err != nil {
+		t.Fatalf("validate should treat duplicate names as warnings: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "Workspace valid") || !strings.Contains(stdout, "Validation warnings") || !strings.Contains(stdout, "duplicate element name") {
+		t.Fatalf("stdout should include valid summary and duplicate warning, got:\n%s", stdout)
+	}
+}
+
 func TestValidateCmd_RuleCodeWithViolations(t *testing.T) {
 	dir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
