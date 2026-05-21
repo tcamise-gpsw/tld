@@ -432,7 +432,7 @@ func scoreFacts(ctx context.Context, store *Store, runID int64, facts []Fact, vi
 		score := visibilityScore{}
 		if highSignalFact(fact) {
 			score.add("fact.high_signal", cfg.Weights.HighSignalFact*fact.Confidence, "high-signal fact "+fact.Type)
-				} else if dependencyFact(fact) {
+		} else if dependencyFact(fact) {
 			score.add("fact.dependency", cfg.Weights.DependencyFact*fact.Confidence, "dependency fact")
 		}
 		if dependencyImportFact(fact) {
@@ -453,6 +453,9 @@ func scoreFacts(ctx context.Context, store *Store, runID int64, facts []Fact, vi
 		}
 		if hintWeight := factVisibilityHint(fact, "score"); hintWeight != 0 {
 			score.add("fact.hint", hintWeight, "enricher visibility hint")
+		}
+		if dependencyHint := factVisibilityHint(fact, "dependency"); dependencyHint != 0 {
+			score.add("fact.dependency_hint", dependencyHint, "dependency visibility hint")
 		}
 		decision := "hidden"
 		if (highSignalFact(fact) || dependencyFact(fact)) && (score.Forced || !cfg.CoreThresholdEnabled || score.Score >= cfg.CoreThreshold) {
@@ -496,7 +499,6 @@ func highSignalFact(fact Fact) bool {
 func dependencyFact(fact Fact) bool {
 	return strings.HasPrefix(fact.Type, "dependency.")
 }
-
 
 func factOwnerKey(fact Fact) string {
 	return "fact:" + fact.Enricher + ":" + fact.StableKey

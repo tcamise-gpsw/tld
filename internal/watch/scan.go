@@ -185,9 +185,16 @@ func (s *Scanner) ScanFilesWithOptions(ctx context.Context, repo Repository, rel
 		scanErr = err
 		return result, err
 	}
+	identityStarted := time.Now()
+	missingIdentities, err := s.Store.replacementMissingIdentityCandidates(ctx, repo.ID)
+	if err != nil {
+		scanErr = err
+		return result, err
+	}
+	logInfo(ctx, s.Logger, "watch.scan.identity_candidates.completed", "elapsed", logElapsed(identityStarted), "repository_id", repo.ID, "missing_symbol_identities", len(missingIdentities), "mode", "focused")
 	progressStart(progress, "Scanning context files", len(files))
 	defer progressFinish(progress)
-	fileResults, err := s.scanFiles(ctx, repo.ID, repoRoot, files, workers, progress, opts.Force, effectiveRules, repoSignals, cache)
+	fileResults, err := s.scanFiles(ctx, repo.ID, repoRoot, files, workers, progress, opts.Force, effectiveRules, repoSignals, cache, missingIdentities)
 	if err != nil {
 		scanErr = err
 		return result, err
@@ -364,13 +371,20 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 		scanErr = err
 		return result, err
 	}
+	identityStarted := time.Now()
+	missingIdentities, err := s.Store.replacementMissingIdentityCandidates(ctx, repo.ID)
+	if err != nil {
+		scanErr = err
+		return result, err
+	}
+	logInfo(ctx, s.Logger, "watch.scan.identity_candidates.completed", "elapsed", logElapsed(identityStarted), "repository_id", repo.ID, "missing_symbol_identities", len(missingIdentities), "mode", result.Mode, "strategy", result.Strategy)
 	progressStart(progress, "Scanning source files", len(files))
 	defer progressFinish(progress)
 	seen := make(map[string]struct{}, len(files))
 	var parsedFiles []parsedFile
 	var parsedFileIDs []int64
 
-	fileResults, err := s.scanFiles(ctx, repo.ID, repoRoot, files, workers, progress, opts.Force, effectiveRules, repoSignals, cache)
+	fileResults, err := s.scanFiles(ctx, repo.ID, repoRoot, files, workers, progress, opts.Force, effectiveRules, repoSignals, cache, missingIdentities)
 	if err != nil {
 		scanErr = err
 		return result, err
@@ -578,7 +592,7 @@ func (c scanCache) hasCurrentEnrichment(rel string) bool {
 	return ok
 }
 
-func (s *Scanner) scanFiles(ctx context.Context, repositoryID int64, repoRoot string, files []string, workers int, progress ProgressSink, force bool, rules *ignore.Rules, repoSignals []enrich.ActivationSignal, cache scanCache) ([]scanFileResult, error) {
+func (s *Scanner) scanFiles(ctx context.Context, repositoryID int64, repoRoot string, files []string, workers int, progress ProgressSink, force bool, rules *ignore.Rules, repoSignals []enrich.ActivationSignal, cache scanCache, missingIdentities []storedSymbolIdentity) ([]scanFileResult, error) {
 	if workers <= 0 {
 		workers = 1
 	}
@@ -600,7 +614,7 @@ func (s *Scanner) scanFiles(ctx context.Context, repositoryID int64, repoRoot st
 					if !ok {
 						return
 					}
-					fileResult, err := s.scanFile(ctx, workerAnalyzer, repositoryID, repoRoot, absFile, progress, force, rules, repoSignals, cache)
+					fileResult, err := s.scanFile(ctx, workerAnalyzer, repositoryID, repoRoot, absFile, progress, force, rules, repoSignals, cache, missingIdentities)
 					if err != nil {
 						select {
 						case errs <- err:
@@ -644,7 +658,8 @@ func (s *Scanner) scanFiles(ctx context.Context, repositoryID int64, repoRoot st
 	return out, nil
 }
 
-func (s *Scanner) scanFile(ctx context.Context, workerAnalyzer analyzer.Service, repositoryID int64, repoRoot, absFile string, progress ProgressSink, force bool, rules *ignore.Rules, repoSignals []enrich.ActivationSignal, cache scanCache) (scanFileResult, error) {
+func (s *Scanner) scanFile(ctx context.Context, workerAnalyzer analyzer.Service, repositoryID int64, repoRoot, absFile string, progress ProgressSink, force bool, rules *ignore.Rules, repoSignals []enrich.ActivationSignal, cache scanCache, missingIdentities []storedSymbolIdentity) (scanFileResult, error) {
+	started := time.Now()
 	rel, err := filepath.Rel(repoRoot, absFile)
 	if err != nil {
 		return scanFileResult{}, err
@@ -655,32 +670,32 @@ func (s *Scanner) scanFile(ctx context.Context, workerAnalyzer analyzer.Service,
 	languageName, parseable, ok := watchedFileLanguage(absFile)
 	if !ok {
 		result.Skipped = true
-		s.logScanFile(ctx, repositoryID, result, "", "unsupported", nil)
+		s.logScanFile(ctx, repositoryID, result, "", "unsupported", started, nil)
 		return result, nil
 	}
 	info, err := os.Stat(absFile)
 	if err != nil {
 		file, _, upsertErr := s.Store.UpsertFile(ctx, repositoryID, rel, languageName, "", "", 0, 0, "error", err)
 		if upsertErr != nil {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", upsertErr)
+			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, upsertErr)
 			return result, upsertErr
 		}
 		result.File = file
-		s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+		s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 		return result, nil
 	}
 	if info.Size() > maxSourceFileBytes {
 		result.Skipped = true
-		s.logScanFile(ctx, repositoryID, result, languageName, "oversized", nil)
+		s.logScanFile(ctx, repositoryID, result, languageName, "oversized", started, nil)
 		return result, nil
 	}
 	data, err := os.ReadFile(absFile)
 	if err != nil {
 		_, _, upsertErr := s.Store.UpsertFile(ctx, repositoryID, rel, languageName, "", "", info.Size(), info.ModTime().UnixNano(), "error", err)
 		if upsertErr != nil {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", upsertErr)
+			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, upsertErr)
 		} else {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 		}
 		return result, upsertErr
 	}
@@ -690,66 +705,66 @@ func (s *Scanner) scanFile(ctx context.Context, workerAnalyzer analyzer.Service,
 		decision := "skipped"
 		if !cache.hasCurrentEnrichment(rel) {
 			if err := s.backfillFactsForCachedFile(ctx, workerAnalyzer, repositoryID, repoRoot, rel, absFile, languageName, parseable, rules, repoSignals, cached, data, &result); err != nil {
-				s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+				s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 				return result, err
 			}
 			decision = "skipped_backfilled"
 		}
 		result.Skipped = true
-		s.logScanFile(ctx, repositoryID, result, languageName, decision, nil)
+		s.logScanFile(ctx, repositoryID, result, languageName, decision, started, nil)
 		return result, nil
 	}
 	blobHash := detectString(func() (string, error) { return tldgit.FileBlobHash(repoRoot, rel) })
 	file, skipped, err := s.Store.UpsertFile(ctx, repositoryID, rel, languageName, blobHash, worktreeHash, info.Size(), info.ModTime().UnixNano(), "parsed", nil)
 	if err != nil {
-		s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+		s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 		return result, err
 	}
 	result.File = file
 	if !force && skipped {
 		if err := s.backfillFactsForCachedFile(ctx, workerAnalyzer, repositoryID, repoRoot, rel, absFile, languageName, parseable, rules, repoSignals, file, data, &result); err != nil {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 			return result, err
 		}
 		result.Skipped = true
-		s.logScanFile(ctx, repositoryID, result, languageName, "skipped_backfilled", nil)
+		s.logScanFile(ctx, repositoryID, result, languageName, "skipped_backfilled", started, nil)
 		return result, nil
 	}
 	if !parseable {
 		if err := s.enrichFile(ctx, repositoryID, file.ID, repoRoot, rel, absFile, languageName, data, nil, repoSignals, &result); err != nil {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 			return result, err
 		}
-		s.logScanFile(ctx, repositoryID, result, languageName, "metadata", nil)
+		s.logScanFile(ctx, repositoryID, result, languageName, "metadata", started, nil)
 		return result, nil
 	}
 	extracted, err := workerAnalyzer.ExtractPath(ctx, absFile, rules, nil)
 	if err != nil {
 		_, _, upsertErr := s.Store.UpsertFile(ctx, repositoryID, rel, languageName, blobHash, worktreeHash, info.Size(), info.ModTime().UnixNano(), "error", err)
 		if upsertErr != nil {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", upsertErr)
+			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, upsertErr)
 		} else {
-			s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+			s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 		}
 		return result, upsertErr
 	}
 	symbols := watchSymbolsFromAnalyzer(repositoryID, file.ID, rel, languageName, data, extracted.Symbols)
-	if err := s.Store.ReplaceFileSymbols(ctx, repositoryID, file.ID, symbols); err != nil {
-		s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+	if err := s.Store.ReplaceFileSymbolsWithMissingCandidates(ctx, repositoryID, file.ID, symbols, missingIdentities); err != nil {
+		s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 		return result, err
 	}
 	if err := s.enrichFile(ctx, repositoryID, file.ID, repoRoot, rel, absFile, languageName, data, extracted, repoSignals, &result); err != nil {
-		s.logScanFile(ctx, repositoryID, result, languageName, "error", err)
+		s.logScanFile(ctx, repositoryID, result, languageName, "error", started, err)
 		return result, err
 	}
 	result.Parsed = true
 	result.SymbolsSeen = len(symbols)
 	result.Refs = extracted.Refs
-	s.logScanFile(ctx, repositoryID, result, languageName, "parsed", nil)
+	s.logScanFile(ctx, repositoryID, result, languageName, "parsed", started, nil)
 	return result, nil
 }
 
-func (s *Scanner) logScanFile(ctx context.Context, repositoryID int64, result scanFileResult, language, decision string, err error) {
+func (s *Scanner) logScanFile(ctx context.Context, repositoryID int64, result scanFileResult, language, decision string, started time.Time, err error) {
 	if s == nil || s.Logger == nil {
 		return
 	}
@@ -764,6 +779,7 @@ func (s *Scanner) logScanFile(ctx context.Context, repositoryID int64, result sc
 		"symbols", result.SymbolsSeen,
 		"references", len(result.Refs),
 		"warnings", len(result.Warnings),
+		"elapsed", logElapsed(started),
 	}
 	if err != nil {
 		logError(ctx, s.Logger, "watch.scan.file.failed", err, fields...)

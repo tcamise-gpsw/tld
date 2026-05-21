@@ -453,7 +453,15 @@ func (s *Store) DeleteFilesByPath(ctx context.Context, repositoryID int64, paths
 }
 
 func (s *Store) ReplaceFileSymbols(ctx context.Context, repositoryID, fileID int64, symbols []Symbol) error {
-	existingIdentities, err := s.replacementIdentityCandidates(ctx, repositoryID, fileID)
+	missingIdentities, err := s.replacementMissingIdentityCandidates(ctx, repositoryID)
+	if err != nil {
+		return err
+	}
+	return s.ReplaceFileSymbolsWithMissingCandidates(ctx, repositoryID, fileID, symbols, missingIdentities)
+}
+
+func (s *Store) ReplaceFileSymbolsWithMissingCandidates(ctx context.Context, repositoryID, fileID int64, symbols []Symbol, missingIdentities []storedSymbolIdentity) error {
+	existingIdentities, err := s.replacementIdentityCandidatesWithMissing(ctx, repositoryID, fileID, missingIdentities)
 	if err != nil {
 		return err
 	}
@@ -611,16 +619,8 @@ func (s *Store) symbolIdentitiesForRepository(ctx context.Context, repositoryID 
 	return out, rows.Err()
 }
 
-func (s *Store) replacementIdentityCandidates(ctx context.Context, repositoryID, fileID int64) ([]storedSymbolIdentity, error) {
+func (s *Store) replacementIdentityCandidatesWithMissing(ctx context.Context, repositoryID, fileID int64, missingIdentities []storedSymbolIdentity) ([]storedSymbolIdentity, error) {
 	currentFile, err := s.symbolIdentitiesForFile(ctx, repositoryID, fileID)
-	if err != nil {
-		return nil, err
-	}
-	repo, err := s.Repository(ctx, repositoryID)
-	if err != nil || strings.TrimSpace(repo.RepoRoot) == "" {
-		return currentFile, err
-	}
-	all, err := s.symbolIdentitiesForRepository(ctx, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -630,6 +630,27 @@ func (s *Store) replacementIdentityCandidates(ctx context.Context, repositoryID,
 		seen[identity.IdentityKey] = struct{}{}
 		out = append(out, identity)
 	}
+	for _, identity := range missingIdentities {
+		if _, ok := seen[identity.IdentityKey]; ok {
+			continue
+		}
+		out = append(out, identity)
+		seen[identity.IdentityKey] = struct{}{}
+	}
+	return out, nil
+}
+
+func (s *Store) replacementMissingIdentityCandidates(ctx context.Context, repositoryID int64) ([]storedSymbolIdentity, error) {
+	repo, err := s.Repository(ctx, repositoryID)
+	if err != nil || strings.TrimSpace(repo.RepoRoot) == "" {
+		return nil, err
+	}
+	all, err := s.symbolIdentitiesForRepository(ctx, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	out := make([]storedSymbolIdentity, 0)
 	for _, identity := range all {
 		if _, ok := seen[identity.IdentityKey]; ok {
 			continue
