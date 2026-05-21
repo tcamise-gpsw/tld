@@ -53,6 +53,9 @@ spec:
   assertions:
     noise:
       body.content.connectors.createdAt: []
+      body.content.connectors.description: []
+      body.content.connectors.relationship: []
+      body.content.connectors.url: []
       body.content.connectors.updatedAt: []
       body.view.createdAt: []
       body.view.updatedAt: []

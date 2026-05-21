@@ -107,6 +107,26 @@ function chunkNodes(nodes: NeighbourNode[], size = 20): NeighbourNode[][] {
   return chunks
 }
 
+function elementToDependency(element: Awaited<ReturnType<typeof api.elements.get>>): DependencyElement {
+  return {
+    id: String(element.id),
+    name: element.name,
+    type: element.kind,
+    description: element.description,
+    technology: element.technology,
+    url: element.url,
+    logo_url: element.logo_url,
+    technology_connectors: element.technology_connectors,
+    tags: element.tags,
+    repo: element.repo,
+    branch: element.branch,
+    language: element.language,
+    file_path: element.file_path,
+    created_at: element.created_at,
+    updated_at: element.updated_at,
+  }
+}
+
 // ── Direction indicator ─────────────────────────────────────────────────────
 function ConnectionIndicator({
   position,
@@ -366,6 +386,7 @@ export default function Dependencies() {
           setSelectedId((current) => {
             if (objs.length === 0) return null
             if (current && objs.some((obj) => obj.id === current)) return current
+            if (current && !search) return current
             const withCounts = computeNeighbourCounts(objs, edgs)
             const sorted = [...withCounts].sort((a, b) => b.neighbourCount - a.neighbourCount)
             return sorted[0]?.id ?? null
@@ -394,6 +415,22 @@ export default function Dependencies() {
 
   useEffect(() => {
     if (selectedId === null) return
+    if (elementUniverse.some((element) => element.id === selectedId)) return
+    let cancelled = false
+    api.elements.get(Number(selectedId))
+      .then((element) => {
+        if (cancelled) return
+        const dependencyElement = elementToDependency(element)
+        setNeighbourElements((prev) => ({ ...prev, [dependencyElement.id]: dependencyElement }))
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedId(null)
+      })
+    return () => { cancelled = true }
+  }, [elementUniverse, selectedId])
+
+  useEffect(() => {
+    if (selectedId === null) return
     const known = new Set(elementUniverse.map((element) => element.id))
     const missing = new Set<string>()
     allEdges.forEach((connector) => {
@@ -409,22 +446,8 @@ export default function Dependencies() {
     Promise.all(
       Array.from(missing).slice(0, 120).map((id) =>
         api.elements.get(Number(id)).then((element) => ({
-          id: String(element.id),
-          name: element.name,
-          type: element.kind,
-          description: element.description,
-          technology: element.technology,
-          url: element.url,
-          logo_url: element.logo_url,
-          technology_connectors: element.technology_connectors,
-          tags: element.tags,
-          repo: element.repo,
-          branch: element.branch,
-          language: element.language,
-          file_path: element.file_path,
-          created_at: element.created_at,
-          updated_at: element.updated_at,
-        } satisfies DependencyElement)).catch(() => null),
+          ...elementToDependency(element),
+        })).catch(() => null),
       ),
     ).then((items) => {
       if (cancelled) return
@@ -807,7 +830,7 @@ export default function Dependencies() {
                     bg={isSelected ? 'rgba(66,153,225,0.07)' : 'transparent'}
                     _hover={{ bg: isSelected ? 'rgba(66,153,225,0.1)' : 'whiteAlpha.50' }}
                     transition="background 0.1s"
-                    onClick={() => selectElement(isSelected ? null : obj.id)}
+                    onClick={() => selectElement(obj.id)}
                     position="relative"
                     role="row"
                     outline={versionColor ? '1px solid' : undefined}

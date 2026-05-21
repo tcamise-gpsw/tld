@@ -238,7 +238,6 @@ const dependencyClient = createClient(DependencyService, transport)
 const importClient = createClient(ImportService, transport)
 const workspaceVersionClient = createClient(WorkspaceVersionService, transport)
 const orgClient = createClient(OrgService, transport)
-let dependencyConnectorsCache: Promise<DependencyConnector[]> | null = null
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1009,13 +1008,6 @@ export const api = {
     list: (params?: { limit?: number; offset?: number; search?: string }): Promise<DependenciesResponse> =>
       rpc(async () => {
         if (params) {
-          if (!dependencyConnectorsCache) {
-            dependencyConnectorsCache = workspaceClient.listConnectors({ viewId: 0 })
-              .then((res) => {
-                const connectorJson = j<{ connectors: Record<string, unknown>[] }>(ListConnectorsResponseSchema, res)
-                return (connectorJson.connectors ?? []).map(protoDependencyConnector)
-              })
-          }
           const [elements, connectors] = await Promise.all([
             workspaceClient.listElements({
               limit: params.limit ?? 0,
@@ -1028,7 +1020,11 @@ export const api = {
                 totalCount: res.pagination ? Number(res.pagination.totalCount) : undefined,
               }
             }),
-            dependencyConnectorsCache,
+            workspaceClient.listConnectors({ viewId: 0 })
+              .then((res) => {
+                const connectorJson = j<{ connectors: Record<string, unknown>[] }>(ListConnectorsResponseSchema, res)
+                return (connectorJson.connectors ?? []).map(protoDependencyConnector)
+              }),
           ])
           return {
             elements: elements.elements.map(libraryElementToDependency),
