@@ -1,4 +1,3 @@
-package kinds
 package kinds_test
 
 import (
@@ -9,7 +8,7 @@ import (
 	"github.com/mertcikla/tld/v2/cmd/kinds"
 )
 
-func TestKindsCmd_ListsCanonicalKinds(t *testing.T) {
+func TestKindsCmd_ListsCommonKindSuggestions(t *testing.T) {
 	cmd := kinds.NewKindsCmd()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)

@@ -166,8 +166,8 @@ func TestAnalyzePlan_ARC002ExemptsRootSingleSystemContext(t *testing.T) {
 
 	warnings := planner.AnalyzePlan(ws)
 	for _, warning := range warnings {
-		if warning.RuleCode == "ARC002" {
-			t.Fatalf("expected ARC002 to be exempt for root single-system context, got %+v", warning)
+		if warning.RuleCode == "ARC002" || warning.RuleCode == "ARC005" {
+			t.Fatalf("expected %s to be exempt for root single-system context, got %+v", warning.RuleCode, warning)
 		}
 	}
 }

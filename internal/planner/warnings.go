@@ -116,8 +116,12 @@ var warningRules = []warningRule{
 			if ctx.allowLowInsight {
 				return
 			}
+			allowSingleSystemRootContext := ctx.isSingleSystemRootContext()
 			for viewRef, elements := range ctx.viewElements {
 				if len(elements) == 0 {
+					continue
+				}
+				if allowSingleSystemRootContext && viewRef == syntheticRootViewRef {
 					continue
 				}
 

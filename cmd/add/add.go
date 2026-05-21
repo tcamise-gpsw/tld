@@ -40,8 +40,8 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if !isValidKind(kind) {
-				return fmt.Errorf("invalid --kind %q. valid kinds: %s", kind, strings.Join(completion.ElementKinds(), ", "))
+			if err := validateKind(kind); err != nil {
+				return err
 			}
 			r := ref
 			if r == "" {
@@ -125,7 +125,7 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 		},
 	}
 
-	c.Flags().StringVar(&kind, "kind", "service", "element kind")
+	c.Flags().StringVar(&kind, "kind", "service", "short element kind metadata, e.g. service, database, component, function")
 	c.Flags().StringVar(&description, "description", "", "description")
 	c.Flags().StringVar(&technology, "technology", "", "primary technology")
 	c.Flags().StringVar(&url, "url", "", "external URL")
@@ -152,13 +152,20 @@ func NewAddCmd(wdir, format *string, compact *bool) *cobra.Command {
 	return c
 }
 
-func isValidKind(kind string) bool {
-	for _, valid := range completion.ElementKinds() {
-		if strings.EqualFold(strings.TrimSpace(kind), valid) {
-			return true
+func validateKind(kind string) error {
+	trimmed := strings.TrimSpace(kind)
+	if trimmed == "" {
+		return fmt.Errorf("--kind is required")
+	}
+	if len(trimmed) > 64 {
+		return fmt.Errorf("--kind %q is too long: use 64 characters or fewer", kind)
+	}
+	for _, r := range trimmed {
+		if r < 32 || r == 127 {
+			return fmt.Errorf("--kind contains control characters")
 		}
 	}
-	return false
+	return nil
 }
 
 func normalizeTechnology(input string) (string, bool) {

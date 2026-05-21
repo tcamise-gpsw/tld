@@ -108,7 +108,7 @@ Secondary actions:
   export      Export all diagrams from an organization to the local workspace
   help        Help about any command
   init        Initialize a new tld workspace
-  kinds       List canonical element kinds
+  kinds       List common element kind suggestions
   login       Authenticate the CLI with a tlDiagram server
   plan        Show what would be applied
   pull        Pull the current server state into local YAML files
@@ -147,10 +147,10 @@ Use Mermaid output for terminal, CI, and remote workflows without launching the 
 tld render root > architecture.mmd
 tld render platform --format mermaid -o platform.mmd
 
-# Explicitly use automatic deepest-common-view placement
-tld connect --view auto --from api --to db --label reads
+# By default, connectors are placed in the source element's view.
+tld connect --from api --to db --label reads
 
-# List canonical kinds for --kind
+# --kind is short custom metadata. These are suggestions, not a closed set.
 tld kinds
 ```
 

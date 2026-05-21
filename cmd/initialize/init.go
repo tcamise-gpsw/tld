@@ -100,14 +100,14 @@ func detectWorkspaceInitDefaults(dir string) (*workspaceInitDefaults, error) {
 	if err != nil {
 		return nil, err
 	}
-	parentDir := filepath.Dir(absDir)
-	repoRoot := parentDir
-	if detectedRepoRoot, err := git.RepoRoot(parentDir); err == nil {
+	scanRoot := workspaceContentRoot(absDir)
+	repoRoot := scanRoot
+	if detectedRepoRoot, err := git.RepoRoot(scanRoot); err == nil {
 		repoRoot = detectedRepoRoot
 	}
 	projectName := filepath.Base(repoRoot)
 	if projectName == "." || projectName == string(filepath.Separator) || projectName == "" {
-		projectName = filepath.Base(parentDir)
+		projectName = filepath.Base(scanRoot)
 	}
 	language := detectDominantLanguage(repoRoot)
 	return &workspaceInitDefaults{
@@ -115,6 +115,14 @@ func detectWorkspaceInitDefaults(dir string) (*workspaceInitDefaults, error) {
 		exclude:     defaultWorkspaceExclude(language),
 		repoRoot:    repoRoot,
 	}, nil
+}
+
+func workspaceContentRoot(absDir string) string {
+	base := filepath.Base(absDir)
+	if base == ".tld" || base == "tld" {
+		return filepath.Dir(absDir)
+	}
+	return absDir
 }
 
 func defaultWorkspaceExclude(language string) []string {

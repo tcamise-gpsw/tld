@@ -134,12 +134,9 @@ func TestConnectCmd_ElementsInDifferentViewsSucceeds(t *testing.T) {
 	cmd.MustRunCmd(t, dir, "add", "API", "--ref", "api", "--parent", "parent1", "--kind", "service")
 	cmd.MustRunCmd(t, dir, "add", "DB", "--ref", "db", "--parent", "parent2", "--kind", "database")
 
-	stdout, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
+	_, _, err := cmd.RunCmd(t, dir, "connect", "--from", "api", "--to", "db")
 	if err != nil {
 		t.Fatalf("connect: %v", err)
-	}
-	if !strings.Contains(stdout, "connector view: root") || !strings.Contains(stdout, "No shared parent found") {
-		t.Fatalf("missing root fallback feedback:\n%s", stdout)
 	}
 
 	ws, err := workspace.Load(dir)
@@ -147,9 +144,9 @@ func TestConnectCmd_ElementsInDifferentViewsSucceeds(t *testing.T) {
 		t.Fatalf("load workspace: %v", err)
 	}
 	connectors := ws.Connectors
-	connector := connectors["root:api:db:"]
-	if connector == nil || connector.View != "root" {
-		t.Errorf("expected connector in root view, got %+v", connector)
+	connector := connectors["parent1:api:db:"]
+	if connector == nil || connector.View != "parent1" {
+		t.Errorf("expected connector in source element view, got %+v", connector)
 	}
 }
 
@@ -220,7 +217,7 @@ func TestConnectCmd_MissingToFlag(t *testing.T) {
 	}
 }
 
-func TestConnectCmd_InfersDeepestCommonAncestorView(t *testing.T) {
+func TestConnectCmd_DefaultsToSourceElementView(t *testing.T) {
 	dir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
 
@@ -234,16 +231,16 @@ func TestConnectCmd_InfersDeepestCommonAncestorView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	if !strings.Contains(stdout, "connector view: payments") {
-		t.Fatalf("expected deepest shared ancestor view 'payments', got:\n%s", stdout)
+	if !strings.Contains(stdout, "connector view: billing") {
+		t.Fatalf("expected source element view 'billing', got:\n%s", stdout)
 	}
 
 	ws, err := workspace.Load(dir)
 	if err != nil {
 		t.Fatalf("load workspace: %v", err)
 	}
-	if ws.Connectors["payments:api:db:"] == nil {
-		t.Fatalf("expected connector in payments view, connectors=%+v", ws.Connectors)
+	if ws.Connectors["billing:api:db:"] == nil {
+		t.Fatalf("expected connector in billing view, connectors=%+v", ws.Connectors)
 	}
 }
 

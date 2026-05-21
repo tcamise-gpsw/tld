@@ -24,7 +24,7 @@ func NewConnectElementsCmd(wdir *string) *cobra.Command {
 
 	c := &cobra.Command{
 		Use:   "elements",
-		Short: "Add a connector between two elements; owner diagram is inferred from their shared parent",
+		Short: "Add a connector between two elements; owner diagram defaults to the source element's view",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := validateConnectorRefs(from, to, legacyView); err != nil {
@@ -39,7 +39,7 @@ func NewConnectElementsCmd(wdir *string) *cobra.Command {
 			}
 			view := legacyView
 			if view == "" {
-				view, _, err = inferConnectorView(ws, from, to)
+				view, err = inferConnectorView(ws, from, to)
 				if err != nil {
 					return err
 				}

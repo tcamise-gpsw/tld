@@ -2,10 +2,8 @@ package add
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/mertcikla/tld/v2/internal/cmdutil"
-	"github.com/mertcikla/tld/v2/internal/completion"
 	"github.com/mertcikla/tld/v2/internal/term"
 
 	"github.com/mertcikla/tld/v2/internal/workspace"
@@ -34,8 +32,8 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if !isValidKind(kind) {
-				return fmt.Errorf("invalid --kind %q. valid kinds: %s", kind, strings.Join(completion.ElementKinds(), ", "))
+			if err := validateKind(kind); err != nil {
+				return err
 			}
 			r := ref
 			if r == "" {
@@ -119,7 +117,7 @@ func NewCreateElementCmd(wdir *string) *cobra.Command {
 		},
 	}
 
-	c.Flags().StringVar(&kind, "kind", "service", "element kind")
+	c.Flags().StringVar(&kind, "kind", "service", "short element kind metadata, e.g. service, database, component, function")
 	c.Flags().StringVar(&description, "description", "", "description")
 	c.Flags().StringVar(&technology, "technology", "", "primary technology")
 	c.Flags().StringVar(&url, "url", "", "external URL")

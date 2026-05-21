@@ -12,7 +12,6 @@ import (
 )
 
 func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
-	const autoViewRef = "auto"
 	var (
 		from         string
 		to           string
@@ -42,12 +41,11 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				return err
 			}
 			view := legacyView
-			if strings.EqualFold(strings.TrimSpace(view), autoViewRef) {
+			if strings.EqualFold(strings.TrimSpace(view), "auto") {
 				view = ""
 			}
-			rootFallback := false
 			if view == "" {
-				view, rootFallback, err = inferConnectorView(ws, from, to)
+				view, err = inferConnectorView(ws, from, to)
 				if err != nil {
 					return err
 				}
@@ -79,9 +77,6 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				}
 				term.Successf(cmd.OutOrStdout(), "dry-run: connect: %s -> %s", from, to)
 				term.Infof(cmd.OutOrStdout(), "connector view: %s", view)
-				if rootFallback {
-					term.Warn(cmd.OutOrStdout(), "No shared parent found; connector would be placed in root. Use --view to choose a specific view.")
-				}
 				return nil
 			}
 			if err := workspace.AppendConnector(*wdir, spec); err != nil {
@@ -95,9 +90,6 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 			}
 			term.Successf(cmd.OutOrStdout(), "ok")
 			term.Infof(cmd.OutOrStdout(), "connector view: %s", view)
-			if rootFallback {
-				term.Warn(cmd.OutOrStdout(), "No shared parent found; connector was placed in root. Use --view to choose a specific view.")
-			}
 			return nil
 		},
 	}
@@ -110,7 +102,7 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 	c.Flags().StringVar(&direction, "direction", "forward", "forward|backward|both|none")
 	c.Flags().StringVar(&style, "style", "bezier", "bezier|straight|step|smoothstep")
 	c.Flags().StringVar(&url, "url", "", "external URL")
-	c.Flags().StringVar(&legacyView, "view", autoViewRef, "connector view ref or 'auto' for deepest common view")
+	c.Flags().StringVar(&legacyView, "view", "", "explicit connector view ref (default: source element's view)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "preview the change without writing files")
 	_ = c.Flags().MarkHidden("style")
 	_ = c.MarkFlagRequired("from")
@@ -126,7 +118,7 @@ func NewConnectCmd(wdir, format *string, compact *bool) *cobra.Command {
 	})
 	_ = c.RegisterFlagCompletionFunc("view", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		refs, directive := completion.ViewRefs(wdir)
-		return append([]string{autoViewRef}, refs...), directive
+		return append([]string{"auto"}, refs...), directive
 	})
 	return c
 }
@@ -172,117 +164,15 @@ func validateConnectorEndpointsExist(ws *workspace.Workspace, from, to string) e
 	return nil
 }
 
-func inferConnectorView(ws *workspace.Workspace, from, to string) (string, bool, error) {
+func inferConnectorView(ws *workspace.Workspace, from, to string) (string, error) {
 	if ws == nil {
-		return "", false, fmt.Errorf("workspace is required")
+		return "", fmt.Errorf("workspace is required")
 	}
 	fromElement, ok := ws.Elements[from]
 	if !ok {
-		return "", false, fmt.Errorf("source element %q not found", from)
+		return "", fmt.Errorf("source element %q not found", from)
 	}
-	toElement, ok := ws.Elements[to]
-	if !ok {
-		return "", false, fmt.Errorf("target element %q not found", to)
-	}
-
-	fromDepths := placementDepths(ws, fromElement)
-	toDepths := placementDepths(ws, toElement)
-	fromDirect := directParentSet(fromElement)
-	toDirect := directParentSet(toElement)
-	bestView := ""
-	bestDepth := -1
-	for view, fromDepth := range fromDepths {
-		toDepth, ok := toDepths[view]
-		if !ok {
-			continue
-		}
-		depth := minDepth(fromDepth, toDepth)
-		if depth > bestDepth {
-			bestDepth = depth
-			bestView = view
-		}
-	}
-	if bestView != "" {
-		rootFallback := bestView == workspace.RootRef && !hasSharedDirectParent(fromDirect, toDirect)
-		return bestView, rootFallback, nil
-	}
-
-	return workspace.RootRef, true, nil
-}
-
-func directParentSet(element *workspace.Element) map[string]bool {
-	parents := map[string]bool{}
-	if element == nil || len(element.Placements) == 0 {
-		parents[workspace.RootRef] = true
-		return parents
-	}
-	for _, placement := range element.Placements {
-		parents[normalizeParentRef(placement.ParentRef)] = true
-	}
-	return parents
-}
-
-func hasSharedDirectParent(left, right map[string]bool) bool {
-	for parent := range left {
-		if right[parent] {
-			return true
-		}
-	}
-	return false
-}
-
-func placementDepths(ws *workspace.Workspace, element *workspace.Element) map[string]int {
-	depths := make(map[string]int)
-	if element == nil || len(element.Placements) == 0 {
-		depths[workspace.RootRef] = 0
-		return depths
-	}
-	queue := make([]string, 0, len(element.Placements))
-	for _, placement := range element.Placements {
-		queue = append(queue, normalizeParentRef(placement.ParentRef))
-	}
-	seen := map[string]bool{}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		if seen[current] {
-			continue
-		}
-		seen[current] = true
-		depths[current] = depthToRoot(ws, current)
-		if current == workspace.RootRef {
-			continue
-		}
-		next := workspace.RootRef
-		if ws != nil {
-			if parentElement, ok := ws.Elements[current]; ok && parentElement != nil {
-				next = parentOfElement(parentElement)
-			}
-		}
-		queue = append(queue, normalizeParentRef(next))
-	}
-	return depths
-}
-
-func depthToRoot(ws *workspace.Workspace, start string) int {
-	depth := 0
-	visited := map[string]bool{}
-	current := normalizeParentRef(start)
-	for current != workspace.RootRef {
-		if visited[current] {
-			return 0
-		}
-		visited[current] = true
-		depth++
-		next := workspace.RootRef
-		if ws != nil {
-			if parentElement, ok := ws.Elements[current]; ok && parentElement != nil {
-				next = parentOfElement(parentElement)
-			}
-		}
-		current = normalizeParentRef(next)
-	}
-	return depth
+	return parentOfElement(fromElement), nil
 }
 
 func parentOfElement(element *workspace.Element) string {
@@ -305,11 +195,4 @@ func normalizeParentRef(ref string) string {
 		return workspace.RootRef
 	}
 	return ref
-}
-
-func minDepth(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

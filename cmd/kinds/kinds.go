@@ -1,5 +1,4 @@
 package kinds
-package kinds
 
 import (
 	"fmt"
@@ -12,7 +11,7 @@ import (
 func NewKindsCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "kinds",
-		Short: "List canonical element kinds",
+		Short: "List common element kind suggestions",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			kinds := append([]string{}, completion.ElementKinds()...)
 			sort.Strings(kinds)

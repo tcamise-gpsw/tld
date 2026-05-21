@@ -37,16 +37,19 @@ func TestAddCmd_DryRunDoesNotMutateWorkspace(t *testing.T) {
 	}
 }
 
-func TestAddCmd_InvalidKindFails(t *testing.T) {
+func TestAddCmd_CustomKindSucceeds(t *testing.T) {
 	dir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
 
-	_, _, err := cmd.RunCmd(t, dir, "add", "API", "--kind", "componet")
-	if err == nil {
-		t.Fatal("expected invalid kind error")
+	if _, _, err := cmd.RunCmd(t, dir, "add", "API", "--ref", "api", "--kind", "componet"); err != nil {
+		t.Fatalf("custom kind should be accepted: %v", err)
 	}
-	if !strings.Contains(err.Error(), "invalid --kind") {
-		t.Fatalf("unexpected error: %v", err)
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+	if got := ws.Elements["api"].Kind; got != "componet" {
+		t.Fatalf("kind = %q, want custom value", got)
 	}
 }
 
