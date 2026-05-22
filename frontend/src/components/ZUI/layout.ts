@@ -92,7 +92,7 @@ function buildNodes(
   ancestorElementIds: number[] = [],
 ): LayoutNode[] {
   const childLinkMap = buildChildLinkMap(links, diagramId)
-  const _treeMap = new Map(tree.map((d) => [d.id, d]))
+  const treeMap = new Map(tree.map((d) => [d.id, d]))
 
   const realNodes: LayoutNode[] = elements.map((obj) => {
     const localX = getPos(obj, 'x') - bboxMinX + pad
@@ -111,7 +111,7 @@ function buildNodes(
 
     if (link) {
       linkedDiagramId = link.to_view_id
-      linkedDiagramLabel = link.to_view_name
+      linkedDiagramLabel = treeMap.get(link.to_view_id)?.name ?? link.to_view_name
 
       // Check for cycle before recursing
       if (visited.has(link.to_view_id)) {
