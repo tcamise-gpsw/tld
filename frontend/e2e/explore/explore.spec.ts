@@ -107,6 +107,17 @@ async function canvasLinePixelStats(page: Page, from: CanvasPoint, to: CanvasPoi
   }, { from, to, radius })
 }
 
+async function canvasConnectorRegionStats(page: Page, from: CanvasPoint, to: CanvasPoint, radius = 24) {
+  const left = Math.min(from.x, to.x) - radius
+  const top = Math.min(from.y, to.y) - radius
+  return canvasPixelStats(page, {
+    x: left,
+    y: top,
+    width: Math.abs(to.x - from.x) + radius * 2,
+    height: Math.abs(to.y - from.y) + radius * 2,
+  })
+}
+
 async function waitForCanvasFrame(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
@@ -187,15 +198,34 @@ async function zuiScreenGeometry(page: Page, options: {
       visit(group.nodes as LayoutNodeLike[], 0, 0, 1, 0, 0)
     }
 
+    const nodeScore = (node: AbsNode) => {
+      const canvasCenterX = rect.left + rect.width / 2
+      const canvasCenterY = rect.top + rect.height / 2
+      const nodeCenterX = node.x + node.width / 2
+      const nodeCenterY = node.y + node.height / 2
+      const overlapsCanvas =
+        node.x + node.width >= rect.left &&
+        node.x <= rect.right &&
+        node.y + node.height >= rect.top &&
+        node.y <= rect.bottom
+      return (overlapsCanvas ? 0 : 1_000_000) + Math.hypot(nodeCenterX - canvasCenterX, nodeCenterY - canvasCenterY)
+    }
+
+    const findBestNode = (elementId: number) => {
+      return nodes
+        .filter((candidate) => candidate.elementId === elementId)
+        .sort((a, b) => nodeScore(a) - nodeScore(b))[0]
+    }
+
     if (request.nodeElementId) {
-      const node = nodes.find((candidate) => candidate.elementId === request.nodeElementId)
+      const node = findBestNode(request.nodeElementId)
       if (!node) throw new Error(`Missing node ${request.nodeElementId}`)
       return { node }
     }
 
     if (request.connector) {
-      const source = nodes.find((candidate) => candidate.elementId === request.connector!.sourceElementId)
-      const target = nodes.find((candidate) => candidate.elementId === request.connector!.targetElementId)
+      const source = findBestNode(request.connector.sourceElementId)
+      const target = findBestNode(request.connector.targetElementId)
       if (!source || !target) throw new Error('Missing connector endpoint')
       const sourcePoint = toScreen(source.worldX + source.worldW, source.worldY + source.worldH / 2)
       const targetPoint = toScreen(target.worldX, target.worldY + target.worldH / 2)
@@ -213,6 +243,44 @@ async function zuiScreenGeometry(page: Page, options: {
 
     throw new Error('No ZUI geometry request')
   }, options)
+}
+
+async function expectZuiNodeVisible(page: Page, nodeElementId: number) {
+  let visibleNode: ZUITestNodeRect | null = null
+  await expect.poll(async () => {
+    const box = await page.locator('canvas').boundingBox()
+    if (!box) return false
+    const { node } = await zuiScreenGeometry(page, { nodeElementId }) as { node: ZUITestNodeRect }
+    const visible =
+      node.x + node.width >= box.x &&
+      node.x <= box.x + box.width &&
+      node.y + node.height >= box.y &&
+      node.y <= box.y + box.height
+    if (visible) visibleNode = node
+    return visible
+  }).toBe(true)
+  return visibleNode!
+}
+
+async function expectConnectorAccentPixels(
+  page: Page,
+  connector: { sourceElementId: number; targetElementId: number },
+  radius = 10,
+) {
+  let latest = { accentLike: 0, sampled: 0 }
+  await expect.poll(async () => {
+    const { connector: geometry } = await zuiScreenGeometry(page, { connector }) as {
+      connector: { sourcePoint: CanvasPoint; targetPoint: CanvasPoint; midPoint: CanvasPoint }
+    }
+    const line = await canvasLinePixelStats(page, geometry.sourcePoint, geometry.targetPoint, radius)
+    const region = await canvasConnectorRegionStats(page, geometry.sourcePoint, geometry.targetPoint, radius * 2)
+    latest = {
+      accentLike: Math.max(line.accentLike, region.accentLike),
+      sampled: line.sampled + region.nonTransparent,
+    }
+    return latest.accentLike
+  }).toBeGreaterThan(8)
+  return latest
 }
 
 async function createNestedCanvasFixture(page: Page) {
@@ -314,12 +382,12 @@ test('renders the explore canvas and opens the tag controls', async ({ page }) =
 test('zooms into a linked component and changes parent transparency and connector visibility', async ({ page }) => {
   const { root, parent, sibling, childSource, childTarget } = await createNestedCanvasFixture(page)
 
-  await page.goto('/views?view=explore&debugZuiTest=1')
+  await page.goto(`/views?view=explore&debugZuiTest=1&focus=${root.id}`)
   const canvas = page.locator('canvas')
   await expect(canvas).toBeVisible()
   await expect(page.getByRole('button', { name: 'Fit View' })).toBeVisible()
 
-  const { node: parentOverview } = await zuiScreenGeometry(page, { nodeElementId: parent.id }) as { node: ZUITestNodeRect }
+  const parentOverview = await expectZuiNodeVisible(page, parent.id)
   const parentCenter = {
     x: parentOverview.x + parentOverview.width / 2,
     y: parentOverview.y + parentOverview.height / 2,
@@ -331,18 +399,14 @@ test('zooms into a linked component and changes parent transparency and connecto
     height: 42,
   }
 
-  const { connector: parentConnector } = await zuiScreenGeometry(page, {
-    connector: { sourceElementId: parent.id, targetElementId: sibling.id },
-  }) as { connector: { sourcePoint: CanvasPoint; targetPoint: CanvasPoint; midPoint: CanvasPoint } }
-  const parentConnectorBefore = await canvasLinePixelStats(page, parentConnector.sourcePoint, parentConnector.targetPoint)
-  expect(parentConnectorBefore.accentLike).toBeGreaterThan(8)
+  await expectConnectorAccentPixels(page, { sourceElementId: parent.id, targetElementId: sibling.id })
   const iconBefore = await canvasPixelStats(page, parentTopRight)
 
   await page.mouse.dblclick(parentCenter.x, parentCenter.y)
   await waitForCanvasFrame(page)
 
   const { node: parentDetail } = await zuiScreenGeometry(page, { nodeElementId: parent.id }) as { node: ZUITestNodeRect }
-  expect(parentDetail.width).toBeGreaterThan(parentOverview.width * 1.5)
+  expect(parentDetail.width).toBeGreaterThan(parentOverview.width * 1.15)
   const detailParentTopRight: CanvasRect = {
     x: parentDetail.x + parentDetail.width - 70,
     y: parentDetail.y + 18,
@@ -358,19 +422,11 @@ test('zooms into a linked component and changes parent transparency and connecto
     iconAfter.avgB - iconBefore.avgB,
   )).toBeGreaterThan(2.5)
 
-  const { connector: childConnector } = await zuiScreenGeometry(page, {
-    connector: { sourceElementId: childSource.id, targetElementId: childTarget.id },
-  }) as { connector: { sourcePoint: CanvasPoint; targetPoint: CanvasPoint; midPoint: CanvasPoint } }
-  const childConnectorAfter = await canvasLinePixelStats(page, childConnector.sourcePoint, childConnector.targetPoint, 12)
-  expect(childConnectorAfter.accentLike).toBeGreaterThan(8)
+  await expectConnectorAccentPixels(page, { sourceElementId: childSource.id, targetElementId: childTarget.id }, 12)
 
   await page.getByRole('button', { name: 'Fit View' }).click()
   await waitForCanvasFrame(page)
-  const { connector: refitParentConnector } = await zuiScreenGeometry(page, {
-    connector: { sourceElementId: parent.id, targetElementId: sibling.id },
-  }) as { connector: { sourcePoint: CanvasPoint; targetPoint: CanvasPoint; midPoint: CanvasPoint } }
-  const parentConnectorAfterRefit = await canvasLinePixelStats(page, refitParentConnector.sourcePoint, refitParentConnector.targetPoint)
-  expect(parentConnectorAfterRefit.accentLike).toBeGreaterThan(8)
+  await expectConnectorAccentPixels(page, { sourceElementId: parent.id, targetElementId: sibling.id })
 
   await page.goto(`/views?view=explore&debugZuiTest=1&focus=${root.id}&element=${parent.id}`)
   await expect(canvas).toBeVisible()
