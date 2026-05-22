@@ -101,11 +101,29 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
     containerSize.w,
   )
 
+  const viewportBounds = useMemo(() => {
+    const zoom = Math.max(0.0001, viewState.zoom)
+    const stableView = { ...viewState, zoom }
+    const minX = screenToWorldX(0, stableView)
+    const minY = screenToWorldY(0, stableView)
+    const maxX = screenToWorldX(containerSize.w, stableView)
+    const maxY = screenToWorldY(containerSize.h, stableView)
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2,
+    }
+  }, [containerSize.h, containerSize.w, viewState])
+
   const proxyState = useZUIProxyConnectors(
     layout.groups,
     workspaceSnapshot,
     viewState,
     containerSize.w,
+    viewportBounds,
     crossBranchSettings,
     hiddenTags,
   )
@@ -202,23 +220,6 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
       fitInitialView(w, h)
     }
   }, [fitInitialView, initialized, layout])
-
-  const viewportBounds = useMemo(() => {
-    const zoom = Math.max(0.0001, viewState.zoom)
-    const stableView = { ...viewState, zoom }
-    const minX = screenToWorldX(0, stableView)
-    const minY = screenToWorldY(0, stableView)
-    const maxX = screenToWorldX(containerSize.w, stableView)
-    const maxY = screenToWorldY(containerSize.h, stableView)
-    return {
-      minX,
-      minY,
-      maxX,
-      maxY,
-      centerX: (minX + maxX) / 2,
-      centerY: (minY + maxY) / 2,
-    }
-  }, [containerSize.h, containerSize.w, viewState])
 
   useEffect(() => {
     if (!debugViewport) return

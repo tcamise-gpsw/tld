@@ -547,7 +547,51 @@ export function drawVisibleProxyConnectors(
   labelBg: string,
   accent: string,
   occupiedLabelRects: ScreenRect[],
+  showBadges = true,
+  viewport?: ZUIViewportBounds,
 ) {
+  const pointInViewport = (x: number, y: number): boolean => {
+    if (!viewport) return true
+    return x >= viewport.minX && x <= viewport.maxX && y >= viewport.minY && y <= viewport.maxY
+  }
+
+  const segmentIntersectsViewport = (x1: number, y1: number, x2: number, y2: number): boolean => {
+    if (!viewport) return true
+    if (pointInViewport(x1, y1) || pointInViewport(x2, y2)) return true
+
+    const segMinX = Math.min(x1, x2)
+    const segMaxX = Math.max(x1, x2)
+    const segMinY = Math.min(y1, y2)
+    const segMaxY = Math.max(y1, y2)
+    if (segMaxX < viewport.minX || segMinX > viewport.maxX || segMaxY < viewport.minY || segMinY > viewport.maxY) {
+      return false
+    }
+
+    const dx = x2 - x1
+    const dy = y2 - y1
+    const p = [-dx, dx, -dy, dy]
+    const q = [x1 - viewport.minX, viewport.maxX - x1, y1 - viewport.minY, viewport.maxY - y1]
+    let t0 = 0
+    let t1 = 1
+
+    for (let i = 0; i < 4; i++) {
+      if (p[i] === 0) {
+        if (q[i] < 0) return false
+        continue
+      }
+
+      const t = q[i] / p[i]
+      if (p[i] < 0) {
+        t0 = Math.max(t0, t)
+      } else {
+        t1 = Math.min(t1, t)
+      }
+      if (t0 > t1) return false
+    }
+
+    return true
+  }
+
   const connectorsByActualPair = new Map<string, ZUIResolvedConnector[]>()
   for (const connector of connectors) {
     const pairKey = `${Math.min(connector.sourceElementId, connector.targetElementId)}::${Math.max(connector.sourceElementId, connector.targetElementId)}`
@@ -574,6 +618,9 @@ export function drawVisibleProxyConnectors(
     if (alpha < 0.01) continue
 
     const { sourcePoint, targetPoint } = getDirectAnchorPoints(source, target)
+    if (!segmentIntersectsViewport(sourcePoint.x, sourcePoint.y, targetPoint.x, targetPoint.y)) {
+      continue
+    }
     const midX = (sourcePoint.x + targetPoint.x) / 2
     const midY = (sourcePoint.y + targetPoint.y) / 2
     const label = String(connector.details.count)
@@ -595,18 +642,20 @@ export function drawVisibleProxyConnectors(
     ctx.lineTo(targetPoint.x, targetPoint.y)
     ctx.stroke()
     ctx.setLineDash([])
-    const badge = measureProxyBadge(ctx, label, zoom)
-    const labelPos = pickEdgeLabelPosition(
-      ctx.getTransform(),
-      midX,
-      midY,
-      badge.worldW,
-      badge.worldH,
-      targetPoint.x - sourcePoint.x,
-      targetPoint.y - sourcePoint.y,
-      occupiedLabelRects,
-    )
-    drawFixedScreenProxyBadge(ctx, label, labelPos, badge.badgeCssW, badge.badgeCssH, labelBg, accent, [1, 4])
+    if (showBadges) {
+      const badge = measureProxyBadge(ctx, label, zoom)
+      const labelPos = pickEdgeLabelPosition(
+        ctx.getTransform(),
+        midX,
+        midY,
+        badge.worldW,
+        badge.worldH,
+        targetPoint.x - sourcePoint.x,
+        targetPoint.y - sourcePoint.y,
+        occupiedLabelRects,
+      )
+      drawFixedScreenProxyBadge(ctx, label, labelPos, badge.badgeCssW, badge.badgeCssH, labelBg, accent, [1, 4])
+    }
 
     ctx.restore()
   }
@@ -619,11 +668,22 @@ export function drawVisibleDirectProxyBadges(
   zoom: number,
   labelBg: string,
   occupiedLabelRects: ScreenRect[],
+  viewport?: ZUIViewportBounds,
 ) {
+  const pointInViewport = (x: number, y: number): boolean => {
+    if (!viewport) return true
+    return x >= viewport.minX && x <= viewport.maxX && y >= viewport.minY && y <= viewport.maxY
+  }
+
+  const anchorCenterInViewport = (anchor: VisibleNodeAnchor): boolean => {
+    return pointInViewport(anchor.worldX + anchor.worldW / 2, anchor.worldY + anchor.worldH / 2)
+  }
+
   for (const badge of badges) {
     const source = visibleAnchorsByNodeId.get(badge.sourceNodeId)
     const target = visibleAnchorsByNodeId.get(badge.targetNodeId)
     if (!source || !target) continue
+    if (viewport && !anchorCenterInViewport(source) && !anchorCenterInViewport(target)) continue
     const alpha = Math.min(source.renderAlpha, target.renderAlpha)
     if (alpha < 0.01) continue
 

@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'reac
 import type { CrossBranchContextSettings } from '../../crossBranch/types'
 import type { WorkspaceVersionFollowTarget, WorkspaceVersionPreview } from '../../context/WorkspaceVersionContext'
 import type { ExploreDiffLens } from '../../utils/exploreDiffLens'
+import type { ZUIViewportBounds } from '../../crossBranch/resolve'
 import {
   drawVisibleDirectProxyBadges,
   drawVisibleProxyConnectors,
@@ -36,16 +37,35 @@ function rebaseVisibleNodeAnchors(
   anchors: Map<string, VisibleNodeAnchor>,
   originX: number,
   originY: number,
+  reusable: Map<string, VisibleNodeAnchor>,
 ): Map<string, VisibleNodeAnchor> {
-  const rebased = new Map<string, VisibleNodeAnchor>()
   for (const [nodeId, anchor] of anchors) {
-    rebased.set(nodeId, {
+    const existing = reusable.get(nodeId)
+    if (existing) {
+      existing.nodeId = anchor.nodeId
+      existing.elementId = anchor.elementId
+      existing.label = anchor.label
+      existing.worldX = anchor.worldX - originX
+      existing.worldY = anchor.worldY - originY
+      existing.worldW = anchor.worldW
+      existing.worldH = anchor.worldH
+      existing.pathDepth = anchor.pathDepth
+      existing.renderAlpha = anchor.renderAlpha
+      continue
+    }
+
+    reusable.set(nodeId, {
       ...anchor,
       worldX: anchor.worldX - originX,
       worldY: anchor.worldY - originY,
     })
   }
-  return rebased
+
+  for (const nodeId of reusable.keys()) {
+    if (!anchors.has(nodeId)) reusable.delete(nodeId)
+  }
+
+  return reusable
 }
 
 interface UseZUIRenderLoopArgs {
@@ -95,6 +115,8 @@ export function useZUIRenderLoop({
   const requestFrameRef = useRef<(() => void) | null>(null)
   const rafIdRef = useRef<number | null>(null)
   const lastViewRef = useRef({ x: NaN, y: NaN, zoom: NaN })
+  const panLowDetailFramesRef = useRef(0)
+  const rebasedProxyAnchorsRef = useRef(new Map<string, VisibleNodeAnchor>())
   const proxyStateRef = useRef(proxyState)
   proxyStateRef.current = proxyState
   const sceneGraphRef = useRef<SceneGraph | null>(null)
@@ -224,6 +246,16 @@ export function useZUIRenderLoop({
 
       const thresholds = getExpandThresholds(w)
 
+      const isPanning =
+        lastViewRef.current.x !== currentView.x ||
+        lastViewRef.current.y !== currentView.y
+      if (isPanning) {
+        panLowDetailFramesRef.current = 2
+      } else if (panLowDetailFramesRef.current > 0) {
+        panLowDetailFramesRef.current -= 1
+      }
+      const lowDetail = panLowDetailFramesRef.current > 0
+
       transitionRebaseRef.current = updateScene(graph, currentView, w, h, thresholds)
 
       ctx.save()
@@ -238,15 +270,25 @@ export function useZUIRenderLoop({
         canvasW: w,
         canvasH: h,
         thresholds,
+        lowDetail,
       }
 
       const occupiedLabelRects = renderFrame(ctx, graph, renderCtx, currentView, transitionRebaseRef.current)
 
       const cameraRebase = getCameraRebase(currentView, w, h)
+      const rebasedViewport: ZUIViewportBounds = {
+        minX: (-cameraRebase.view.x) / cameraRebase.view.zoom,
+        minY: (-cameraRebase.view.y) / cameraRebase.view.zoom,
+        maxX: (w - cameraRebase.view.x) / cameraRebase.view.zoom,
+        maxY: (h - cameraRebase.view.y) / cameraRebase.view.zoom,
+        centerX: (w / 2 - cameraRebase.view.x) / cameraRebase.view.zoom,
+        centerY: (h / 2 - cameraRebase.view.y) / cameraRebase.view.zoom,
+      }
       const rebasedProxyAnchors = rebaseVisibleNodeAnchors(
         proxyStateRef.current.byNodeId,
         cameraRebase.originX,
         cameraRebase.originY,
+        rebasedProxyAnchorsRef.current,
       )
       ctx.save()
       ctx.translate(cameraRebase.view.x, cameraRebase.view.y)
@@ -259,15 +301,20 @@ export function useZUIRenderLoop({
         labelBgRef.current,
         accentRef.current,
         occupiedLabelRects,
+        !lowDetail,
+        rebasedViewport,
       )
-      drawVisibleDirectProxyBadges(
-        ctx,
-        proxyStateRef.current.hiddenProxyBadges,
-        rebasedProxyAnchors,
-        cameraRebase.view.zoom,
-        labelBgRef.current,
-        occupiedLabelRects,
-      )
+      if (!lowDetail) {
+        drawVisibleDirectProxyBadges(
+          ctx,
+          proxyStateRef.current.hiddenProxyBadges,
+          rebasedProxyAnchors,
+          cameraRebase.view.zoom,
+          labelBgRef.current,
+          occupiedLabelRects,
+          rebasedViewport,
+        )
+      }
       ctx.restore()
       ctx.restore()
       lastViewRef.current = currentView

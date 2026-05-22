@@ -29,6 +29,7 @@ export function useZUIProxyConnectors(
   workspaceSnapshot: WorkspaceGraphSnapshot,
   viewState: ZUIViewState,
   canvasW: number,
+  viewportBounds: { minX: number; minY: number; maxX: number; maxY: number; centerX: number; centerY: number },
   crossBranchSettings: CrossBranchContextSettings,
   hiddenTags: string[] | undefined,
 ): ZUIProxyConnectorState {
@@ -58,7 +59,7 @@ export function useZUIProxyConnectors(
   // Connector topology follows visible anchor identity and cross-branch settings.
   // The string signatures intentionally avoid pan state, so panning never rebuilds topology.
   const proxyConnectors = useMemo(() => {
-    return buildVisibleProxyConnectors(workspaceSnapshot, anchors.visibleAnchors, crossBranchSettings)
+    return buildVisibleProxyConnectors(workspaceSnapshot, anchors.visibleAnchors, crossBranchSettings, viewportBounds)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceSnapshot, visibleElementSig, proxySettingsSig])
 

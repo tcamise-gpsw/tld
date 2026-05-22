@@ -128,6 +128,7 @@ export interface RenderContext {
   canvasW: number
   canvasH: number
   thresholds: { start: number; end: number }
+  lowDetail: boolean
 }
 
 const imageCache = new Map<string, HTMLImageElement>()
@@ -408,9 +409,11 @@ function drawGroupLabel(
   canvasW: number,
   canvasH: number,
   accent: string,
+  lowDetail: boolean,
   originX?: number,
   originY?: number,
 ): void {
+  if (lowDetail) return
   if (!group.isPortal && !group.label) return
 
   const ox = originX ?? 0
@@ -525,6 +528,15 @@ function drawSceneNode(
 
   const hasChildren = layout.children.length > 0
   const t = state.t
+
+  if (state.isLeafCapped) {
+    ctx.save()
+    const cx = x + w / 2
+    const cy = y + h / 2
+    ctx.translate(cx, cy)
+    ctx.scale(state.leafCapScale, state.leafCapScale)
+    ctx.translate(-cx, -cy)
+  }
 
   if (state.isLeafCapped) {
     ctx.save()
@@ -654,7 +666,7 @@ function drawSceneNode(
     ctx.restore()
   }
 
-  if (state.screenW >= MIN_LABEL_PX && parentAlpha > 0.1) {
+  if (!renderCtx.lowDetail && state.screenW >= MIN_LABEL_PX && parentAlpha > 0.1) {
     const nameFontSize = h * NAME_FONT_TO_NODE_H
     const screenFontSize = nameFontSize * drawZoom
 
@@ -694,7 +706,7 @@ function drawSceneNode(
     }
   }
 
-  if (layout.linkedDiagramLabel && t > 0.05 && inheritedAlpha > 0.05) {
+  if (!renderCtx.lowDetail && layout.linkedDiagramLabel && t > 0.05 && inheritedAlpha > 0.05) {
     const hintFontSize = getClampedFontSize(14, MIN_FONT_HINT, MAX_FONT_HINT, drawZoom)
     const screenFontSize = hintFontSize * drawZoom
 
@@ -751,7 +763,7 @@ function drawSceneNode(
     }
   }
 
-  if ((hasChildren || layout.isCircular) && t < 0.9 && parentAlpha > 0.2 && drawScreenW > BADGE_THRESHOLD) {
+  if (!renderCtx.lowDetail && (hasChildren || layout.isCircular) && t < 0.9 && parentAlpha > 0.2 && drawScreenW > BADGE_THRESHOLD) {
     const iconSize = getClampedFontSize(12, 10, 16, drawZoom)
     const padding = 8 / drawZoom
 
@@ -825,7 +837,7 @@ function drawSceneNode(
   }
 
   const delta = currentVersionElementLineDeltas.get(layout.elementId)
-  if (delta && (delta.added > 0 || delta.removed > 0) && drawScreenW > 52 && parentAlpha > 0.05) {
+  if (!renderCtx.lowDetail && delta && (delta.added > 0 || delta.removed > 0) && drawScreenW > 52 && parentAlpha > 0.05) {
     const addText = delta.added > 0 ? `+${delta.added}` : ''
     const removeText = delta.removed > 0 ? `-${delta.removed}` : ''
     const badgeText = [addText, removeText].filter(Boolean).join(' ')
@@ -852,6 +864,9 @@ function drawSceneNode(
     ctx.restore()
   }
 
+  if (state.isLeafCapped) {
+    ctx.restore()
+  }
   if (state.isLeafCapped) {
     ctx.restore()
   }
@@ -971,6 +986,7 @@ function drawEdges(
   accent: string,
   labelBg: string,
   occupiedLabelRects: ScreenRect[],
+  lowDetail: boolean,
   originX?: number,
   originY?: number,
 ): void {
@@ -1215,7 +1231,7 @@ function drawEdges(
         }
       }
 
-      if (edge.label) {
+      if (!lowDetail && edge.label) {
         const screenFontSize = 12
         const worldFontSize = screenFontSize / zoom
         ctx.font = `${worldFontSize}px Inter, system-ui, sans-serif`
@@ -1267,9 +1283,11 @@ function drawNodeTree(
 ): void {
   const nodeScreenX = dpr * (renderCtx.canvasW / 2 + node.state.worldX * view.zoom)
   const nodeScreenY = dpr * (renderCtx.canvasH / 2 + node.state.worldY * view.zoom)
+  const capScale = node.state.isLeafCapped ? Math.max(node.state.leafCapScale, 0.0001) : 1
+  const baseDrawZoom = node.state.drawZoom / capScale
 
   ctx.save()
-  ctx.setTransform(dpr * node.state.drawZoom, 0, 0, dpr * node.state.drawZoom, nodeScreenX, nodeScreenY)
+  ctx.setTransform(dpr * baseDrawZoom, 0, 0, dpr * baseDrawZoom, nodeScreenX, nodeScreenY)
 
   drawSceneNode(ctx, node, renderCtx, view, transitionRebase, navigationHints)
 
@@ -1288,7 +1306,7 @@ function drawNodeTree(
     ctx.translate(-node.layout.childOffsetX, -node.layout.childOffsetY)
 
     if (node.state.childAlpha > 0.2) {
-      drawEdges(ctx, node.children, node.state.childAlpha * 0.8, childZoom, renderCtx.thresholds, renderCtx.accent, renderCtx.labelBg, occupiedLabelRects)
+      drawEdges(ctx, node.children, node.state.childAlpha * 0.8, childZoom, renderCtx.thresholds, renderCtx.accent, renderCtx.labelBg, occupiedLabelRects, renderCtx.lowDetail)
     }
 
     for (const child of node.children) {
@@ -1333,7 +1351,7 @@ export function renderFrame(
   for (const group of graph.groups) {
     if (!group.isVisible) continue
 
-    drawGroupLabel(ctx, group.layout, renderView, canvasW, canvasH, accent, rebase.originX, rebase.originY)
+    drawGroupLabel(ctx, group.layout, renderView, canvasW, canvasH, accent, renderCtx.lowDetail, rebase.originX, rebase.originY)
 
     const borderAlpha = clamp(0.5 - renderView.zoom * 0.05, 0.15, 0.5)
 
@@ -1351,7 +1369,7 @@ export function renderFrame(
     ctx.setLineDash([])
     ctx.restore()
 
-    drawEdges(ctx, group.nodes, 0.7, renderView.zoom, renderCtx.thresholds, accent, renderCtx.labelBg, occupiedLabelRects, rebase.originX, rebase.originY)
+    drawEdges(ctx, group.nodes, 0.7, renderView.zoom, renderCtx.thresholds, accent, renderCtx.labelBg, occupiedLabelRects, renderCtx.lowDetail, rebase.originX, rebase.originY)
 
     for (const node of group.nodes) {
       if (!node.state.isVisible) continue
@@ -1359,7 +1377,9 @@ export function renderFrame(
     }
   }
 
-  drawNavigationHints(ctx, navigationHints, occupiedLabelRects)
+  if (!renderCtx.lowDetail) {
+    drawNavigationHints(ctx, navigationHints, occupiedLabelRects)
+  }
 
   ctx.restore()
   return occupiedLabelRects
