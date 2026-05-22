@@ -66,6 +66,18 @@ interface RendererThemeVars {
   labelBg: string
 }
 
+interface NavigationHintDraw {
+  matrix: DOMMatrix
+  candidates: Array<{ x: number; y: number }>
+  text: string
+  textW: number
+  textH: number
+  fontSize: number
+  color: string
+  alpha: number
+  priority: number
+}
+
 const themeFallbacks: RendererThemeVars = {
   canvasBg: '#0d121e',
   nodeBg: '#2d3748',
@@ -276,8 +288,65 @@ export function pickEdgeLabelPosition(
   return { x: midX, y: midY }
 }
 
+function pickNavigationHintPosition(
+  matrix: DOMMatrix,
+  candidates: Array<{ x: number; y: number }>,
+  textW: number,
+  textH: number,
+  occupiedLabelRects: ScreenRect[],
+): { x: number; y: number } | null {
+  const screenTextW = Math.max(1, textW * matrix.a)
+  const screenTextH = Math.max(1, textH * matrix.d)
+  const gap = 6
+
+  for (const candidate of candidates) {
+    const screenX = matrix.a * candidate.x + matrix.c * candidate.y + matrix.e
+    const screenY = matrix.b * candidate.x + matrix.d * candidate.y + matrix.f
+    const rect: ScreenRect = {
+      left: screenX - screenTextW / 2 - gap,
+      top: screenY - gap,
+      right: screenX + screenTextW / 2 + gap,
+      bottom: screenY + screenTextH + gap,
+    }
+    if (occupiedLabelRects.some((existing) => rectsOverlap(rect, existing))) continue
+    occupiedLabelRects.push(rect)
+    return candidate
+  }
+
+  return null
+}
+
 function isHiddenByTags(node: LayoutNode): boolean {
   return currentHiddenTags.size > 0 && node.tags.length > 0 && node.tags.some((t) => currentHiddenTags.has(t))
+}
+
+function drawNavigationHints(
+  ctx: CanvasRenderingContext2D,
+  hints: NavigationHintDraw[],
+  occupiedLabelRects: ScreenRect[],
+): void {
+  hints.sort((a, b) => b.priority - a.priority)
+
+  for (const hint of hints) {
+    const hintPos = pickNavigationHintPosition(
+      hint.matrix,
+      hint.candidates,
+      hint.textW,
+      hint.textH,
+      occupiedLabelRects,
+    )
+    if (!hintPos) continue
+
+    ctx.save()
+    ctx.setTransform(hint.matrix)
+    ctx.globalAlpha = hint.alpha
+    ctx.font = `${hint.fontSize}px Inter, system-ui, sans-serif`
+    ctx.fillStyle = hint.color
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillText(hint.text, hintPos.x, hintPos.y)
+    ctx.restore()
+  }
 }
 
 function drawZoomInIcon(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, strokeWidth: number): void {
@@ -436,6 +505,7 @@ function drawSceneNode(
   renderCtx: RenderContext,
   view: ZUIViewState,
   _transitionRebase: ZUITransitionRebase,
+  navigationHints: NavigationHintDraw[],
 ): void {
   const state = node.state
   const layout = node.layout
@@ -629,43 +699,55 @@ function drawSceneNode(
     const screenFontSize = hintFontSize * drawZoom
 
     if (screenFontSize >= 6) {
-      let hintX = x + w / 2
-      let hintY = y + h + 10
+      const hintPrefix = layout.isCircular ? '\u21ba ' : '\u203a '
+      const hintSuffix = layout.isCircular ? ' (Circular)' : ''
+      const hintText = hintPrefix + layout.linkedDiagramLabel + hintSuffix
+
+      ctx.save()
+      ctx.font = `${hintFontSize}px Inter, system-ui, sans-serif`
+      const tw = ctx.measureText(hintText).width
+      ctx.restore()
+
+      const baseHintX = x + w / 2
+      let baseHintY = y + h + 10
+      let clampedHintX = baseHintX
 
       if (t > 0.8) {
         const m = ctx.getTransform()
         const vwLocalB = (canvasH - screenFontSize - m.f) / m.d
-        hintY = Math.min(hintY, vwLocalB)
-        hintY = Math.max(hintY, y + h / 2)
+        baseHintY = Math.min(baseHintY, vwLocalB)
+        baseHintY = Math.max(baseHintY, y + h / 2)
 
         const vwLocalL = -m.e / m.a
         const vwLocalR = (canvasW - m.e) / m.a
 
-        const hintPrefix = layout.isCircular ? '\u21ba ' : '\u229e '
-        const hintSuffix = layout.isCircular ? ' (Circular)' : ''
-        const hintText = hintPrefix + layout.linkedDiagramLabel + hintSuffix
-
-        ctx.save()
-        ctx.font = `${hintFontSize}px Inter, system-ui, sans-serif`
-        const tw = ctx.measureText(hintText).width
-        ctx.restore()
-
         const pad = 30 / view.zoom
-        hintX = Math.max(hintX, vwLocalL + tw / 2 + pad)
-        hintX = Math.min(hintX, vwLocalR - tw / 2 - pad)
-        hintX = clamp(hintX, x + tw / 2 + 10, x + w - tw / 2 - 10)
+        clampedHintX = Math.max(clampedHintX, vwLocalL + tw / 2 + pad)
+        clampedHintX = Math.min(clampedHintX, vwLocalR - tw / 2 - pad)
+        clampedHintX = clamp(clampedHintX, x + tw / 2 + 10, x + w - tw / 2 - 10)
       }
 
-      ctx.save()
-      ctx.globalAlpha = inheritedAlpha * 0.7
-      ctx.font = `${hintFontSize}px Inter, system-ui, sans-serif`
-      ctx.fillStyle = layout.isCircular ? accent : '#718096'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'top'
-      const hintPrefix = layout.isCircular ? '\u21ba ' : '\u229e '
-      const hintSuffix = layout.isCircular ? ' (Circular)' : ''
-      ctx.fillText(hintPrefix + layout.linkedDiagramLabel + hintSuffix, hintX, hintY)
-      ctx.restore()
+      const lineH = hintFontSize * 1.2
+      const gap = 10 / drawZoom
+      const sideGap = 14 / drawZoom
+      const lowerGap = lineH + gap
+      navigationHints.push({
+        matrix: ctx.getTransform(),
+        candidates: [
+          { x: clampedHintX, y: baseHintY },
+          { x: clampedHintX, y: y - lineH - gap },
+          { x: clampedHintX, y: baseHintY + lowerGap },
+          { x: x + w + tw / 2 + sideGap, y: y + h / 2 - lineH / 2 },
+          { x: x - tw / 2 - sideGap, y: y + h / 2 - lineH / 2 },
+        ],
+        text: hintText,
+        textW: tw,
+        textH: lineH,
+        fontSize: hintFontSize,
+        color: layout.isCircular ? accent : '#718096',
+        alpha: inheritedAlpha * 0.7,
+        priority: layout.pathElementIds.length,
+      })
     }
   }
 
@@ -1180,6 +1262,7 @@ function drawNodeTree(
   transitionRebase: ZUITransitionRebase,
   effectiveZoom: number,
   occupiedLabelRects: ScreenRect[],
+  navigationHints: NavigationHintDraw[],
   dpr: number,
 ): void {
   const nodeScreenX = dpr * (renderCtx.canvasW / 2 + node.state.worldX * view.zoom)
@@ -1188,7 +1271,7 @@ function drawNodeTree(
   ctx.save()
   ctx.setTransform(dpr * node.state.drawZoom, 0, 0, dpr * node.state.drawZoom, nodeScreenX, nodeScreenY)
 
-  drawSceneNode(ctx, node, renderCtx, view, transitionRebase)
+  drawSceneNode(ctx, node, renderCtx, view, transitionRebase, navigationHints)
 
   if (node.layout.children.length > 0 && node.state.childAlpha > 0.01) {
     const childScale = node.layout.childScale > 0 ? node.layout.childScale : 1
@@ -1210,7 +1293,7 @@ function drawNodeTree(
 
     for (const child of node.children) {
       if (!child.state.isVisible) continue
-      drawNodeTree(ctx, child, renderCtx, view, transitionRebase, childZoom, occupiedLabelRects, dpr)
+      drawNodeTree(ctx, child, renderCtx, view, transitionRebase, childZoom, occupiedLabelRects, navigationHints, dpr)
     }
 
     ctx.restore()
@@ -1245,6 +1328,7 @@ export function renderFrame(
 
   const occupiedLabelRects = frameLabelRects
   occupiedLabelRects.length = 0
+  const navigationHints: NavigationHintDraw[] = []
 
   for (const group of graph.groups) {
     if (!group.isVisible) continue
@@ -1271,9 +1355,11 @@ export function renderFrame(
 
     for (const node of group.nodes) {
       if (!node.state.isVisible) continue
-      drawNodeTree(ctx, node, renderCtx, view, transitionRebase, renderView.zoom, occupiedLabelRects, dpr)
+      drawNodeTree(ctx, node, renderCtx, view, transitionRebase, renderView.zoom, occupiedLabelRects, navigationHints, dpr)
     }
   }
+
+  drawNavigationHints(ctx, navigationHints, occupiedLabelRects)
 
   ctx.restore()
   return occupiedLabelRects
