@@ -9,7 +9,7 @@ import { diffResourceKey, type ExploreDiffDetail, type ExploreDiffLens } from '.
 import { getSourceEditor } from '../../utils/sourceEditor'
 import { toast } from '../../utils/toast'
 import { computeLayout } from './layout'
-import { getCameraRebase, screenToWorldX, screenToWorldY, worldToScreenX, worldToScreenY } from './renderer'
+import { getCameraRebase, screenToWorldX, screenToWorldY, worldToScreenX, worldToScreenY } from './layoutEngine'
 import { useZUIInteraction } from './useZUIInteraction'
 import type { DiagramGroupLayout, HoveredItem, ZUIViewState } from './types'
 import { getPathAt } from './camera'

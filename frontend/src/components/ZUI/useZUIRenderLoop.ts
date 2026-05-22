@@ -10,13 +10,21 @@ import {
 } from './proxy'
 import {
   getCameraRebase,
+  getExpandThresholds,
+  updateScene,
+  type ZUITransitionRebase,
+} from './layoutEngine'
+import {
   renderFrame,
   setHighlightColor as setRendererHighlightColor,
   setHighlightedTags as setRendererHighlightedTags,
   setHiddenTags as setRendererHiddenTags,
   setOnImageLoadCallback,
   setVersionDiff as setRendererVersionDiff,
+  getThemeVars,
+  type RenderContext,
 } from './renderer'
+import { buildSceneGraph, type SceneGraph } from './sceneGraph'
 import type { ZUILayout, ZUIViewState } from './types'
 import type { ZUIProxyConnectorState } from './useZUIProxyConnectors'
 
@@ -86,6 +94,8 @@ export function useZUIRenderLoop({
   const accentRef = useRef('#63b3ed')
   const proxyStateRef = useRef(proxyState)
   proxyStateRef.current = proxyState
+  const sceneGraphRef = useRef<SceneGraph | null>(null)
+  const transitionRebaseRef = useRef<ZUITransitionRebase>({ preserveChildAlphaNodeIds: new Set() })
 
   const invalidate = useCallback(() => {
     needsRedrawRef.current = true
@@ -112,6 +122,11 @@ export function useZUIRenderLoop({
   useEffect(invalidate, [invalidate, viewState, crossBranchSettings])
 
   useEffect(() => {
+    sceneGraphRef.current = buildSceneGraph(layout)
+    invalidate()
+  }, [layout, invalidate])
+
+  useEffect(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
     if (!canvas || !container) return
@@ -131,7 +146,6 @@ export function useZUIRenderLoop({
       const ctx = canvas.getContext('2d')
       if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-      // Resizing clears canvas pixels immediately; mark the next RAF as mandatory.
       invalidate()
 
       if (!initialized && w > 0 && h > 0) {
@@ -167,9 +181,9 @@ export function useZUIRenderLoop({
       if (w === 0 || h === 0) { rafId = requestAnimationFrame(frame); return }
 
       const currentView = viewStateRef.current
+      const graph = sceneGraphRef.current
+      if (!graph) { rafId = requestAnimationFrame(frame); return }
 
-      // The renderer redraws only when camera state or explicit invalidation changes.
-      // Explicit invalidation covers async image loads, CSS theme changes, data changes, and overlay state.
       const changed =
         lastView.x !== currentView.x ||
         lastView.y !== currentView.y ||
@@ -177,12 +191,27 @@ export function useZUIRenderLoop({
         needsRedrawRef.current
 
       if (changed) {
+        const thresholds = getExpandThresholds(w)
+
+        transitionRebaseRef.current = updateScene(graph, currentView, w, h, thresholds)
+
         ctx.save()
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        const occupiedLabelRects = renderFrame(ctx, layout.groups, currentView, w, h)
+
+        const theme = getThemeVars()
+        const renderCtx: RenderContext = {
+          canvasBg: theme.canvasBg,
+          nodeBg: theme.nodeBg,
+          accent: theme.accent,
+          labelBg: theme.labelBg,
+          canvasW: w,
+          canvasH: h,
+          thresholds,
+        }
+
+        const occupiedLabelRects = renderFrame(ctx, graph, renderCtx, currentView, transitionRebaseRef.current)
+
         const cameraRebase = getCameraRebase(currentView, w, h)
-        // Renderer camera rebasing keeps very deep zoom coordinates near the viewport origin,
-        // which avoids precision loss when nested diagrams are magnified aggressively.
         const rebasedProxyAnchors = rebaseVisibleNodeAnchors(
           proxyStateRef.current.byNodeId,
           cameraRebase.originX,
@@ -219,7 +248,7 @@ export function useZUIRenderLoop({
 
     rafId = requestAnimationFrame(frame)
     return () => cancelAnimationFrame(rafId)
-  }, [canvasRef, containerRef, initialized, layout, viewStateRef])
+  }, [canvasRef, containerRef, initialized, viewStateRef])
 
   useEffect(() => {
     if (initialized) invalidate()

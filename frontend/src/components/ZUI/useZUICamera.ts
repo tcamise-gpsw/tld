@@ -4,7 +4,7 @@ import type { ZUICameraFrame } from './ZUICanvas'
 import type { BBox, DiagramGroupLayout, HoveredItem, ZUIViewState } from './types'
 import { findDiagramFocusTarget, findElementFocusTarget, viewportForDiagramFocusTarget, viewportForElementFocusTarget } from './focus'
 import { clamp01, easeOutQuart, findFirstExpandableNode, fitWorldRect, type PathItem } from './camera'
-import { rawCameraView } from './renderer'
+import { rawCameraView } from './layoutEngine'
 
 export interface ZUICameraController {
   fitInitialView: (w: number, h: number) => void

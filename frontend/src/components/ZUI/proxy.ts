@@ -7,7 +7,8 @@ import {
 } from '../../crossBranch/resolve'
 import type { WorkspaceGraphSnapshot } from '../../crossBranch/types'
 import type { LayoutNode, ZUIViewState, HoveredItem } from './types'
-import { getExpandThresholds, pickEdgeLabelPosition, type ScreenRect } from './renderer'
+import { getExpandThresholds } from './layoutEngine'
+import { pickEdgeLabelPosition, type ScreenRect } from './renderer'
 import type { CrossBranchContextSettings } from '../../crossBranch/types'
 import { DEFAULT_MIN_CONNECTOR_ANCHOR_ALPHA } from '../../crossBranch/settings'
 import {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import type { BBox, DiagramGroupLayout, LayoutNode, ZUIViewState, HoveredItem } from './types'
-import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY } from './renderer'
+import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY } from './layoutEngine'
 import { hitTestZUIRenderedNode, warmZUIHitTestIndexes } from './hitTest'
 import { buildEdgeSpatialIndex, findHoveredEdge, type EdgeSpatialIndex } from './edgeHover'
 

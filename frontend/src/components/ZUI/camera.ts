@@ -1,5 +1,5 @@
 import type { DiagramGroupLayout, LayoutNode, ZUIViewState } from './types'
-import { getExpandThresholds, screenToWorldX, screenToWorldY } from './renderer'
+import { getExpandThresholds, screenToWorldX, screenToWorldY } from './layoutEngine'
 
 export interface PathItem {
   id: string
