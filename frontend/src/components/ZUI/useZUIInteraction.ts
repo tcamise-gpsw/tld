@@ -263,34 +263,76 @@ export function useZUIInteraction(
   }, [groups, canvasWidth, viewState])
 
   const maxZoomRef = useRef(40)
+  const pendingViewStateRef = useRef<ZUIViewState | null>(null)
+  const queuedViewStateRafRef = useRef<number | null>(null)
   useEffect(() => {
     maxZoomRef.current = dynamicMaxZoom
   }, [dynamicMaxZoom])
 
+  const resolveViewState = useCallback((
+    update: React.SetStateAction<ZUIViewState>,
+    baseView: ZUIViewState,
+  ): ZUIViewState => {
+    const next = typeof update === 'function' ? (update as (p: ZUIViewState) => ZUIViewState)(baseView) : update
+    const box = bboxRef.current
+    if (!box || !canvasRef.current) {
+      return next
+    }
+
+    const el = canvasRef.current
+    const w = el.clientWidth || el.width / (window.devicePixelRatio || 1)
+    const h = el.clientHeight || el.height / (window.devicePixelRatio || 1)
+
+    if (w === 0 || h === 0) {
+      return next
+    }
+
+    return constrainViewState(next, w, h, box)
+  }, [canvasRef])
+
+  const flushQueuedViewState = useCallback(() => {
+    queuedViewStateRafRef.current = null
+    const next = pendingViewStateRef.current
+    pendingViewStateRef.current = null
+    if (!next) return
+
+    viewStateRef.current = next
+    setViewStateInternal(next)
+  }, [])
+
   const setViewState = useCallback(
     (update: React.SetStateAction<ZUIViewState>) => {
-      setViewStateInternal((prev) => {
-        const next = typeof update === 'function' ? (update as (p: ZUIViewState) => ZUIViewState)(prev) : update
-        const box = bboxRef.current
-        if (!box || !canvasRef.current) {
-          viewStateRef.current = next
-          return next
-        }
-        const el = canvasRef.current
-        const w = el.clientWidth || el.width / (window.devicePixelRatio || 1)
-        const h = el.clientHeight || el.height / (window.devicePixelRatio || 1)
+      if (queuedViewStateRafRef.current !== null) {
+        cancelAnimationFrame(queuedViewStateRafRef.current)
+        queuedViewStateRafRef.current = null
+      }
 
-        if (w === 0 || h === 0) {
-          viewStateRef.current = next
-          return next
-        }
-        const constrained = constrainViewState(next, w, h, box)
-        viewStateRef.current = constrained
-        return constrained
-      })
+      const baseView = pendingViewStateRef.current ?? viewStateRef.current
+      const next = resolveViewState(update, baseView)
+      pendingViewStateRef.current = null
+      viewStateRef.current = next
+      setViewStateInternal(next)
     },
-    [canvasRef],
+    [resolveViewState],
   )
+
+  const scheduleViewState = useCallback((update: React.SetStateAction<ZUIViewState>) => {
+    const baseView = pendingViewStateRef.current ?? viewStateRef.current
+    const next = resolveViewState(update, baseView)
+    pendingViewStateRef.current = next
+    viewStateRef.current = next
+
+    if (queuedViewStateRafRef.current !== null) return
+    queuedViewStateRafRef.current = requestAnimationFrame(flushQueuedViewState)
+  }, [flushQueuedViewState, resolveViewState])
+
+  useEffect(() => {
+    return () => {
+      if (queuedViewStateRafRef.current !== null) {
+        cancelAnimationFrame(queuedViewStateRafRef.current)
+      }
+    }
+  }, [])
 
   const dragging = useRef(false)
   const lastMouse = useRef({ x: 0, y: 0 })
@@ -376,13 +418,13 @@ export function useZUIInteraction(
         let factor = 1 - e.deltaY * (isRealMouseWheel ? 0.002 : 0.01)
         factor = Math.max(0.85, Math.min(1.15, factor))
 
-        setViewState((prev) => {
+        scheduleViewState((prev) => {
           return zoomAround(prev, focalX, focalY, factor, maxZoomRef.current)
         })
         onZoomRef.current?.()
       } else if (!isMobile) {
         // Trackpad panning - disabled on mobile to avoid interference with pinch-to-zoom
-        setViewState((prev) => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }))
+        scheduleViewState((prev) => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }))
         onPanRef.current?.()
       }
     }
@@ -408,7 +450,7 @@ export function useZUIInteraction(
         const dy = e.clientY - lastMouse.current.y
         lastMouse.current.x = e.clientX
         lastMouse.current.y = e.clientY
-        setViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+        scheduleViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
         onPanRef.current?.()
         return
       }
@@ -516,7 +558,7 @@ export function useZUIInteraction(
         const dy = e.touches[0].clientY - lastMouse.current.y
         lastMouse.current.x = e.touches[0].clientX
         lastMouse.current.y = e.touches[0].clientY
-        setViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+        scheduleViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
         onPanRef.current?.()
       } else if (e.touches.length >= 2) {
         const dist = pinchDist(e.touches)
@@ -527,7 +569,7 @@ export function useZUIInteraction(
           const dy = mid.y - lastPinchMid.current.y
 
           if (isFinite(factor) && factor > 0) {
-            setViewState((prev) => {
+            scheduleViewState((prev) => {
               const zoomed = zoomAround(prev, mid.x, mid.y, factor, maxZoomRef.current)
               return { ...zoomed, x: zoomed.x + dx, y: zoomed.y + dy }
             })
@@ -583,7 +625,7 @@ export function useZUIInteraction(
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchEnd)
     }
-  }, [canvasRef, setViewState, setHoveredItem, isMobile, resolveHoveredProxyItem]) // groupsRef handles groups updates without re-binding!
+  }, [canvasRef, scheduleViewState, setViewState, setHoveredItem, isMobile, resolveHoveredProxyItem]) // groupsRef handles groups updates without re-binding!
 
   return { viewState, viewStateRef, setViewState, fitView, maxZoom: dynamicMaxZoom, hoveredItem, setHoveredItem, setHoverLocked }
 }

@@ -92,6 +92,9 @@ export function useZUIRenderLoop({
   const needsRedrawRef = useRef(true)
   const labelBgRef = useRef('#171923')
   const accentRef = useRef('#63b3ed')
+  const requestFrameRef = useRef<(() => void) | null>(null)
+  const rafIdRef = useRef<number | null>(null)
+  const lastViewRef = useRef({ x: NaN, y: NaN, zoom: NaN })
   const proxyStateRef = useRef(proxyState)
   proxyStateRef.current = proxyState
   const sceneGraphRef = useRef<SceneGraph | null>(null)
@@ -99,6 +102,7 @@ export function useZUIRenderLoop({
 
   const invalidate = useCallback(() => {
     needsRedrawRef.current = true
+    requestFrameRef.current?.()
   }, [])
 
   useEffect(() => {
@@ -187,86 +191,101 @@ export function useZUIRenderLoop({
     const container = containerRef.current
     if (!canvas || !container) return
 
-    let rafId: number
-    let lastView = { x: NaN, y: NaN, zoom: NaN }
+    function requestFrame() {
+      if (rafIdRef.current !== null) return
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null
+        frame()
+      })
+    }
+
+    requestFrameRef.current = requestFrame
 
     function frame() {
       const ctx = canvas!.getContext('2d')
-      if (!ctx) { rafId = requestAnimationFrame(frame); return }
+      if (!ctx) return
 
       const dpr = window.devicePixelRatio || 1
       const w = container!.offsetWidth
       const h = container!.offsetHeight
-      if (w === 0 || h === 0) { rafId = requestAnimationFrame(frame); return }
+      if (w === 0 || h === 0) return
 
       const currentView = viewStateRef.current
       const graph = sceneGraphRef.current
-      if (!graph) { rafId = requestAnimationFrame(frame); return }
+      if (!graph) return
 
       const changed =
-        lastView.x !== currentView.x ||
-        lastView.y !== currentView.y ||
-        lastView.zoom !== currentView.zoom ||
+        lastViewRef.current.x !== currentView.x ||
+        lastViewRef.current.y !== currentView.y ||
+        lastViewRef.current.zoom !== currentView.zoom ||
         needsRedrawRef.current
 
-      if (changed) {
-        const thresholds = getExpandThresholds(w)
+      if (!changed) return
 
-        transitionRebaseRef.current = updateScene(graph, currentView, w, h, thresholds)
+      const thresholds = getExpandThresholds(w)
 
-        ctx.save()
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      transitionRebaseRef.current = updateScene(graph, currentView, w, h, thresholds)
 
-        const theme = getThemeVars()
-        const renderCtx: RenderContext = {
-          canvasBg: theme.canvasBg,
-          nodeBg: theme.nodeBg,
-          accent: theme.accent,
-          labelBg: theme.labelBg,
-          canvasW: w,
-          canvasH: h,
-          thresholds,
-        }
+      ctx.save()
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-        const occupiedLabelRects = renderFrame(ctx, graph, renderCtx, currentView, transitionRebaseRef.current)
-
-        const cameraRebase = getCameraRebase(currentView, w, h)
-        const rebasedProxyAnchors = rebaseVisibleNodeAnchors(
-          proxyStateRef.current.byNodeId,
-          cameraRebase.originX,
-          cameraRebase.originY,
-        )
-        ctx.save()
-        ctx.translate(cameraRebase.view.x, cameraRebase.view.y)
-        ctx.scale(cameraRebase.view.zoom, cameraRebase.view.zoom)
-        drawVisibleProxyConnectors(
-          ctx,
-          proxyStateRef.current.proxyConnectors,
-          rebasedProxyAnchors,
-          cameraRebase.view.zoom,
-          labelBgRef.current,
-          accentRef.current,
-          occupiedLabelRects,
-        )
-        drawVisibleDirectProxyBadges(
-          ctx,
-          proxyStateRef.current.hiddenProxyBadges,
-          rebasedProxyAnchors,
-          cameraRebase.view.zoom,
-          labelBgRef.current,
-          occupiedLabelRects,
-        )
-        ctx.restore()
-        ctx.restore()
-        lastView = currentView
-        needsRedrawRef.current = false
+      const theme = getThemeVars()
+      const renderCtx: RenderContext = {
+        canvasBg: theme.canvasBg,
+        nodeBg: theme.nodeBg,
+        accent: theme.accent,
+        labelBg: theme.labelBg,
+        canvasW: w,
+        canvasH: h,
+        thresholds,
       }
 
-      rafId = requestAnimationFrame(frame)
+      const occupiedLabelRects = renderFrame(ctx, graph, renderCtx, currentView, transitionRebaseRef.current)
+
+      const cameraRebase = getCameraRebase(currentView, w, h)
+      const rebasedProxyAnchors = rebaseVisibleNodeAnchors(
+        proxyStateRef.current.byNodeId,
+        cameraRebase.originX,
+        cameraRebase.originY,
+      )
+      ctx.save()
+      ctx.translate(cameraRebase.view.x, cameraRebase.view.y)
+      ctx.scale(cameraRebase.view.zoom, cameraRebase.view.zoom)
+      drawVisibleProxyConnectors(
+        ctx,
+        proxyStateRef.current.proxyConnectors,
+        rebasedProxyAnchors,
+        cameraRebase.view.zoom,
+        labelBgRef.current,
+        accentRef.current,
+        occupiedLabelRects,
+      )
+      drawVisibleDirectProxyBadges(
+        ctx,
+        proxyStateRef.current.hiddenProxyBadges,
+        rebasedProxyAnchors,
+        cameraRebase.view.zoom,
+        labelBgRef.current,
+        occupiedLabelRects,
+      )
+      ctx.restore()
+      ctx.restore()
+      lastViewRef.current = currentView
+      needsRedrawRef.current = false
+
+      if (needsRedrawRef.current) {
+        requestFrame()
+      }
     }
 
-    rafId = requestAnimationFrame(frame)
-    return () => cancelAnimationFrame(rafId)
+    requestFrame()
+    return () => {
+      requestFrameRef.current = null
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+    }
   }, [canvasRef, containerRef, initialized, viewStateRef])
 
   useEffect(() => {
