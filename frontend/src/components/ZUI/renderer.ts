@@ -339,13 +339,17 @@ function drawGroupLabel(
   canvasW: number,
   canvasH: number,
   accent: string,
+  originX?: number,
+  originY?: number,
 ): void {
   if (!group.isPortal && !group.label) return
 
+  const ox = originX ?? 0
+  const oy = originY ?? 0
   const { worldX, worldY, diagramX, diagramY, diagramW } = group
 
   if (!isVisible(
-    worldX + diagramX, worldY + diagramY - 30,
+    worldX + diagramX - ox, worldY + diagramY - 30 - oy,
     diagramW, 30,
     renderView, canvasW, canvasH,
   )) return
@@ -358,8 +362,8 @@ function drawGroupLabel(
   const padH = 10 / renderView.zoom
   const padV = 4 / renderView.zoom
 
-  const labelX = worldX + diagramX + diagramW / 2
-  const labelY = worldY + diagramY - 8 / renderView.zoom
+  const labelX = worldX + diagramX + diagramW / 2 - ox
+  const labelY = worldY + diagramY - 8 / renderView.zoom - oy
 
   const boxLeft = labelX - textW / 2 - padH
   const boxTop = labelY - 14 - padV
@@ -439,8 +443,8 @@ function drawSceneNode(
   if (state.screenW < MIN_DRAW_PX || (state.parentAlpha < 0.01 && state.inheritedAlpha < 0.01)) return
   if (isHiddenByTags(layout)) return
 
-  const x = layout.worldX
-  const y = layout.worldY
+  const x = 0
+  const y = 0
   const w = layout.worldW
   const h = layout.worldH
 
@@ -629,12 +633,13 @@ function drawSceneNode(
       let hintY = y + h + 10
 
       if (t > 0.8) {
-        const viewportBottomWorld = screenToWorldY(canvasH - screenFontSize, view)
-        hintY = Math.min(hintY, viewportBottomWorld)
+        const m = ctx.getTransform()
+        const vwLocalB = (canvasH - screenFontSize - m.f) / m.d
+        hintY = Math.min(hintY, vwLocalB)
         hintY = Math.max(hintY, y + h / 2)
 
-        const vwL = screenToWorldX(0, view)
-        const vwR = screenToWorldX(canvasW, view)
+        const vwLocalL = -m.e / m.a
+        const vwLocalR = (canvasW - m.e) / m.a
 
         const hintPrefix = layout.isCircular ? '\u21ba ' : '\u229e '
         const hintSuffix = layout.isCircular ? ' (Circular)' : ''
@@ -646,8 +651,8 @@ function drawSceneNode(
         ctx.restore()
 
         const pad = 30 / view.zoom
-        hintX = Math.max(hintX, vwL + tw / 2 + pad)
-        hintX = Math.min(hintX, vwR - tw / 2 - pad)
+        hintX = Math.max(hintX, vwLocalL + tw / 2 + pad)
+        hintX = Math.min(hintX, vwLocalR - tw / 2 - pad)
         hintX = clamp(hintX, x + tw / 2 + 10, x + w - tw / 2 - 10)
       }
 
@@ -884,8 +889,13 @@ function drawEdges(
   accent: string,
   labelBg: string,
   occupiedLabelRects: ScreenRect[],
+  originX?: number,
+  originY?: number,
 ): void {
   if (alpha < 0.05) return
+
+  const ox = originX ?? 0
+  const oy = originY ?? 0
 
   const nodes = sceneNodes.map(sceneNodeToLayoutNode)
   const { nodeMap, handleUsage, handleUsageIndex } = getDrawEdgesLayoutMetadata(nodes)
@@ -924,8 +934,8 @@ function drawEdges(
       const sSource = (!hasSourceChildren && sourceScreenW > thresholds.end) ? thresholds.end / sourceScreenW : 1
       const effWSource = node.worldW * sSource
       const effHSource = node.worldH * sSource
-      const cxSource = node.worldX + node.worldW / 2
-      const cySource = node.worldY + node.worldH / 2
+      const cxSource = node.worldX + node.worldW / 2 - ox
+      const cySource = node.worldY + node.worldH / 2 - oy
       const effXSource = cxSource - effWSource / 2
       const effYSource = cySource - effHSource / 2
 
@@ -934,8 +944,8 @@ function drawEdges(
       const sTarget = (!hasTargetChildren && targetScreenW > thresholds.end) ? thresholds.end / targetScreenW : 1
       const effWTarget = target.worldW * sTarget
       const effHTarget = target.worldH * sTarget
-      const cxTarget = target.worldX + target.worldW / 2
-      const cyTarget = target.worldY + target.worldH / 2
+      const cxTarget = target.worldX + target.worldW / 2 - ox
+      const cyTarget = target.worldY + target.worldH / 2 - oy
       const effXTarget = cxTarget - effWTarget / 2
       const effYTarget = cyTarget - effHTarget / 2
 
@@ -1170,7 +1180,14 @@ function drawNodeTree(
   transitionRebase: ZUITransitionRebase,
   effectiveZoom: number,
   occupiedLabelRects: ScreenRect[],
+  dpr: number,
 ): void {
+  const nodeScreenX = dpr * (renderCtx.canvasW / 2 + node.state.worldX * view.zoom)
+  const nodeScreenY = dpr * (renderCtx.canvasH / 2 + node.state.worldY * view.zoom)
+
+  ctx.save()
+  ctx.setTransform(dpr * node.state.drawZoom, 0, 0, dpr * node.state.drawZoom, nodeScreenX, nodeScreenY)
+
   drawSceneNode(ctx, node, renderCtx, view, transitionRebase)
 
   if (node.layout.children.length > 0 && node.state.childAlpha > 0.01) {
@@ -1181,10 +1198,9 @@ function drawNodeTree(
 
     const r = node.layout.worldH * RADIUS_TO_NODE_H
     ctx.beginPath()
-    ctx.roundRect(node.layout.worldX, node.layout.worldY, node.layout.worldW, node.layout.worldH, r)
+    ctx.roundRect(0, 0, node.layout.worldW, node.layout.worldH, r)
     ctx.clip()
 
-    ctx.translate(node.layout.worldX, node.layout.worldY)
     ctx.scale(childScale, childScale)
     ctx.translate(-node.layout.childOffsetX, -node.layout.childOffsetY)
 
@@ -1194,11 +1210,13 @@ function drawNodeTree(
 
     for (const child of node.children) {
       if (!child.state.isVisible) continue
-      drawNodeTree(ctx, child, renderCtx, view, transitionRebase, childZoom, occupiedLabelRects)
+      drawNodeTree(ctx, child, renderCtx, view, transitionRebase, childZoom, occupiedLabelRects, dpr)
     }
 
     ctx.restore()
   }
+
+  ctx.restore()
 }
 
 export function renderFrame(
@@ -1219,11 +1237,11 @@ export function renderFrame(
 
   const rebase = getCameraRebase(view, canvasW, canvasH)
   const renderView = rebase.view
+  const dpr = ctx.getTransform().a
 
   ctx.save()
   ctx.translate(renderView.x, renderView.y)
   ctx.scale(renderView.zoom, renderView.zoom)
-  ctx.translate(-rebase.originX, -rebase.originY)
 
   const occupiedLabelRects = frameLabelRects
   occupiedLabelRects.length = 0
@@ -1231,7 +1249,7 @@ export function renderFrame(
   for (const group of graph.groups) {
     if (!group.isVisible) continue
 
-    drawGroupLabel(ctx, group.layout, renderView, canvasW, canvasH, accent)
+    drawGroupLabel(ctx, group.layout, renderView, canvasW, canvasH, accent, rebase.originX, rebase.originY)
 
     const borderAlpha = clamp(0.5 - renderView.zoom * 0.05, 0.15, 0.5)
 
@@ -1241,19 +1259,19 @@ export function renderFrame(
     ctx.lineWidth = 2 / renderView.zoom
     ctx.setLineDash([2, 2])
     ctx.strokeRect(
-      group.layout.worldX + group.layout.diagramX,
-      group.layout.worldY + group.layout.diagramY,
+      group.layout.worldX + group.layout.diagramX - rebase.originX,
+      group.layout.worldY + group.layout.diagramY - rebase.originY,
       group.layout.diagramW,
       group.layout.diagramH,
     )
     ctx.setLineDash([])
     ctx.restore()
 
-    drawEdges(ctx, group.nodes, 0.7, renderView.zoom, renderCtx.thresholds, accent, renderCtx.labelBg, occupiedLabelRects)
+    drawEdges(ctx, group.nodes, 0.7, renderView.zoom, renderCtx.thresholds, accent, renderCtx.labelBg, occupiedLabelRects, rebase.originX, rebase.originY)
 
     for (const node of group.nodes) {
       if (!node.state.isVisible) continue
-      drawNodeTree(ctx, node, renderCtx, view, transitionRebase, renderView.zoom, occupiedLabelRects)
+      drawNodeTree(ctx, node, renderCtx, view, transitionRebase, renderView.zoom, occupiedLabelRects, dpr)
     }
   }
 
