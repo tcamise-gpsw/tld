@@ -52,6 +52,15 @@ import {
 
 const MAX_PROXY_HOVER_VIEW_LINKS = 5
 
+declare global {
+  interface Window {
+    __TLD_ZUI_TEST_STATE__?: {
+      viewState: ZUIViewState
+      groups: DiagramGroupLayout[]
+    }
+  }
+}
+
 export interface ZUICanvasHandle {
   fitView(): void
   focusDiagram(viewId: number): boolean
@@ -359,6 +368,7 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 })
   const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
   const debugViewport = useMemo(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debugZuiCamera'), [])
+  const debugTestState = useMemo(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debugZuiTest'), [])
 
   // ── Layout ──────────────────────────────────────────────────────
   const layout = useMemo(() => computeLayout(data), [data])
@@ -385,6 +395,17 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
     resolveHoveredProxyItem,
     hiddenTags,
   )
+
+  useEffect(() => {
+    if (!debugTestState || typeof window === 'undefined') return
+    window.__TLD_ZUI_TEST_STATE__ = {
+      viewState,
+      groups: layout.groups,
+    }
+    return () => {
+      delete window.__TLD_ZUI_TEST_STATE__
+    }
+  }, [debugTestState, layout.groups, viewState])
 
   // Anchor positions are zoom-dependent, but not pan-dependent. Keeping pan out
   // of this memo avoids re-walking the ZUI tree during drag/trackpad movement.
