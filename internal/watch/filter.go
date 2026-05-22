@@ -455,6 +455,9 @@ func scoreFacts(ctx context.Context, store *Store, runID int64, facts []Fact, vi
 		if hintWeight := factVisibilityHint(fact, "score"); hintWeight != 0 {
 			score.add("fact.hint", hintWeight, "enricher visibility hint")
 		}
+		if dependencyHint := factVisibilityHint(fact, "dependency"); dependencyHint != 0 {
+			score.add("fact.dependency_hint", dependencyHint, "dependency visibility hint")
+		}
 		decision := "hidden"
 		dependencyImportVisible := dependencyImportFact(fact) && (score.Forced || sourceFileVisible)
 		if (highSignalFact(fact) || dependencyFact(fact)) && (dependencyImportVisible || score.Forced || !cfg.CoreThresholdEnabled || score.Score >= cfg.CoreThreshold) {

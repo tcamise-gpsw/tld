@@ -342,10 +342,24 @@ func printAnalyzeScanModeWarning(out io.Writer, scan watchpkg.ScanResult) {
 	}
 	term.Warnf(out, "Limited scan mode active: %s.", reason)
 	if scan.TrackedFiles > 0 {
-		term.Hint(out, "Scanned selected high-signal files only; source symbols and connectors may be omitted.")
+		term.Hint(out, "Scanned recent files plus bounded reference/caller context; source symbols and connectors may still be omitted.")
 		term.Hint(out, fmt.Sprintf("Selected %d file(s) out of %d tracked file(s); skipped %d tracked file(s).", scan.FilesSeen, scan.TrackedFiles, scan.SkippedTrackedFiles))
 	} else {
-		term.Hint(out, "Scanned selected high-signal files only; source symbols and connectors may be omitted.")
+		term.Hint(out, "Scanned recent files plus bounded reference/caller context; source symbols and connectors may still be omitted.")
+	}
+	if scan.RecentFiles > 0 || scan.AnchorFiles > 0 || scan.NeighborFiles > 0 || scan.CallerFiles > 0 {
+		term.Hint(out, fmt.Sprintf("Limited expansion: recent=%d anchors=%d neighbors=%d callers=%d depth=%d shared_ancestor=%t cap_reached=%t.",
+			scan.RecentFiles,
+			scan.AnchorFiles,
+			scan.NeighborFiles,
+			scan.CallerFiles,
+			scan.CallerDepthReached,
+			scan.SharedAncestorFound,
+			scan.LimitedCapReached,
+		))
+	}
+	if scan.LimitedFallback != "" {
+		term.Hint(out, "Limited expansion fallback: "+scan.LimitedFallback+".")
 	}
 	term.Hint(out, "Use `tld config set watch.scale.strategy full` or raise `watch.scale.max_tracked_files` for a full scan.")
 }

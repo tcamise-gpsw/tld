@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { computeLayout } from './layout'
 import { findDiagramFocusTarget, findElementFocusTarget, viewportForDiagramFocusTarget, viewportForElementFocusTarget, viewportForFocusTarget, type ZUIFocusTarget } from './focus'
 import { calculateMaxZoom, constrainViewState } from './useZUIInteraction'
-import { buildCameraTransitionRebase, findFocusedFlattenedLayerForTest, getCameraRebase, getExpandThresholds, rawCameraView, worldToScreenX, worldToScreenY } from './renderer'
+import { getCameraRebase, getExpandThresholds, rawCameraView, updateScene, worldToScreenX, worldToScreenY } from './layoutEngine'
+import { buildSceneGraph } from './sceneGraph'
 import type { ExploreData, PlacedElement, ViewConnector, ViewTreeNode } from '../../types'
 import type { DiagramGroupLayout, LayoutNode, ZUIViewState } from './types'
 
@@ -320,35 +321,27 @@ describe('ZUI focus targets', () => {
     })
   })
 
-  it('flattens the focused deepest layer at extreme zoom', () => {
+  it('maintains correct node positions at extreme zoom via universal rebase', () => {
     const layout = computeLayout(deepSingleChainExploreData(8))
     const elementTarget = findElementFocusTarget(layout.groups, 8, 9001)
     expect(elementTarget).not.toBeNull()
-    const constrained = {
+    const constrained: ZUIViewState = {
       x: 498.5,
       y: 487.5,
       zoom: 13_610_091,
       originX: elementTarget!.absX + elementTarget!.absW / 2,
       originY: elementTarget!.absY + elementTarget!.absH / 2,
     }
-    const rebase = getCameraRebase(constrained, 997, 975)
-    const layer = findFocusedFlattenedLayerForTest(
-      layout.groups,
-      constrained,
-      997,
-      975,
-      getExpandThresholds(997),
-      rebase,
-    )
+    const graph = buildSceneGraph(layout)
+    const thresholds = getExpandThresholds(997)
+    updateScene(graph, constrained, 997, 975, thresholds)
 
-    expect(layer?.nodes.length).toBeGreaterThan(0)
-    const target = layer!.nodes.find((node) => node.elementId === 9001)
+    const target = graph.nodeById.get(elementTarget!.id)
     expect(target).toBeTruthy()
-    const left = worldToScreenX(target!.worldX, layer!.view)
-    const right = worldToScreenX(target!.worldX + target!.worldW, layer!.view)
-    expect(Number.isFinite(left)).toBe(true)
-    expect(Number.isFinite(right)).toBe(true)
-    expect(right - left).toBeGreaterThan(0)
+    expect(target!.state.isVisible).toBe(true)
+    expect(Number.isFinite(target!.state.worldX)).toBe(true)
+    expect(Number.isFinite(target!.state.worldY)).toBe(true)
+    expect(target!.state.screenW).toBeGreaterThan(0)
   })
 
   it('rebases stacked camera-center transitions without forcing ancestor expansion', () => {
@@ -356,35 +349,27 @@ describe('ZUI focus targets', () => {
     const child = testNode('node-2', [grandchild])
     const parent = testNode('node-1', [child])
     const groups = [testGroup([parent])]
+    const layout = { groups, bbox: { minX: 0, minY: 0, maxX: 180, maxY: 85 } }
+    const graph = buildSceneGraph(layout)
     const thresholds = getExpandThresholds(1200)
 
-    const rebase = buildCameraTransitionRebase(
-      groups,
-      { x: 420, y: 315, zoom: 2.2 },
-      1200,
-      800,
-      thresholds,
-    )
+    const result = updateScene(graph, { x: 420, y: 315, zoom: 2.2 }, 1200, 800, thresholds)
 
-    expect(rebase.preserveChildAlphaNodeIds.has('node-1')).toBe(true)
-    expect(rebase.preserveChildAlphaNodeIds.has('node-2')).toBe(false)
+    expect(result.preserveChildAlphaNodeIds.has('node-1')).toBe(true)
+    expect(result.preserveChildAlphaNodeIds.has('node-2')).toBe(false)
   })
 
   it('does not rebase when only one camera-center transition is active', () => {
     const child = testNode('node-2', [])
     const parent = testNode('node-1', [child])
     const groups = [testGroup([parent])]
+    const layout = { groups, bbox: { minX: 0, minY: 0, maxX: 180, maxY: 85 } }
+    const graph = buildSceneGraph(layout)
     const thresholds = getExpandThresholds(1200)
 
-    const rebase = buildCameraTransitionRebase(
-      groups,
-      { x: 420, y: 315, zoom: 1.9 },
-      1200,
-      800,
-      thresholds,
-    )
+    const result = updateScene(graph, { x: 420, y: 315, zoom: 1.9 }, 1200, 800, thresholds)
 
-    expect(rebase.preserveChildAlphaNodeIds.size).toBe(0)
+    expect(result.preserveChildAlphaNodeIds.size).toBe(0)
   })
 
   it('finds and centers an element inside a deeply nested view', () => {

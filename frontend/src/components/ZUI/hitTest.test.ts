@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getExpandThresholds } from './renderer'
+import { getExpandThresholds } from './layoutEngine'
 import { hitTestZUIRenderedNode } from './hitTest'
 import { zoomAround } from './useZUIInteraction'
 import type { DiagramGroupLayout, LayoutNode, ZUIViewState } from './types'

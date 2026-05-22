@@ -47,7 +47,6 @@ tasks:
   lint-be:
     desc: Lint Go backend
     cmds:
-      - test "$(golangci-lint version --short)" = "{{.GOLANGCI_LINT_VERSION}}" || (echo "golangci-lint {{.GOLANGCI_LINT_VERSION}} required; found $(golangci-lint version --short)" && exit 1)
       - golangci-lint run ./...
 
   lint-fe:

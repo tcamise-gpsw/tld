@@ -1,5 +1,5 @@
 import type { DiagramGroupLayout, LayoutNode, ZUIViewState } from './types'
-import { transitionT } from './renderer'
+import { transitionT } from './layoutEngine'
 
 export interface ZUIHitTestNodeResult {
   node: LayoutNode

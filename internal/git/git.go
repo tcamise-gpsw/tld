@@ -3,7 +3,10 @@
 package git
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -117,6 +120,47 @@ func FileBlobHash(dir, filePath string) (string, error) {
 	return fields[1], nil
 }
 
+// FileBlobHashes returns git blob hashes for tracked files at HEAD/index,
+// keyed by repository-relative slash paths.
+func FileBlobHashes(dir string) (map[string]string, error) {
+	cmd := exec.Command("git", "ls-files", "-s", "-z")
+	cmd.Dir = dir
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files -s: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git ls-files -s: %w", err)
+	}
+	hashes := map[string]string{}
+	reader := bufio.NewReader(stdout)
+	for {
+		raw, readErr := reader.ReadString(0)
+		entry := strings.TrimSuffix(raw, "\x00")
+		if entry != "" {
+			meta, path, ok := strings.Cut(entry, "\t")
+			fields := strings.Fields(meta)
+			if ok && len(fields) >= 2 {
+				hashes[filepath.ToSlash(path)] = fields[1]
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("git ls-files -s: %w", readErr)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("git ls-files -s: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, fmt.Errorf("git ls-files -s: %w", err)
+	}
+	return hashes, nil
+}
+
 // FileLastCommitAt returns the timestamp of the most recent commit that touched filePath
 // in the git repo rooted at dir.  filePath may be absolute or relative to dir.
 func FileLastCommitAt(dir, filePath string) (time.Time, error) {
@@ -133,6 +177,55 @@ func FileLastCommitAt(dir, filePath string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("file last commit: parse timestamp %q: %w", s, err)
 	}
 	return time.Unix(unix, 0).UTC(), nil
+}
+
+// RecentChangedFiles returns unique repository-relative paths touched by local
+// commit history, newest commits first. It never contacts remotes.
+func RecentChangedFiles(dir string, limit int) ([]string, error) {
+	cmd := exec.Command("git", "log", "--diff-filter=ACMR", "--name-only", "-z", "--format=", "--")
+	cmd.Dir = dir
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git log recent files: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git log recent files: %w", err)
+	}
+	seen := map[string]struct{}{}
+	var files []string
+	reader := bufio.NewReader(stdout)
+	for {
+		raw, readErr := reader.ReadString(0)
+		entry := filepath.ToSlash(strings.TrimSpace(strings.TrimSuffix(raw, "\x00")))
+		if entry != "" {
+			if _, ok := seen[entry]; !ok {
+				seen[entry] = struct{}{}
+				// Verify if the file exists on disk.
+				if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(entry))); err == nil {
+					files = append(files, entry)
+					if limit > 0 && len(files) >= limit {
+						_ = cmd.Process.Kill()
+						_ = cmd.Wait()
+						return files, nil
+					}
+				}
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("git log recent files: %w", readErr)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("git log recent files: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, fmt.Errorf("git log recent files: %w", err)
+	}
+	return files, nil
 }
 
 func StatusSnapshot(dir string) (Status, error) {
