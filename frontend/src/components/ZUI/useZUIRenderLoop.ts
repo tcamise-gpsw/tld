@@ -33,6 +33,13 @@ export interface ZUIRenderInvalidator {
   invalidate: () => void
 }
 
+export function isPanFrame(previousView: ZUIViewState | null, currentView: ZUIViewState): boolean {
+  return previousView !== null && (
+    previousView.x !== currentView.x ||
+    previousView.y !== currentView.y
+  )
+}
+
 function rebaseVisibleNodeAnchors(
   anchors: Map<string, VisibleNodeAnchor>,
   originX: number,
@@ -114,7 +121,7 @@ export function useZUIRenderLoop({
   const accentRef = useRef('#63b3ed')
   const requestFrameRef = useRef<(() => void) | null>(null)
   const rafIdRef = useRef<number | null>(null)
-  const lastViewRef = useRef({ x: NaN, y: NaN, zoom: NaN })
+  const lastViewRef = useRef<ZUIViewState | null>(null)
   const panLowDetailFramesRef = useRef(0)
   const rebasedProxyAnchorsRef = useRef(new Map<string, VisibleNodeAnchor>())
   const proxyStateRef = useRef(proxyState)
@@ -233,22 +240,22 @@ export function useZUIRenderLoop({
       if (w === 0 || h === 0) return
 
       const currentView = viewStateRef.current
+      const previousView = lastViewRef.current
       const graph = sceneGraphRef.current
       if (!graph) return
 
       const changed =
-        lastViewRef.current.x !== currentView.x ||
-        lastViewRef.current.y !== currentView.y ||
-        lastViewRef.current.zoom !== currentView.zoom ||
+        previousView === null ||
+        previousView.x !== currentView.x ||
+        previousView.y !== currentView.y ||
+        previousView.zoom !== currentView.zoom ||
         needsRedrawRef.current
 
       if (!changed) return
 
       const thresholds = getExpandThresholds(w)
 
-      const isPanning =
-        lastViewRef.current.x !== currentView.x ||
-        lastViewRef.current.y !== currentView.y
+      const isPanning = isPanFrame(previousView, currentView)
       if (isPanning) {
         panLowDetailFramesRef.current = 2
       } else if (panLowDetailFramesRef.current > 0) {
