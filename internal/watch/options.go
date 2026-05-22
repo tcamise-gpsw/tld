@@ -7,13 +7,14 @@ import (
 	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
-func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int) EmbeddingConfig {
+func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int, runtimePath ...string) EmbeddingConfig {
 	embedding := EmbeddingConfig{}
 	if cfg != nil {
 		embedding.Provider = cfg.Watch.Embedding.Provider
 		embedding.Endpoint = cfg.Watch.Embedding.Endpoint
 		embedding.Model = cfg.Watch.Embedding.Model
 		embedding.Dimension = cfg.Watch.Embedding.Dimension
+		embedding.RuntimePath = cfg.Watch.Embedding.RuntimePath
 		embedding.HealthThreshold = cfg.Watch.Embedding.HealthThreshold
 	}
 	if provider != "" {
@@ -27,6 +28,9 @@ func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model str
 	}
 	if dimension > 0 {
 		embedding.Dimension = dimension
+	}
+	if len(runtimePath) > 0 && runtimePath[0] != "" {
+		embedding.RuntimePath = runtimePath[0]
 	}
 	return NormalizeEmbeddingConfig(embedding)
 }

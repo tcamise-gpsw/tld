@@ -72,6 +72,9 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		logError(ctx, req.Logger, "watch.representation.prepare.failed", err, "elapsed", logElapsed(prepareStarted), "repository_id", repositoryID)
 		return RepresentResult{}, err
 	}
+	if closer, ok := provider.(ClosableProvider); ok {
+		defer func() { _ = closer.Close() }()
+	}
 	progressAdvance(req.Progress, "Embedding provider configured")
 	model := provider.ModelID()
 	modelID, err := r.Store.EnsureEmbeddingModel(ctx, EmbeddingConfig{Provider: model.Provider, Model: model.Model, Dimension: model.Dimension}, model.ConfigHash)

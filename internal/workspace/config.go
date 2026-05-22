@@ -93,6 +93,7 @@ type WatchEmbeddingConfig struct {
 	Endpoint        string  `yaml:"endpoint"`
 	Model           string  `yaml:"model"`
 	Dimension       int     `yaml:"dimension"`
+	RuntimePath     string  `yaml:"runtime_path"`
 	HealthThreshold float64 `yaml:"health_threshold"`
 }
 

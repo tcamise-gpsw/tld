@@ -243,9 +243,9 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 
 	provider := strings.TrimSpace(cfg.Watch.Embedding.Provider)
 	switch provider {
-	case "none", "openai", "ollama", "local-lexical", "local-deterministic-test":
+	case "none", "openai", "ollama", "local-lexical", "local-minilm", "local-deterministic-test":
 	default:
-		add("watch.embedding.provider", "must be none, openai, ollama, local-lexical, or local-deterministic-test")
+		add("watch.embedding.provider", "must be none, openai, ollama, local-lexical, local-minilm, or local-deterministic-test")
 	}
 	if cfg.Watch.Embedding.Dimension < 0 {
 		add("watch.embedding.dimension", "must be non-negative")
@@ -356,6 +356,7 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "watch.embedding.endpoint", Env: []string{"TLD_EMBEDDING_ENDPOINT"}, Description: "Embedding provider endpoint when the provider uses HTTP."},
 	{Key: "watch.embedding.model", Env: []string{"TLD_EMBEDDING_MODEL"}, Description: "Embedding model name."},
 	{Key: "watch.embedding.dimension", Env: []string{"TLD_EMBEDDING_DIMENSION"}, Description: "Embedding vector dimension, or 0 to infer when supported."},
+	{Key: "watch.embedding.runtime_path", Env: []string{"TLD_EMBEDDING_RUNTIME_PATH", "ONNXRUNTIME_LIB_PATH"}, Description: "ONNX Runtime shared library path for local embedding providers."},
 	{Key: "watch.embedding.health_threshold", Description: "Similarity threshold required by embedding health checks."},
 	{Key: "watch.layout.link_distance", Env: []string{"LAYOUT_LINK_DISTANCE"}, Description: "Organic layout target link distance for generated watch views."},
 	{Key: "watch.layout.charge_strength", Env: []string{"LAYOUT_CHARGE_STRENGTH"}, Description: "Organic layout node charge strength for generated watch views."},
@@ -468,6 +469,7 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"watch.embedding.endpoint", "TLD_EMBEDDING_ENDPOINT"},
 		{"watch.embedding.model", "TLD_EMBEDDING_MODEL"},
 		{"watch.embedding.dimension", "TLD_EMBEDDING_DIMENSION"},
+		{"watch.embedding.runtime_path", "TLD_EMBEDDING_RUNTIME_PATH"},
 		{"watch.layout.link_distance", "LAYOUT_LINK_DISTANCE"},
 		{"watch.layout.charge_strength", "LAYOUT_CHARGE_STRENGTH"},
 		{"watch.layout.collide_radius", "LAYOUT_COLLIDE_RADIUS"},
@@ -733,6 +735,8 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.Watch.Embedding.Dimension = v
+	case "watch.embedding.runtime_path":
+		cfg.Watch.Embedding.RuntimePath = strings.TrimSpace(value)
 	case "watch.embedding.health_threshold":
 		v, err := parseFloat(value)
 		if err != nil {
@@ -871,6 +875,8 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.Watch.Embedding.Model
 	case "watch.embedding.dimension":
 		return cfg.Watch.Embedding.Dimension
+	case "watch.embedding.runtime_path":
+		return cfg.Watch.Embedding.RuntimePath
 	case "watch.embedding.health_threshold":
 		return cfg.Watch.Embedding.HealthThreshold
 	case "watch.layout.link_distance":
@@ -979,8 +985,9 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	addScalar(embedding, "endpoint", cfg.Watch.Embedding.Endpoint, desc("watch.embedding.endpoint"))
 	addScalar(embedding, "model", cfg.Watch.Embedding.Model, desc("watch.embedding.model"))
 	addScalar(embedding, "dimension", cfg.Watch.Embedding.Dimension, desc("watch.embedding.dimension"))
+	addScalar(embedding, "runtime_path", cfg.Watch.Embedding.RuntimePath, desc("watch.embedding.runtime_path"))
 	addScalar(embedding, "health_threshold", cfg.Watch.Embedding.HealthThreshold, desc("watch.embedding.health_threshold"))
-	appendUnknownEntries(embedding, mappingValueNode(mappingValueNode(existing, "watch"), "embedding"), setOf("provider", "endpoint", "model", "dimension", "health_threshold"))
+	appendUnknownEntries(embedding, mappingValueNode(mappingValueNode(existing, "watch"), "embedding"), setOf("provider", "endpoint", "model", "dimension", "runtime_path", "health_threshold"))
 	addMap(watchNode, "embedding", embedding, "Embedding settings used by watch/analyze identity matching.")
 
 	layout := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}

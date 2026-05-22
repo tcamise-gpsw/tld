@@ -29,7 +29,7 @@ import (
 func NewAnalyzeCmd(wdir *string) *cobra.Command {
 	var dryRun bool
 	var dataDirFlag string
-	var embeddingProvider, embeddingEndpoint, embeddingModel string
+	var embeddingProvider, embeddingEndpoint, embeddingModel, embeddingRuntimePath string
 	var embeddingDimension int
 	var languageFlags []string
 	var rescan, failOnDrift bool
@@ -97,7 +97,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 				"languages", strings.Join(languageFlags, ","),
 			)
 			logger.InfoContext(cmd.Context(), "analyze.setup.completed", "elapsed", time.Since(commandStarted).Round(time.Millisecond).String(), "workspace", *wdir, "data_dir", dataDir)
-			embeddingCfg := resolveAnalyzeEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension)
+			embeddingCfg := resolveAnalyzeEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension, embeddingRuntimePath)
 			settings := resolveAnalyzeWatchSettings(cfg, languageFlags, maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup)
 			logger.InfoContext(cmd.Context(), "analyze.settings.resolved",
 				"embedding_provider", embeddingCfg.Provider,
@@ -198,6 +198,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 	c.Flags().StringVar(&embeddingEndpoint, "embedding-endpoint", "", "embedding endpoint for representation")
 	c.Flags().StringVar(&embeddingModel, "embedding-model", "", "embedding model for representation")
 	c.Flags().IntVar(&embeddingDimension, "embedding-dimension", 0, "embedding vector dimension")
+	c.Flags().StringVar(&embeddingRuntimePath, "embedding-runtime-path", "", "ONNX Runtime shared library path for local embedding providers")
 	c.Flags().IntVar(&maxElements, "max-elements-per-view", 0, "maximum generated elements per view")
 	c.Flags().IntVar(&maxConnectors, "max-connectors-per-view", 0, "maximum generated connectors per view")
 	c.Flags().IntVar(&maxIncoming, "max-incoming-per-element", 0, "maximum incoming references per element before collapsing")
@@ -216,7 +217,7 @@ func openAnalyzeLog(dataDir string) (*os.File, *slog.Logger, error) {
 	return file, logger, nil
 }
 
-func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int) watchpkg.EmbeddingConfig {
+func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int, runtimePath ...string) watchpkg.EmbeddingConfig {
 	embedding := watchpkg.EmbeddingConfig{Provider: "none"}
 	if cfg != nil {
 		embedding = watchpkg.EmbeddingConfig{
@@ -224,6 +225,7 @@ func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, mo
 			Endpoint:        cfg.Watch.Embedding.Endpoint,
 			Model:           cfg.Watch.Embedding.Model,
 			Dimension:       cfg.Watch.Embedding.Dimension,
+			RuntimePath:     cfg.Watch.Embedding.RuntimePath,
 			HealthThreshold: cfg.Watch.Embedding.HealthThreshold,
 		}
 	}
@@ -238,6 +240,9 @@ func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, mo
 	}
 	if dimension > 0 {
 		embedding.Dimension = dimension
+	}
+	if len(runtimePath) > 0 && runtimePath[0] != "" {
+		embedding.RuntimePath = runtimePath[0]
 	}
 	return watchpkg.NormalizeEmbeddingConfig(embedding)
 }

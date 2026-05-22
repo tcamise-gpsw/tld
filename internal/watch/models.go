@@ -178,6 +178,7 @@ type EmbeddingConfig struct {
 	Endpoint        string  `json:"endpoint,omitempty" yaml:"endpoint"`
 	Model           string  `json:"model" yaml:"model"`
 	Dimension       int     `json:"dimension" yaml:"dimension"`
+	RuntimePath     string  `json:"runtime_path,omitempty" yaml:"runtime_path"`
 	HealthThreshold float64 `json:"health_threshold,omitempty" yaml:"health_threshold"`
 	TimeoutSeconds  int     `json:"timeout_seconds,omitempty" yaml:"timeout_seconds"`
 }
