@@ -538,15 +538,6 @@ function drawSceneNode(
     ctx.translate(-cx, -cy)
   }
 
-  if (state.isLeafCapped) {
-    ctx.save()
-    const cx = x + w / 2
-    const cy = y + h / 2
-    ctx.translate(cx, cy)
-    ctx.scale(state.leafCapScale, state.leafCapScale)
-    ctx.translate(-cx, -cy)
-  }
-
   const parentAlpha = state.parentAlpha
   const inheritedAlpha = state.inheritedAlpha
 
@@ -864,9 +855,6 @@ function drawSceneNode(
     ctx.restore()
   }
 
-  if (state.isLeafCapped) {
-    ctx.restore()
-  }
   if (state.isLeafCapped) {
     ctx.restore()
   }
