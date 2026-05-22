@@ -190,6 +190,7 @@ export function useZUIInteraction(
   isMobile: boolean = false,
   resolveHoveredProxyItem?: (worldX: number, worldY: number, view: ZUIViewState, canvasW: number) => HoveredItem | null,
   hiddenTags: string[] = [],
+  canvasWidth: number = 0,
 ): ZUIInteraction {
   const [viewState, setViewStateInternal] = useState<ZUIViewState>(initialView)
   const [hoveredItem, setHoveredItemInternal] = useState<HoveredItem | null>(null)
@@ -257,11 +258,9 @@ export function useZUIInteraction(
     hiddenTagsRef.current = new Set(hiddenTags)
   }, [hiddenTags])
 
-  const [lastCanvasW, setLastCanvasW] = useState(0)
-
   const dynamicMaxZoom = useMemo(() => {
-    return calculateMaxZoom(groups, lastCanvasW || 1200, viewState) // Fallback width for initial calc
-  }, [groups, lastCanvasW, viewState])
+    return calculateMaxZoom(groups, canvasWidth || 1200, viewState) // Fallback width for initial calc
+  }, [groups, canvasWidth, viewState])
 
   const maxZoomRef = useRef(40)
   useEffect(() => {
@@ -281,10 +280,6 @@ export function useZUIInteraction(
         const w = el.clientWidth || el.width / (window.devicePixelRatio || 1)
         const h = el.clientHeight || el.height / (window.devicePixelRatio || 1)
 
-        if (w !== lastCanvasW && w > 0) {
-          setLastCanvasW(w)
-        }
-
         if (w === 0 || h === 0) {
           viewStateRef.current = next
           return next
@@ -294,7 +289,7 @@ export function useZUIInteraction(
         return constrained
       })
     },
-    [canvasRef, lastCanvasW],
+    [canvasRef],
   )
 
   const dragging = useRef(false)
@@ -309,9 +304,6 @@ export function useZUIInteraction(
       bbox: { minX: number; minY: number; maxX: number; maxY: number },
       padding = 0.1,
     ) => {
-      if (canvasW !== lastCanvasW && canvasW > 0) {
-        setLastCanvasW(canvasW)
-      }
       const bboxW = bbox.maxX - bbox.minX
       const bboxH = bbox.maxY - bbox.minY
       if (bboxW <= 0 || bboxH <= 0) return
@@ -327,7 +319,7 @@ export function useZUIInteraction(
       const y = (canvasH - bboxH * zoom) / 2 - bbox.minY * zoom
       setViewState({ x, y, zoom })
     },
-    [setViewState, lastCanvasW],
+    [setViewState],
   )
 
   const lastPanTimeRef = useRef(0)

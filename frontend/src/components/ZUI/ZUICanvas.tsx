@@ -98,6 +98,7 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
     isMobileLayout,
     resolveHoveredProxyItem,
     hiddenTags,
+    containerSize.w,
   )
 
   const proxyState = useZUIProxyConnectors(

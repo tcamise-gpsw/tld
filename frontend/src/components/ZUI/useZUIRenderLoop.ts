@@ -126,6 +126,20 @@ export function useZUIRenderLoop({
     invalidate()
   }, [layout, invalidate])
 
+  const fitInitialViewRef = useRef(fitInitialView)
+  const onReadyRef = useRef(onReady)
+  const setInitializedRef = useRef(setInitialized)
+  const setContainerSizeRef = useRef(setContainerSize)
+  const initializedRef = useRef(initialized)
+
+  useEffect(() => {
+    fitInitialViewRef.current = fitInitialView
+    onReadyRef.current = onReady
+    setInitializedRef.current = setInitialized
+    setContainerSizeRef.current = setContainerSize
+    initializedRef.current = initialized
+  }, [fitInitialView, onReady, setInitialized, setContainerSize, initialized])
+
   useEffect(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
@@ -138,20 +152,25 @@ export function useZUIRenderLoop({
       const h = container.offsetHeight
       if (w === 0 || h === 0) return
 
-      setContainerSize({ w, h })
-      canvas.width = w * dpr
-      canvas.height = h * dpr
-      canvas.style.width = `${w}px`
-      canvas.style.height = `${h}px`
-      const ctx = canvas.getContext('2d')
-      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const newWidth = Math.floor(w * dpr)
+      const newHeight = Math.floor(h * dpr)
 
-      invalidate()
+      if (canvas.width !== newWidth || canvas.height !== newHeight) {
+        canvas.width = newWidth
+        canvas.height = newHeight
+        canvas.style.width = `${w}px`
+        canvas.style.height = `${h}px`
+        const ctx = canvas.getContext('2d')
+        if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        invalidate()
+      }
 
-      if (!initialized && w > 0 && h > 0) {
-        fitInitialView(w, h)
-        setInitialized(true)
-        onReady?.()
+      setContainerSizeRef.current({ w, h })
+
+      if (!initializedRef.current && w > 0 && h > 0) {
+        fitInitialViewRef.current(w, h)
+        setInitializedRef.current(true)
+        onReadyRef.current?.()
       }
     }
 
@@ -159,7 +178,7 @@ export function useZUIRenderLoop({
     ro.observe(container)
     resize()
     return () => ro.disconnect()
-  }, [canvasRef, containerRef, fitInitialView, initialized, invalidate, onReady, setContainerSize, setInitialized])
+  }, [canvasRef, containerRef, invalidate])
 
   useEffect(() => {
     if (!initialized) return
