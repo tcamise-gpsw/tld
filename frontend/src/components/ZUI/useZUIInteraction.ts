@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import type { BBox, DiagramGroupLayout, LayoutNode, ZUIViewState, HoveredItem } from './types'
-import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY } from './layoutEngine'
+import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY, worldToScreenX, worldToScreenY } from './layoutEngine'
 import { hitTestZUIRenderedNode, warmZUIHitTestIndexes } from './hitTest'
 import { buildEdgeSpatialIndex, findHoveredEdge, type EdgeSpatialIndex } from './edgeHover'
 
@@ -57,27 +57,65 @@ function findHoveredGroup(worldX: number, worldY: number, groups: DiagramGroupLa
   return null
 }
 
-export function calculateMaxZoom(groups: DiagramGroupLayout[], canvasW: number): number {
+export function calculateMaxZoom(groups: DiagramGroupLayout[], canvasW: number, view?: ZUIViewState, canvasH?: number): number {
   if (canvasW <= 0) return 40
+  const cH = canvasH ?? canvasW
   const thresholds = getExpandThresholds(canvasW)
   let maxPossibleZoom = 40
 
-  function visitNodes(nodes: LayoutNode[], cumulativeScale: number) {
+  let hasVisibleExpandable = !view
+  let anyVisible = !view
+  let minVisibleAbsW = Infinity
+
+  function visitNodes(nodes: LayoutNode[], cumulativeScale: number,
+    parentAbsX: number, parentAbsY: number,
+    parentChildOffsetX: number, parentChildOffsetY: number,
+  ) {
     for (const node of nodes) {
+      const absW = node.worldW * cumulativeScale
+
       if (!node.children || node.children.length === 0) {
-        // This is a leaf node. We want it to be able to fill 'thresholds.end' of the canvas.
-        const neededZoom = thresholds.end / (node.worldW * cumulativeScale)
+        const neededZoom = thresholds.end / absW
         if (neededZoom > maxPossibleZoom) {
           maxPossibleZoom = neededZoom
         }
       } else {
-        visitNodes(node.children, cumulativeScale * node.childScale)
+        visitNodes(node.children, cumulativeScale * (node.childScale > 0 ? node.childScale : 1),
+          parentAbsX + (node.worldX - parentChildOffsetX) * cumulativeScale,
+          parentAbsY + (node.worldY - parentChildOffsetY) * cumulativeScale,
+          node.childOffsetX, node.childOffsetY)
+      }
+
+      if (view) {
+        const absX = parentAbsX + (node.worldX - parentChildOffsetX) * cumulativeScale
+        const absY = parentAbsY + (node.worldY - parentChildOffsetY) * cumulativeScale
+        const sx = worldToScreenX(absX, view)
+        const sy = worldToScreenY(absY, view)
+        const sw = absW * view.zoom
+        const sh = node.worldH * cumulativeScale * view.zoom
+        if (sx + sw > 0 && sy + sh > 0 && sx < canvasW && sy < cH) {
+          anyVisible = true
+          if (absW < minVisibleAbsW) minVisibleAbsW = absW
+          if (node.children && node.children.length > 0 && sw < thresholds.end) {
+            hasVisibleExpandable = true
+          }
+        }
       }
     }
   }
 
   for (const group of groups) {
-    visitNodes(group.nodes, 1)
+    visitNodes(group.nodes, 1, 0, 0, 0, 0)
+  }
+
+  if (view) {
+    if (!anyVisible) {
+      return view.zoom
+    }
+    if (!hasVisibleExpandable && minVisibleAbsW < Infinity) {
+      const capZoom = thresholds.end / minVisibleAbsW
+      return Math.min(maxPossibleZoom, capZoom)
+    }
   }
 
   return maxPossibleZoom
@@ -222,8 +260,8 @@ export function useZUIInteraction(
   const [lastCanvasW, setLastCanvasW] = useState(0)
 
   const dynamicMaxZoom = useMemo(() => {
-    return calculateMaxZoom(groups, lastCanvasW || 1200) // Fallback width for initial calc
-  }, [groups, lastCanvasW])
+    return calculateMaxZoom(groups, lastCanvasW || 1200, viewState) // Fallback width for initial calc
+  }, [groups, lastCanvasW, viewState])
 
   const maxZoomRef = useRef(40)
   useEffect(() => {
