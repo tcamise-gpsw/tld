@@ -50,31 +50,34 @@ type ReferenceQuery struct {
 }
 
 func (s *Store) BeginFilterRun(ctx context.Context, repositoryID int64, settingsHash, rawGraphHash string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO watch_filter_runs(repository_id, settings_hash, raw_graph_hash, started_at, status)
-		VALUES (?, ?, ?, ?, 'running')`, repositoryID, settingsHash, rawGraphHash, nowString())
+	row := &filterRunModel{RepositoryID: repositoryID, SettingsHash: settingsHash, RawGraphHash: rawGraphHash, StartedAt: nowString(), Status: "running"}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	return row.ID, nil
 }
 
 func (s *Store) SaveFilterDecision(ctx context.Context, filterRunID int64, ownerType string, ownerID int64, ownerKey string, decision, reason string, score *float64, tier int, signalsJSON string) error {
 	if signalsJSON == "" {
 		signalsJSON = "[]"
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO watch_filter_decisions(filter_run_id, owner_type, owner_id, owner_key, decision, reason, score, tier, signals_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, filterRunID, ownerType, ownerID, ownerKey, decision, reason, score, tier, signalsJSON)
+	row := &filterDecisionModel{FilterRunID: filterRunID, OwnerType: ownerType, OwnerID: ownerID, OwnerKey: ownerKey, Decision: decision, Reason: reason, Score: score, Tier: tier, SignalsJSON: signalsJSON}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	return err
 }
 
 func (s *Store) FinishFilterRun(ctx context.Context, id int64, status string, visibleSymbols, hiddenSymbols, visibleReferences, hiddenReferences int) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE watch_filter_runs
-		SET finished_at = ?, status = ?, visible_symbols = ?, hidden_symbols = ?, visible_references = ?, hidden_references = ?
-		WHERE id = ?`,
-		nowString(), status, visibleSymbols, hiddenSymbols, visibleReferences, hiddenReferences, id)
+	_, err := s.bun.NewUpdate().
+		Model((*filterRunModel)(nil)).
+		Set("finished_at = ?", nowString()).
+		Set("status = ?", status).
+		Set("visible_symbols = ?", visibleSymbols).
+		Set("hidden_symbols = ?", hiddenSymbols).
+		Set("visible_references = ?", visibleReferences).
+		Set("hidden_references = ?", hiddenReferences).
+		Where("id = ?", id).
+		Exec(ctx)
 	return err
 }
 
@@ -221,97 +224,68 @@ func (s *Store) EnsureRepository(ctx context.Context, input RepositoryInput) (Re
 	}
 	now := nowString()
 
-	var existingID int64
+	var existing repositoryModel
 	var err error
 	if input.RemoteURL != "" {
-		err = s.db.QueryRowContext(ctx, `SELECT id FROM watch_repositories WHERE remote_url = ?`, input.RemoteURL).Scan(&existingID)
+		err = s.bun.NewSelect().Model(&existing).Column("id").Where("remote_url = ?", input.RemoteURL).Scan(ctx)
 	} else {
-		err = s.db.QueryRowContext(ctx, `SELECT id FROM watch_repositories WHERE repo_root = ? AND identity_status = 'local_only'`, input.RepoRoot).Scan(&existingID)
+		err = s.bun.NewSelect().Model(&existing).Column("id").Where("repo_root = ?", input.RepoRoot).Where("identity_status = 'local_only'").Scan(ctx)
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Repository{}, err
 	}
-	if existingID > 0 {
-		_, err = s.db.ExecContext(ctx, `
-			UPDATE watch_repositories
-			SET repo_root = ?, display_name = ?, branch = ?, head_commit = ?, identity_status = ?, settings_hash = ?, updated_at = ?
-			WHERE id = ?`,
-			input.RepoRoot,
-			input.DisplayName,
-			nullString(input.Branch),
-			nullString(input.HeadCommit),
-			input.IdentityStatus,
-			input.SettingsHash,
-			now,
-			existingID,
-		)
+	if existing.ID > 0 {
+		_, err = s.bun.NewUpdate().
+			Model((*repositoryModel)(nil)).
+			Set("repo_root = ?", input.RepoRoot).
+			Set("display_name = ?", input.DisplayName).
+			Set("branch = ?", nullString(input.Branch)).
+			Set("head_commit = ?", nullString(input.HeadCommit)).
+			Set("identity_status = ?", input.IdentityStatus).
+			Set("settings_hash = ?", input.SettingsHash).
+			Set("updated_at = ?", now).
+			Where("id = ?", existing.ID).
+			Exec(ctx)
 		if err != nil {
 			return Repository{}, err
 		}
-		return s.Repository(ctx, existingID)
+		return s.Repository(ctx, existing.ID)
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO watch_repositories(remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullString(input.RemoteURL),
-		input.RepoRoot,
-		input.DisplayName,
-		nullString(input.Branch),
-		nullString(input.HeadCommit),
-		input.IdentityStatus,
-		input.SettingsHash,
-		now,
-		now,
-	)
+	row := &repositoryModel{
+		RemoteURL:      stringPtrOrNil(input.RemoteURL),
+		RepoRoot:       input.RepoRoot,
+		DisplayName:    input.DisplayName,
+		Branch:         stringPtrOrNil(input.Branch),
+		HeadCommit:     stringPtrOrNil(input.HeadCommit),
+		IdentityStatus: input.IdentityStatus,
+		SettingsHash:   input.SettingsHash,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	_, err = s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return Repository{}, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Repository{}, err
-	}
-	return s.Repository(ctx, id)
+	return s.Repository(ctx, row.ID)
 }
 
 func (s *Store) Repository(ctx context.Context, id int64) (Repository, error) {
-	var repo Repository
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at
-		FROM watch_repositories
-		WHERE id = ?`, id).Scan(
-		&repo.ID,
-		&repo.RemoteURL,
-		&repo.RepoRoot,
-		&repo.DisplayName,
-		&repo.Branch,
-		&repo.HeadCommit,
-		&repo.IdentityStatus,
-		&repo.SettingsHash,
-		&repo.CreatedAt,
-		&repo.UpdatedAt,
-	)
-	return repo, err
+	var row repositoryModel
+	err := s.bun.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx)
+	return repositoryFromModel(row), err
 }
 
 func (s *Store) Repositories(ctx context.Context) ([]Repository, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at
-		FROM watch_repositories
-		ORDER BY display_name, id`)
-	if err != nil {
+	var rows []repositoryModel
+	if err := s.bun.NewSelect().Model(&rows).Order("display_name").Order("id").Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var repos []Repository
-	for rows.Next() {
-		var repo Repository
-		if err := rows.Scan(&repo.ID, &repo.RemoteURL, &repo.RepoRoot, &repo.DisplayName, &repo.Branch, &repo.HeadCommit, &repo.IdentityStatus, &repo.SettingsHash, &repo.CreatedAt, &repo.UpdatedAt); err != nil {
-			return nil, err
-		}
-		repos = append(repos, repo)
+	repos := make([]Repository, 0, len(rows))
+	for _, row := range rows {
+		repos = append(repos, repositoryFromModel(row))
 	}
-	return repos, rows.Err()
+	return repos, nil
 }
 
 func (s *Store) ReassociateRepository(ctx context.Context, id int64, remoteURL string) (Repository, error) {

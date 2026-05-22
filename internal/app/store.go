@@ -12,16 +12,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
 	sqlitevec "github.com/viant/sqlite-vec/vec"
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	bun *bun.DB
 }
 
 func (s *Store) DB() *sql.DB {
 	return s.db
+}
+
+func (s *Store) BunDB() *bun.DB {
+	return s.bun
 }
 
 type TechnologyConnector struct {
@@ -108,7 +115,7 @@ func OpenStore(dbPath string, migrations embed.FS) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	store := &Store{db: db}
+	store := &Store{db: db, bun: bun.NewDB(db, sqlitedialect.New())}
 	if err := store.ensureBootstrapData(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -249,10 +256,6 @@ type viewRow struct {
 	Level          int
 	CreatedAt      string
 	UpdatedAt      string
-}
-
-type scanner interface {
-	Scan(dest ...any) error
 }
 
 func (s *Store) Explore(ctx context.Context) (ExploreData, error) {

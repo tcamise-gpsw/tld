@@ -2,35 +2,36 @@ package app
 
 import "context"
 
-func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, error) {
-	type placementRow struct {
-		item    PlacedElement
-		techRaw string
-		tagRaw  string
-	}
+type placementJoinRow struct {
+	ID                   int64   `bun:"id"`
+	ViewID               int64   `bun:"view_id"`
+	ElementID            int64   `bun:"element_id"`
+	PositionX            float64 `bun:"position_x"`
+	PositionY            float64 `bun:"position_y"`
+	Name                 string  `bun:"name"`
+	Kind                 *string `bun:"kind"`
+	Description          *string `bun:"description"`
+	Technology           *string `bun:"technology"`
+	URL                  *string `bun:"url"`
+	LogoURL              *string `bun:"logo_url"`
+	TechnologyConnectors string  `bun:"technology_connectors"`
+	Tags                 string  `bun:"tags"`
+	Repo                 *string `bun:"repo"`
+	Branch               *string `bun:"branch"`
+	FilePath             *string `bun:"file_path"`
+	Language             *string `bun:"language"`
+}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.view_id, p.element_id, p.position_x, p.position_y,
-		       e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language, e.created_at, e.updated_at
-		FROM placements p
-		JOIN elements e ON e.id = p.element_id
-		WHERE p.view_id = ?
-		ORDER BY p.id`, viewID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	scanned := make([]placementRow, 0)
-	for rows.Next() {
-		var row placementRow
-		if err := rows.Scan(&row.item.ID, &row.item.ViewID, &row.item.ElementID, &row.item.PositionX, &row.item.PositionY,
-			&row.item.Name, &row.item.Kind, &row.item.Description, &row.item.Technology, &row.item.URL, &row.item.LogoURL,
-			&row.techRaw, &row.tagRaw, &row.item.Repo, &row.item.Branch, &row.item.FilePath, &row.item.Language, new(string), new(string)); err != nil {
-			return nil, err
-		}
-		scanned = append(scanned, row)
-	}
-	if err := rows.Err(); err != nil {
+func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, error) {
+	var scanned []placementJoinRow
+	if err := s.bun.NewSelect().
+		TableExpr("placements AS p").
+		ColumnExpr("p.id, p.view_id, p.element_id, p.position_x, p.position_y").
+		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language").
+		Join("JOIN elements AS e ON e.id = p.element_id").
+		Where("p.view_id = ?", viewID).
+		Order("p.id").
+		Scan(ctx, &scanned); err != nil {
 		return nil, err
 	}
 	viewMeta, err := s.childViewMetaMap(ctx)
@@ -40,9 +41,7 @@ func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, 
 
 	out := make([]PlacedElement, 0, len(scanned))
 	for _, row := range scanned {
-		item := row.item
-		item.TechnologyConnectors = parseTechnologyConnectors(row.techRaw)
-		item.Tags = parseStrings(row.tagRaw)
+		item := placedElementFromPlacementRow(row)
 		if meta, ok := viewMeta[item.ElementID]; ok {
 			item.HasView = meta.hasView
 			item.ViewLabel = meta.label
@@ -53,33 +52,15 @@ func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, 
 }
 
 func (s *Store) AllPlacements(ctx context.Context) ([]PlacedElement, error) {
-	type placementRow struct {
-		item    PlacedElement
-		techRaw string
-		tagRaw  string
-	}
-
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.view_id, p.element_id, p.position_x, p.position_y,
-		       e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language, e.created_at, e.updated_at
-		FROM placements p
-		JOIN elements e ON e.id = p.element_id
-		ORDER BY p.view_id, p.id`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	scanned := make([]placementRow, 0)
-	for rows.Next() {
-		var row placementRow
-		if err := rows.Scan(&row.item.ID, &row.item.ViewID, &row.item.ElementID, &row.item.PositionX, &row.item.PositionY,
-			&row.item.Name, &row.item.Kind, &row.item.Description, &row.item.Technology, &row.item.URL, &row.item.LogoURL,
-			&row.techRaw, &row.tagRaw, &row.item.Repo, &row.item.Branch, &row.item.FilePath, &row.item.Language, new(string), new(string)); err != nil {
-			return nil, err
-		}
-		scanned = append(scanned, row)
-	}
-	if err := rows.Err(); err != nil {
+	var scanned []placementJoinRow
+	if err := s.bun.NewSelect().
+		TableExpr("placements AS p").
+		ColumnExpr("p.id, p.view_id, p.element_id, p.position_x, p.position_y").
+		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language").
+		Join("JOIN elements AS e ON e.id = p.element_id").
+		Order("p.view_id").
+		Order("p.id").
+		Scan(ctx, &scanned); err != nil {
 		return nil, err
 	}
 	viewMeta, err := s.childViewMetaMap(ctx)
@@ -89,9 +70,7 @@ func (s *Store) AllPlacements(ctx context.Context) ([]PlacedElement, error) {
 
 	out := make([]PlacedElement, 0, len(scanned))
 	for _, row := range scanned {
-		item := row.item
-		item.TechnologyConnectors = parseTechnologyConnectors(row.techRaw)
-		item.Tags = parseStrings(row.tagRaw)
+		item := placedElementFromPlacementRow(row)
 		if meta, ok := viewMeta[item.ElementID]; ok {
 			item.HasView = meta.hasView
 			item.ViewLabel = meta.label
@@ -102,46 +81,91 @@ func (s *Store) AllPlacements(ctx context.Context) ([]PlacedElement, error) {
 }
 
 func (s *Store) ElementPlacements(ctx context.Context, viewID int64) ([]ElementPlacement, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, view_id, element_id, position_x, position_y FROM placements WHERE view_id = ? ORDER BY id`, viewID)
-	if err != nil {
+	var rows []elementPlacementModel
+	if err := s.bun.NewSelect().
+		Model(&rows).
+		Where("view_id = ?", viewID).
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]ElementPlacement, 0)
-	for rows.Next() {
-		var item ElementPlacement
-		if err := rows.Scan(&item.ID, &item.ViewID, &item.ElementID, &item.PositionX, &item.PositionY); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
+	out := make([]ElementPlacement, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, elementPlacementFromModel(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) AddPlacement(ctx context.Context, viewID, elementID int64, x, y float64) (ElementPlacement, error) {
 	now := nowString()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(view_id, element_id) DO UPDATE SET position_x = excluded.position_x, position_y = excluded.position_y, updated_at = excluded.updated_at`,
-		viewID, elementID, x, y, now, now)
+	row := &elementPlacementModel{
+		ViewID:    viewID,
+		ElementID: elementID,
+		PositionX: x,
+		PositionY: y,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, err := s.bun.NewInsert().
+		Model(row).
+		On("CONFLICT(view_id, element_id) DO UPDATE").
+		Set("position_x = excluded.position_x").
+		Set("position_y = excluded.position_y").
+		Set("updated_at = excluded.updated_at").
+		Exec(ctx)
 	if err != nil {
 		return ElementPlacement{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT id, view_id, element_id, position_x, position_y FROM placements WHERE view_id = ? AND element_id = ?`, viewID, elementID)
-	var item ElementPlacement
-	if err := row.Scan(&item.ID, &item.ViewID, &item.ElementID, &item.PositionX, &item.PositionY); err != nil {
+	var got elementPlacementModel
+	if err := s.bun.NewSelect().
+		Model(&got).
+		Where("view_id = ?", viewID).
+		Where("element_id = ?", elementID).
+		Scan(ctx); err != nil {
 		return ElementPlacement{}, err
 	}
-	return item, nil
+	return elementPlacementFromModel(got), nil
 }
 
 func (s *Store) UpdatePlacement(ctx context.Context, viewID, elementID int64, x, y float64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE placements SET position_x = ?, position_y = ?, updated_at = ? WHERE view_id = ? AND element_id = ?`, x, y, nowString(), viewID, elementID)
+	_, err := s.bun.NewUpdate().
+		Model((*elementPlacementModel)(nil)).
+		Set("position_x = ?", x).
+		Set("position_y = ?", y).
+		Set("updated_at = ?", nowString()).
+		Where("view_id = ?", viewID).
+		Where("element_id = ?", elementID).
+		Exec(ctx)
 	return err
 }
 
 func (s *Store) DeletePlacement(ctx context.Context, viewID, elementID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM placements WHERE view_id = ? AND element_id = ?`, viewID, elementID)
+	_, err := s.bun.NewDelete().
+		Model((*elementPlacementModel)(nil)).
+		Where("view_id = ?", viewID).
+		Where("element_id = ?", elementID).
+		Exec(ctx)
 	return err
+}
+
+func placedElementFromPlacementRow(row placementJoinRow) PlacedElement {
+	return PlacedElement{
+		ID:                   row.ID,
+		ViewID:               row.ViewID,
+		ElementID:            row.ElementID,
+		PositionX:            row.PositionX,
+		PositionY:            row.PositionY,
+		Name:                 row.Name,
+		Kind:                 row.Kind,
+		Description:          row.Description,
+		Technology:           row.Technology,
+		URL:                  row.URL,
+		LogoURL:              row.LogoURL,
+		TechnologyConnectors: parseTechnologyConnectors(row.TechnologyConnectors),
+		Tags:                 parseStrings(row.Tags),
+		Repo:                 row.Repo,
+		Branch:               row.Branch,
+		FilePath:             row.FilePath,
+		Language:             row.Language,
+	}
 }

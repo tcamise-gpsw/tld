@@ -94,72 +94,27 @@ type PlanElement struct {
 }
 
 func (s *Store) Elements(ctx context.Context, limit, offset int, search string) ([]LibraryElement, int, error) {
-	type elementRow struct {
-		ID          int64
-		Name        string
-		Kind        sql.NullString
-		Description sql.NullString
-		Technology  sql.NullString
-		URL         sql.NullString
-		LogoURL     sql.NullString
-		TechRaw     string
-		TagRaw      string
-		Repo        sql.NullString
-		Branch      sql.NullString
-		FilePath    sql.NullString
-		Language    sql.NullString
-		CreatedAt   string
-		UpdatedAt   string
-	}
-
-	where := ""
-	args := []any{}
+	query := s.bun.NewSelect().Model((*elementModel)(nil))
 	if strings.TrimSpace(search) != "" {
-		where = ` WHERE LOWER(name) LIKE LOWER(?)`
 		pattern := "%" + strings.TrimSpace(search) + "%"
-		args = append(args, pattern)
+		query = query.Where("LOWER(name) LIKE LOWER(?)", pattern)
 	}
-	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM elements`+where, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	query := `SELECT id, name, kind, description, technology, url, logo_url, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at FROM elements` + where
-	query += ` ORDER BY LOWER(name) ASC, id ASC`
-	if limit > 0 {
-		query += ` LIMIT ? OFFSET ?`
-		args = append(args, limit, offset)
-	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	total, err := query.Count(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer func() { _ = rows.Close() }()
-	scanned := make([]elementRow, 0)
-	for rows.Next() {
-		var row elementRow
-		if err := rows.Scan(
-			&row.ID,
-			&row.Name,
-			&row.Kind,
-			&row.Description,
-			&row.Technology,
-			&row.URL,
-			&row.LogoURL,
-			&row.TechRaw,
-			&row.TagRaw,
-			&row.Repo,
-			&row.Branch,
-			&row.FilePath,
-			&row.Language,
-			&row.CreatedAt,
-			&row.UpdatedAt,
-		); err != nil {
-			return nil, 0, err
-		}
-		scanned = append(scanned, row)
+
+	var rows []elementModel
+	selectQuery := s.bun.NewSelect().Model(&rows)
+	if strings.TrimSpace(search) != "" {
+		pattern := "%" + strings.TrimSpace(search) + "%"
+		selectQuery = selectQuery.Where("LOWER(name) LIKE LOWER(?)", pattern)
 	}
-	if err := rows.Err(); err != nil {
+	selectQuery = selectQuery.OrderExpr("LOWER(name) ASC").Order("id")
+	if limit > 0 {
+		selectQuery = selectQuery.Limit(limit).Offset(offset)
+	}
+	if err := selectQuery.Scan(ctx); err != nil {
 		return nil, 0, err
 	}
 	viewMeta, err := s.childViewMetaMap(ctx)
@@ -167,43 +122,9 @@ func (s *Store) Elements(ctx context.Context, limit, offset int, search string) 
 		return nil, 0, err
 	}
 
-	out := make([]LibraryElement, 0, len(scanned))
-	for _, row := range scanned {
-		elem := LibraryElement{
-			ID:                   row.ID,
-			Name:                 row.Name,
-			TechnologyConnectors: parseTechnologyConnectors(row.TechRaw),
-			Tags:                 parseStrings(row.TagRaw),
-			CreatedAt:            row.CreatedAt,
-			UpdatedAt:            row.UpdatedAt,
-		}
-		if row.Kind.Valid {
-			elem.Kind = &row.Kind.String
-		}
-		if row.Description.Valid {
-			elem.Description = &row.Description.String
-		}
-		if row.Technology.Valid {
-			elem.Technology = &row.Technology.String
-		}
-		if row.URL.Valid {
-			elem.URL = &row.URL.String
-		}
-		if row.LogoURL.Valid {
-			elem.LogoURL = &row.LogoURL.String
-		}
-		if row.Repo.Valid {
-			elem.Repo = &row.Repo.String
-		}
-		if row.Branch.Valid {
-			elem.Branch = &row.Branch.String
-		}
-		if row.FilePath.Valid {
-			elem.FilePath = &row.FilePath.String
-		}
-		if row.Language.Valid {
-			elem.Language = &row.Language.String
-		}
+	out := make([]LibraryElement, 0, len(rows))
+	for _, row := range rows {
+		elem := elementFromModel(row)
 		if meta, ok := viewMeta[elem.ID]; ok {
 			elem.HasView = meta.hasView
 			elem.ViewLabel = meta.label
@@ -214,8 +135,18 @@ func (s *Store) Elements(ctx context.Context, limit, offset int, search string) 
 }
 
 func (s *Store) ElementByID(ctx context.Context, id int64) (LibraryElement, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, kind, description, technology, url, logo_url, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at FROM elements WHERE id = ?`, id)
-	return scanElement(row, true, s, ctx)
+	var row elementModel
+	if err := s.bun.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx); err != nil {
+		return LibraryElement{}, err
+	}
+	elem := elementFromModel(row)
+	hasView, label, err := s.childViewMeta(ctx, elem.ID)
+	if err != nil {
+		return LibraryElement{}, err
+	}
+	elem.HasView = hasView
+	elem.ViewLabel = label
+	return elem, nil
 }
 
 func (s *Store) CreateElement(ctx context.Context, input LibraryElement) (LibraryElement, error) {
@@ -223,29 +154,27 @@ func (s *Store) CreateElement(ctx context.Context, input LibraryElement) (Librar
 		return LibraryElement{}, err
 	}
 	now := nowString()
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO elements(name, kind, description, technology, url, logo_url, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		strings.TrimSpace(input.Name),
-		input.Kind,
-		input.Description,
-		input.Technology,
-		input.URL,
-		input.LogoURL,
-		jsonString(input.TechnologyConnectors, "[]"),
-		jsonString(input.Tags, "[]"),
-		input.Repo,
-		input.Branch,
-		input.FilePath,
-		input.Language,
-		now,
-		now,
-	)
+	row := &elementModel{
+		Name:                 strings.TrimSpace(input.Name),
+		Kind:                 input.Kind,
+		Description:          input.Description,
+		Technology:           input.Technology,
+		URL:                  input.URL,
+		LogoURL:              input.LogoURL,
+		TechnologyConnectors: jsonString(input.TechnologyConnectors, "[]"),
+		Tags:                 jsonString(input.Tags, "[]"),
+		Repo:                 input.Repo,
+		Branch:               input.Branch,
+		FilePath:             input.FilePath,
+		Language:             input.Language,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return LibraryElement{}, err
 	}
-	id, _ := res.LastInsertId()
-	return s.ElementByID(ctx, id)
+	return s.ElementByID(ctx, row.ID)
 }
 
 func (s *Store) UpdateElement(ctx context.Context, id int64, input LibraryElement) (LibraryElement, error) {
@@ -262,80 +191,79 @@ func (s *Store) UpdateElement(ctx context.Context, id int64, input LibraryElemen
 	if input.Tags != nil {
 		tags = jsonString(input.Tags, "[]")
 	}
-	row := s.db.QueryRowContext(ctx, `
-		UPDATE elements SET
-			name = COALESCE(NULLIF(?, ''), name),
-			kind = COALESCE(?, kind),
-			description = COALESCE(?, description),
-			technology = COALESCE(?, technology),
-			url = COALESCE(?, url),
-			logo_url = COALESCE(?, logo_url),
-			technology_connectors = COALESCE(?, technology_connectors),
-			tags = COALESCE(?, tags),
-			repo = COALESCE(?, repo),
-			branch = COALESCE(?, branch),
-			file_path = COALESCE(?, file_path),
-			language = COALESCE(?, language),
-			updated_at = ?
-		WHERE id = ?
-		RETURNING id, name, kind, description, technology, url, logo_url, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at`,
-		strings.TrimSpace(input.Name), input.Kind, input.Description, input.Technology, input.URL, input.LogoURL,
-		technologyConnectors, tags,
-		input.Repo, input.Branch, input.FilePath, input.Language, nowString(), id,
-	)
-	return scanElement(row, true, s, ctx)
+	res, err := s.bun.NewUpdate().
+		Model((*elementModel)(nil)).
+		Set("name = COALESCE(NULLIF(?, ''), name)", strings.TrimSpace(input.Name)).
+		Set("kind = COALESCE(?, kind)", input.Kind).
+		Set("description = COALESCE(?, description)", input.Description).
+		Set("technology = COALESCE(?, technology)", input.Technology).
+		Set("url = COALESCE(?, url)", input.URL).
+		Set("logo_url = COALESCE(?, logo_url)", input.LogoURL).
+		Set("technology_connectors = COALESCE(?, technology_connectors)", technologyConnectors).
+		Set("tags = COALESCE(?, tags)", tags).
+		Set("repo = COALESCE(?, repo)", input.Repo).
+		Set("branch = COALESCE(?, branch)", input.Branch).
+		Set("file_path = COALESCE(?, file_path)", input.FilePath).
+		Set("language = COALESCE(?, language)", input.Language).
+		Set("updated_at = ?", nowString()).
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return LibraryElement{}, err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return LibraryElement{}, sql.ErrNoRows
+	}
+	return s.ElementByID(ctx, id)
 }
 
 func (s *Store) DeleteElement(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM elements WHERE id = ?`, id)
+	_, err := s.bun.NewDelete().Model((*elementModel)(nil)).Where("id = ?", id).Exec(ctx)
 	return err
 }
 
 func (s *Store) ListElementPlacements(ctx context.Context, elementID int64) ([]ViewPlacement, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.view_id, v.name
-		FROM placements p
-		JOIN views v ON v.id = p.view_id
-		WHERE p.element_id = ?
-		ORDER BY p.view_id`, elementID)
-	if err != nil {
+	var rows []ViewPlacement
+	if err := s.bun.NewSelect().
+		TableExpr("placements AS p").
+		ColumnExpr("p.view_id").
+		ColumnExpr("v.name AS view_name").
+		Join("JOIN views AS v ON v.id = p.view_id").
+		Where("p.element_id = ?", elementID).
+		Order("p.view_id").
+		Scan(ctx, &rows); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]ViewPlacement, 0)
-	for rows.Next() {
-		var placement ViewPlacement
-		if err := rows.Scan(&placement.ViewID, &placement.ViewName); err != nil {
-			return nil, err
-		}
-		out = append(out, placement)
-	}
-	return out, rows.Err()
+	return rows, nil
 }
 
 func (s *Store) ListElementNavigations(ctx context.Context, elementID int64, fromViewID, toViewID *int64) ([]ViewConnector, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name FROM views WHERE owner_element_id = ? ORDER BY id LIMIT 1`, elementID)
-	var childViewID int64
-	var childViewName string
-	if err := row.Scan(&childViewID, &childViewName); err != nil {
+	var child viewModel
+	if err := s.bun.NewSelect().
+		Model(&child).
+		Column("id", "name").
+		Where("owner_element_id = ?", elementID).
+		Order("id").
+		Limit(1).
+		Scan(ctx); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return []ViewConnector{}, nil
 		}
 		return nil, err
 	}
-	parentID, err := s.parentViewForOwner(ctx, elementID, childViewID)
+	parentID, err := s.parentViewForOwner(ctx, elementID, child.ID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ViewConnector, 0, 1)
 	if fromViewID != nil && *fromViewID > 0 {
 		if parentID != nil && *parentID == *fromViewID {
-			out = append(out, ViewConnector{ID: 0, ElementID: &elementID, FromViewID: *fromViewID, ToViewID: childViewID, ToViewName: childViewName, RelationType: "child"})
+			out = append(out, ViewConnector{ID: 0, ElementID: &elementID, FromViewID: *fromViewID, ToViewID: child.ID, ToViewName: child.Name, RelationType: "child"})
 		}
 		return out, nil
 	}
-	if toViewID != nil && *toViewID > 0 && parentID != nil && *toViewID == childViewID {
-		out = append(out, ViewConnector{ID: 0, ElementID: &elementID, FromViewID: *parentID, ToViewID: childViewID, ToViewName: childViewName, RelationType: "child"})
+	if toViewID != nil && *toViewID > 0 && parentID != nil && *toViewID == child.ID {
+		out = append(out, ViewConnector{ID: 0, ElementID: &elementID, FromViewID: *parentID, ToViewID: child.ID, ToViewName: child.Name, RelationType: "child"})
 	}
 	return out, nil
 }

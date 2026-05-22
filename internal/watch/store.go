@@ -16,6 +16,8 @@ import (
 
 	tldgit "github.com/mertcikla/tld/v2/internal/git"
 	"github.com/mertcikla/tld/v2/internal/tagcolors"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/viant/sqlite-vec/vector"
 )
 
@@ -24,11 +26,12 @@ const maxInClauseIDs = 500
 const embeddingSimilarityTimeout = 2 * time.Second
 
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	bun *bun.DB
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, bun: bun.NewDB(db, sqlitedialect.New())}
 }
 
 type materializationState struct {

@@ -3,64 +3,70 @@ package app
 import "context"
 
 func (s *Store) Connectors(ctx context.Context, viewID int64) ([]Connector, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at
-		FROM connectors WHERE view_id = ? ORDER BY id`, viewID)
-	if err != nil {
+	var rows []connectorModel
+	if err := s.bun.NewSelect().
+		Model(&rows).
+		Where("view_id = ?", viewID).
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]Connector, 0)
-	for rows.Next() {
-		var item Connector
-		if err := rows.Scan(&item.ID, &item.ViewID, &item.SourceElementID, &item.TargetElementID, &item.Label, &item.Description, &item.Relationship, &item.Direction, &item.Style, &item.URL, &item.SourceHandle, &item.TargetHandle, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
+	out := make([]Connector, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, connectorFromModel(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) AllConnectors(ctx context.Context) ([]Connector, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at
-		FROM connectors ORDER BY view_id, id`)
-	if err != nil {
+	var rows []connectorModel
+	if err := s.bun.NewSelect().
+		Model(&rows).
+		Order("view_id").
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]Connector, 0)
-	for rows.Next() {
-		var item Connector
-		if err := rows.Scan(&item.ID, &item.ViewID, &item.SourceElementID, &item.TargetElementID, &item.Label, &item.Description, &item.Relationship, &item.Direction, &item.Style, &item.URL, &item.SourceHandle, &item.TargetHandle, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
+	out := make([]Connector, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, connectorFromModel(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) CreateConnector(ctx context.Context, input Connector) (Connector, error) {
 	now := nowString()
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO connectors(view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		input.ViewID, input.SourceElementID, input.TargetElementID, input.Label, input.Description, input.Relationship,
-		normalizeDirection(new(input.Direction)), input.Style, input.URL, input.SourceHandle, input.TargetHandle, now, now)
+	row := &connectorModel{
+		ViewID:          input.ViewID,
+		SourceElementID: input.SourceElementID,
+		TargetElementID: input.TargetElementID,
+		Label:           input.Label,
+		Description:     input.Description,
+		Relationship:    input.Relationship,
+		Direction:       normalizeDirection(new(input.Direction)),
+		Style:           input.Style,
+		URL:             input.URL,
+		SourceHandle:    input.SourceHandle,
+		TargetHandle:    input.TargetHandle,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return Connector{}, err
 	}
-	id, _ := res.LastInsertId()
-	return s.ConnectorByID(ctx, id)
+	return s.ConnectorByID(ctx, row.ID)
 }
 
 func (s *Store) ConnectorByID(ctx context.Context, id int64) (Connector, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at FROM connectors WHERE id = ?`, id)
-	var item Connector
-	if err := row.Scan(&item.ID, &item.ViewID, &item.SourceElementID, &item.TargetElementID, &item.Label, &item.Description, &item.Relationship, &item.Direction, &item.Style, &item.URL, &item.SourceHandle, &item.TargetHandle, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	var row connectorModel
+	if err := s.bun.NewSelect().
+		Model(&row).
+		Where("id = ?", id).
+		Scan(ctx); err != nil {
 		return Connector{}, err
 	}
-	return item, nil
+	return connectorFromModel(row), nil
 }
 
 func (s *Store) UpdateConnector(ctx context.Context, id int64, patch Connector) (Connector, error) {
@@ -93,6 +99,9 @@ func (s *Store) UpdateConnector(ctx context.Context, id int64, patch Connector) 
 }
 
 func (s *Store) DeleteConnector(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM connectors WHERE id = ?`, id)
+	_, err := s.bun.NewDelete().
+		Model((*connectorModel)(nil)).
+		Where("id = ?", id).
+		Exec(ctx)
 	return err
 }

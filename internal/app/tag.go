@@ -14,41 +14,35 @@ type Tag struct {
 }
 
 func (s *Store) Layers(ctx context.Context, viewID int64) ([]ViewLayer, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, view_id, name, tags, color, created_at, updated_at FROM view_layers WHERE view_id = ? ORDER BY id`, viewID)
-	if err != nil {
+	var rows []viewLayerModel
+	if err := s.bun.NewSelect().
+		Model(&rows).
+		Where("view_id = ?", viewID).
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]ViewLayer, 0)
-	for rows.Next() {
-		var rawTags string
-		var item ViewLayer
-		if err := rows.Scan(&item.ID, &item.DiagramID, &item.Name, &rawTags, &item.Color, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		item.Tags = parseStrings(rawTags)
-		out = append(out, item)
+	out := make([]ViewLayer, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, viewLayerFromModel(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) AllLayers(ctx context.Context) ([]ViewLayer, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, view_id, name, tags, color, created_at, updated_at FROM view_layers ORDER BY view_id, id`)
-	if err != nil {
+	var rows []viewLayerModel
+	if err := s.bun.NewSelect().
+		Model(&rows).
+		Order("view_id").
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]ViewLayer, 0)
-	for rows.Next() {
-		var rawTags string
-		var item ViewLayer
-		if err := rows.Scan(&item.ID, &item.DiagramID, &item.Name, &rawTags, &item.Color, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		item.Tags = parseStrings(rawTags)
-		out = append(out, item)
+	out := make([]ViewLayer, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, viewLayerFromModel(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) CreateLayer(ctx context.Context, viewID int64, name string, tags []string, color *string) (ViewLayer, error) {
@@ -81,24 +75,30 @@ func (s *Store) CreateLayer(ctx context.Context, viewID int64, name string, tags
 	}
 
 	now := nowString()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO view_layers(view_id, name, tags, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		viewID, name, jsonString(tags, "[]"), color, now, now)
+	row := &viewLayerModel{
+		ViewID:    viewID,
+		Name:      name,
+		Tags:      jsonString(tags, "[]"),
+		Color:     color,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return ViewLayer{}, err
 	}
-	id, _ := res.LastInsertId()
-	return s.LayerByID(ctx, id)
+	return s.LayerByID(ctx, row.ID)
 }
 
 func (s *Store) LayerByID(ctx context.Context, id int64) (ViewLayer, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, view_id, name, tags, color, created_at, updated_at FROM view_layers WHERE id = ?`, id)
-	var rawTags string
-	var item ViewLayer
-	if err := row.Scan(&item.ID, &item.DiagramID, &item.Name, &rawTags, &item.Color, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	var row viewLayerModel
+	if err := s.bun.NewSelect().
+		Model(&row).
+		Where("id = ?", id).
+		Scan(ctx); err != nil {
 		return ViewLayer{}, err
 	}
-	item.Tags = parseStrings(rawTags)
-	return item, nil
+	return viewLayerFromModel(row), nil
 }
 
 func (s *Store) UpdateLayer(ctx context.Context, id int64, patch ViewLayer) (ViewLayer, error) {
@@ -118,7 +118,14 @@ func (s *Store) UpdateLayer(ctx context.Context, id int64, patch ViewLayer) (Vie
 	if patch.Color == nil {
 		patch.Color = current.Color
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE view_layers SET name = ?, tags = ?, color = ?, updated_at = ? WHERE id = ?`, patch.Name, jsonString(patch.Tags, "[]"), patch.Color, nowString(), id)
+	_, err = s.bun.NewUpdate().
+		Model((*viewLayerModel)(nil)).
+		Set("name = ?", patch.Name).
+		Set("tags = ?", jsonString(patch.Tags, "[]")).
+		Set("color = ?", patch.Color).
+		Set("updated_at = ?", nowString()).
+		Where("id = ?", id).
+		Exec(ctx)
 	if err != nil {
 		return ViewLayer{}, err
 	}
@@ -126,32 +133,36 @@ func (s *Store) UpdateLayer(ctx context.Context, id int64, patch ViewLayer) (Vie
 }
 
 func (s *Store) DeleteLayer(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM view_layers WHERE id = ?`, id)
+	_, err := s.bun.NewDelete().
+		Model((*viewLayerModel)(nil)).
+		Where("id = ?", id).
+		Exec(ctx)
 	return err
 }
 
 func (s *Store) Tags(ctx context.Context) (map[string]Tag, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, color, description FROM tags ORDER BY name`)
-	if err != nil {
+	var rows []tagModel
+	if err := s.bun.NewSelect().
+		Model(&rows).
+		Order("name").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := map[string]Tag{}
-	for rows.Next() {
-		var tag Tag
-		if err := rows.Scan(&tag.Name, &tag.Color, &tag.Description); err != nil {
-			return nil, err
-		}
-		out[tag.Name] = tag
+	out := make(map[string]Tag, len(rows))
+	for _, row := range rows {
+		out[row.Name] = tagFromModel(row)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) UpdateTag(ctx context.Context, name, color string, description *string) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO tags(name, color, description) VALUES (?, ?, ?)
-		ON CONFLICT(name) DO UPDATE SET color = excluded.color, description = excluded.description`,
-		name, color, description)
+	row := &tagModel{Name: name, Color: color, Description: description}
+	_, err := s.bun.NewInsert().
+		Model(row).
+		On("CONFLICT(name) DO UPDATE").
+		Set("color = excluded.color").
+		Set("description = excluded.description").
+		Exec(ctx)
 	return err
 }
 
