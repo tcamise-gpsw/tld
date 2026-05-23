@@ -229,8 +229,8 @@ spec:
 	if architectureRef == "" || structuralRef == "" || repositoryRef == "" {
 		t.Fatalf("missing repository sections: %+v", ws.Elements)
 	}
-	if !hasPlacementParent(ws, architectureRef, repositoryRef) || !hasPlacementParent(ws, structuralRef, repositoryRef) {
-		t.Fatalf("architecture and structural sections should be siblings under repository: %+v", ws.Elements)
+	if !hasPlacementParent(ws, architectureRef, structuralRef) || !hasPlacementParent(ws, structuralRef, repositoryRef) {
+		t.Fatalf("architecture section should be nested under structural, and structural under repository: %+v", ws.Elements)
 	}
 	for _, name := range []string{"alpha", "beta", "cache", "External traffic"} {
 		ref := refByElementNameWithParent(ws, name, architectureRef)
@@ -338,11 +338,12 @@ spec:
 		t.Fatal(err)
 	}
 	runtimeRef := refByElementName(ws, "runtime-repo")
-	architectureRef := refByElementNameWithParent(ws, "Architecture", runtimeRef)
+	structuralRef := refByElementNameWithParent(ws, "Structural", runtimeRef)
+	architectureRef := refByElementNameWithParent(ws, "Architecture", structuralRef)
 	cartArchRef := refByElementNameWithParent(ws, "cart", architectureRef)
 	cartFolderRef := refByKindAndFilePath(ws, "folder", "modules/cart")
-	if runtimeRef == "" || architectureRef == "" || cartArchRef == "" || cartFolderRef == "" {
-		t.Fatalf("missing cross-repo test elements: runtime=%q architecture=%q cartArch=%q cartFolder=%q elements=%+v", runtimeRef, architectureRef, cartArchRef, cartFolderRef, ws.Elements)
+	if runtimeRef == "" || structuralRef == "" || architectureRef == "" || cartArchRef == "" || cartFolderRef == "" {
+		t.Fatalf("missing cross-repo test elements: runtime=%q structural=%q architecture=%q cartArch=%q cartFolder=%q elements=%+v", runtimeRef, structuralRef, architectureRef, cartArchRef, cartFolderRef, ws.Elements)
 	}
 	if placementCount(ws, cartFolderRef) < 2 {
 		t.Fatalf("source structural folder should remain in its original structural view and be reused in runtime deep-dive view: %+v", ws.Elements[cartFolderRef])

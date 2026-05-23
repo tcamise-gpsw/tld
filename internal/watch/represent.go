@@ -1276,27 +1276,6 @@ func (m *materializer) materializeArchitecture(ctx context.Context, architecture
 }
 
 func (m *materializer) materializeRepositorySections(ctx context.Context, repoView int64, repoLanguage string) (int64, int64, error) {
-	architectureElem, err := m.upsertElement(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), elementInput{
-		Name:        "Architecture",
-		Kind:        "view",
-		Description: "Generated architecture view",
-		Technology:  "Architecture",
-		Repo:        repoIdentity(m.repo),
-		Branch:      nullStringValue(m.repo.Branch),
-		Language:    repoLanguage,
-		Tags:        []string{"view:architecture"},
-	})
-	if err != nil {
-		return 0, 0, err
-	}
-	if err := m.upsertPlacement(ctx, repoView, architectureElem, 0, 0); err != nil {
-		return 0, 0, err
-	}
-	architectureView, err := m.upsertView(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), architectureElem, m.repo.DisplayName+" Architecture", "Architecture")
-	if err != nil {
-		return 0, 0, err
-	}
-
 	structuralElem, err := m.upsertElement(ctx, "repository-section", fmt.Sprintf("repository-structural:%d", m.repo.ID), elementInput{
 		Name:        "Structural",
 		Kind:        "view",
@@ -1310,13 +1289,35 @@ func (m *materializer) materializeRepositorySections(ctx context.Context, repoVi
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := m.upsertPlacement(ctx, repoView, structuralElem, 260, 0); err != nil {
+	if err := m.upsertPlacement(ctx, repoView, structuralElem, 0, 0); err != nil {
 		return 0, 0, err
 	}
 	structuralView, err := m.upsertView(ctx, "repository-section", fmt.Sprintf("repository-structural:%d", m.repo.ID), structuralElem, m.repo.DisplayName+" Structural", "Structural")
 	if err != nil {
 		return 0, 0, err
 	}
+
+	architectureElem, err := m.upsertElement(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), elementInput{
+		Name:        "Architecture",
+		Kind:        "view",
+		Description: "Generated architecture view",
+		Technology:  "Architecture",
+		Repo:        repoIdentity(m.repo),
+		Branch:      nullStringValue(m.repo.Branch),
+		Language:    repoLanguage,
+		Tags:        []string{"view:architecture"},
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := m.upsertPlacement(ctx, structuralView, architectureElem, 0, 0); err != nil {
+		return 0, 0, err
+	}
+	architectureView, err := m.upsertView(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), architectureElem, m.repo.DisplayName+" Architecture", "Architecture")
+	if err != nil {
+		return 0, 0, err
+	}
+
 	return architectureView, structuralView, nil
 }
 
