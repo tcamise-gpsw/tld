@@ -70,6 +70,9 @@ flowchart LR
   await expect(page).toHaveURL(new RegExp(`/views/${viewId}$`))
   await expect(nodeByName(page, 'Paste API')).toBeVisible()
   await expect(nodeByName(page, 'Paste DB')).toBeVisible()
+  await expect(page.getByTestId('vieweditor-selection-bulk-bar')).toContainText('2 selected')
+  await expect.poll(async () => nodeByName(page, 'Paste API').evaluate((node) => node.closest('.react-flow__node')?.classList.contains('selected'))).toBe(true)
+  await expect.poll(async () => nodeByName(page, 'Paste DB').evaluate((node) => node.closest('.react-flow__node')?.classList.contains('selected'))).toBe(true)
 })
 
 test('pasting non-Mermaid text is ignored by canvas import', async ({ page }) => {

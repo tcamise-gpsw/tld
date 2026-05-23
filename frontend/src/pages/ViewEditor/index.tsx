@@ -132,6 +132,30 @@ const SNAP_GRID: [number, number] = [30, 30]
 
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
 
+async function copyTextToClipboard(text: string) {
+  let clipboardError: unknown
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch (err) {
+      clipboardError = err
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  if (!copied) throw clipboardError ?? new Error('Clipboard copy failed')
+}
+
 function elementUpdatePayload(element: WorkspaceElement) {
   return {
     name: element.name,
@@ -467,6 +491,7 @@ function ViewEditorInner({
   const [extrasOpen, setExtrasOpen] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const isPasteImportingRef = useRef(false)
+  const pendingPasteSelectionRef = useRef<{ viewId: number; elementIds: Set<number> } | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const setViewEditorUi = useStore((state) => state.setViewEditorUi)
   const snapToGrid = useStore((state) => state.snapToGrid)
@@ -718,6 +743,35 @@ function ViewEditorInner({
     })
     return counts
   }, [selectedCanvasElements])
+
+  useEffect(() => {
+    const pendingSelection = pendingPasteSelectionRef.current
+    if (!pendingSelection || pendingSelection.viewId !== viewId || pendingSelection.elementIds.size === 0) return
+
+    const visibleElementIds = new Set(
+      rfNodes
+        .filter((node) => node.type === 'elementNode')
+        .map((node) => parseNumericId(node.id))
+        .filter((id): id is number => id !== null),
+    )
+    for (const elementId of pendingSelection.elementIds) {
+      if (!visibleElementIds.has(elementId)) return
+    }
+
+    pendingPasteSelectionRef.current = null
+    setSelectedElement(null)
+    setSelectedEdge(null)
+    setSelectedProxyConnectorDetails(null)
+    closeElementPanelRef.current()
+    closeConnectorPanelRef.current()
+    closeProxyConnectorPanelRef.current()
+    setRfEdges((edges) => edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+    setRfNodes((nodes) => nodes.map((node) => {
+      const elementId = node.type === 'elementNode' ? parseNumericId(node.id) : null
+      const selected = elementId !== null && pendingSelection.elementIds.has(elementId)
+      return node.selected === selected ? node : { ...node, selected }
+    }))
+  }, [rfNodes, setRfEdges, setRfNodes, viewId])
 
   useEffect(() => {
     if (selectedCanvasElementIds.length <= 1) return
@@ -1974,14 +2028,16 @@ function ViewEditorInner({
   }, [rfNodesRef])
 
   // ── Export / Import ────────────────────────────────────────────────────────
-  const handleExportMermaidDirect = useCallback(() => {
-    const baseName = sanitizeExportFilename(viewName || 'view-export')
-    const downloadName = `${baseName}.mermaid`
+  const handleCopyMermaidDirect = useCallback(async () => {
     const code = serializeViewToMermaid(viewElements, connectors)
-    triggerDownload(URL.createObjectURL(new Blob([code], { type: 'text/plain;charset=utf-8' })), downloadName)
     setCanvasMenu(null)
-    toast({ status: 'success', title: 'Export complete', description: `Saved ${downloadName}` })
-  }, [connectors, setCanvasMenu, toast, viewElements, viewName])
+    try {
+      await copyTextToClipboard(code)
+      toast({ status: 'success', title: 'Copied Mermaid', description: 'Mermaid source copied to clipboard.' })
+    } catch {
+      toast({ status: 'error', title: 'Copy failed', description: 'Could not write Mermaid source to the clipboard.' })
+    }
+  }, [connectors, setCanvasMenu, toast, viewElements])
 
   const handleExportView = useCallback(async (options: ExportOptions) => {
     const flowRoot = containerRef.current?.querySelector('.react-flow') as HTMLElement | null
@@ -2076,6 +2132,10 @@ function ViewEditorInner({
 
       clearEditHistory()
       await refreshElements()
+      pendingPasteSelectionRef.current = {
+        viewId: currentViewId,
+        elementIds: new Set(Array.from(createdByRef.values(), (element) => element.id)),
+      }
       toast({
         status: 'success',
         title: 'Mermaid imported',
@@ -2418,7 +2478,7 @@ function ViewEditorInner({
                 if (rect) showAddingElementAt(x + rect.left, y + rect.top)
                 setCanvasMenu(null)
               }}
-              onExportMermaid={handleExportMermaidDirect}
+              onCopyMermaid={handleCopyMermaidDirect}
             />
 
             {/* Inline element adder */}

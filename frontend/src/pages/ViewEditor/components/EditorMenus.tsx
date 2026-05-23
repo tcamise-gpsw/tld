@@ -1,6 +1,6 @@
 import React from 'react'
 import { Box, Button, Divider, HStack, Text, VStack } from '@chakra-ui/react'
-import { DownloadIcon } from '@chakra-ui/icons'
+import { CopyIcon } from '@chakra-ui/icons'
 import {
   AddElementIcon as AddElementSvg,
   TrashIcon as TrashSvg,
@@ -76,10 +76,10 @@ ConnectorContextMenu.displayName = 'ConnectorContextMenu'
 interface CanvasContextMenuProps {
   menu: { x: number; y: number; flowX: number; flowY: number } | null
   onAddElement: (x: number, y: number) => void
-  onExportMermaid: () => void
+  onCopyMermaid: () => void
 }
 
-export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = React.memo(({ menu, onAddElement, onExportMermaid }) => {
+export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = React.memo(({ menu, onAddElement, onCopyMermaid }) => {
   const { canEdit, snapToGrid, setSnapToGrid } = useViewEditorContext()
   if (!menu) return null
 
@@ -103,12 +103,12 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = React.memo(({
         </Button>
         <Divider borderColor="whiteAlpha.100" my={1} />
         <Button size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start"
-          data-testid="vieweditor-canvas-context-export-mermaid"
+          data-testid="vieweditor-canvas-context-copy-mermaid"
           color="clay.text" _hover={{ bg: 'whiteAlpha.100' }}
-          onClick={onExportMermaid}>
+          onClick={onCopyMermaid}>
           <HStack spacing={2} w="full">
-            <DownloadIcon boxSize={3} />
-            <Text fontSize="xs" fontWeight="normal" flex={1}>Export as Mermaid</Text>
+            <CopyIcon boxSize={3} />
+            <Text fontSize="xs" fontWeight="normal" flex={1}>Copy as Mermaid</Text>
           </HStack>
         </Button>
         <Divider borderColor="whiteAlpha.100" my={1} />

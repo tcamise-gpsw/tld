@@ -35,22 +35,18 @@ test('exported Mermaid download contains node names and edge syntax', async ({ p
   expect(content).toMatch(/node_\d+ -- "exports-to" --> node_\d+/)
 })
 
-test('canvas context menu exports Mermaid directly', async ({ page }) => {
+test('canvas context menu copies Mermaid directly', async ({ page, context }) => {
   const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 2, 'Context Export Content')
   await createConnector(page, diagram.id, elements[0].id, elements[1].id)
   await page.reload()
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin })
 
   const box = await reactFlowPaneBox(page)
   await page.mouse.click(box.x + box.width * 0.48, box.y + box.height * 0.38, { button: 'right' })
 
-  const downloadPromise = page.waitForEvent('download')
-  await page.getByTestId('vieweditor-canvas-context-export-mermaid').click()
-  const download = await downloadPromise
-  expect(download.suggestedFilename()).toMatch(/^Context Export Content .*\.mermaid$/)
-
-  const path = await download.path()
-  if (!path) throw new Error('Expected download path')
-  const content = await readFile(path, 'utf8')
+  await page.getByTestId('vieweditor-canvas-context-copy-mermaid').click()
+  await expect(page.getByText('Copied Mermaid').first()).toBeVisible()
+  const content = await page.evaluate(() => navigator.clipboard.readText())
   expect(content).toContain('flowchart LR')
   expect(content).toContain(elements[0].name)
   expect(content).toContain(elements[1].name)
