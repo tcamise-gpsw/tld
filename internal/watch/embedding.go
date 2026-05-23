@@ -435,8 +435,18 @@ func (p *OllamaProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]
 		return []Vector{}, nil
 	}
 	texts := make([]string, 0, len(inputs))
+	isJina := strings.Contains(p.Model, "jina-code-embeddings")
 	for _, input := range inputs {
-		texts = append(texts, input.Text)
+		text := input.Text
+		if isJina {
+			switch input.OwnerType {
+			case "query", "":
+				text = "Find the most relevant code snippet given the following query:\n" + text
+			case "symbol":
+				text = "Candidate code snippet:\n" + text
+			}
+		}
+		texts = append(texts, text)
 	}
 	vectors, err := p.embedTexts(ctx, texts)
 	if err != nil {
@@ -452,11 +462,11 @@ func (p *OllamaProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]
 }
 
 func (p *OllamaProvider) HealthCheck(ctx context.Context) (HealthResult, error) {
-	texts := []string{
-		"Why is the sky blue?",
-		"What causes the sky to look blue during the day?",
+	inputs := []EmbeddingInput{
+		{OwnerType: "query", Text: "Why is the sky blue?"},
+		{OwnerType: "query", Text: "What causes the sky to look blue during the day?"},
 	}
-	vectors, err := p.embedTexts(ctx, texts)
+	vectors, err := p.Embed(ctx, inputs)
 	if err != nil {
 		return HealthResult{}, err
 	}

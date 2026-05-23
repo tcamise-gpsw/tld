@@ -192,7 +192,7 @@ func embedQuery(ctx context.Context, model Model, query, runtimePath string) (wa
 	if closer, ok := provider.(watch.ClosableProvider); ok {
 		defer func() { _ = closer.Close() }()
 	}
-	vectors, err := provider.Embed(ctx, []watch.EmbeddingInput{{Text: query}})
+	vectors, err := provider.Embed(ctx, []watch.EmbeddingInput{{OwnerType: "query", Text: query}})
 	if err != nil {
 		return nil, err
 	}
