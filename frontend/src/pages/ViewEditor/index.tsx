@@ -1863,7 +1863,8 @@ function ViewEditorInner({
       )
     }
     setView(updated)
-  }, [pushViewEditAction, setView, view])
+    void refreshElements()
+  }, [pushViewEditAction, setView, view, refreshElements])
 
   // ── Library helpers ────────────────────────────────────────────────────────
   // Assigned below; referenced by memoized callbacks (e.g. ElementLibrary onCreateNew).

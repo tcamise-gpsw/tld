@@ -16,6 +16,8 @@ import (
 
 	assets "github.com/mertcikla/tld/v2"
 	"github.com/mertcikla/tld/v2/cmd/version"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 	"github.com/mertcikla/tld/v2/internal/localserver"
 	"github.com/mertcikla/tld/v2/internal/store"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -55,6 +57,14 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 			ws, err := workspace.Load(*wdir)
 			if err != nil {
 				return fmt.Errorf("load workspace: %w", err)
+			}
+			scopes, err := cmdutil.ResolveAnalyzeRepoScopes(ws, absPath)
+			if err != nil {
+				return err
+			}
+			var rules *ignore.Rules
+			if len(scopes) > 0 {
+				rules = ws.IgnoreRulesForRepository(scopes[0].Name)
 			}
 			cfg, err := workspace.LoadGlobalConfig()
 			if err != nil {
@@ -144,7 +154,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 					term.Label(cmd.OutOrStdout(), 20, "Mode", "dry-run")
 				}
 			}
-			once, err := watchpkg.NewRunner(watchStore).RunOnce(cmd.Context(), watchpkg.OneShotOptions{Path: absPath, Rescan: rescan, Embedding: embeddingCfg, Settings: settings, DataDir: dataDir, Progress: progress, Logger: logger, ConfirmAfterScan: confirmAnalyzeLSPProceed(cmd)})
+			once, err := watchpkg.NewRunner(watchStore).RunOnce(cmd.Context(), watchpkg.OneShotOptions{Path: absPath, Rescan: rescan, Embedding: embeddingCfg, Settings: settings, DataDir: dataDir, Progress: progress, Logger: logger, ConfirmAfterScan: confirmAnalyzeLSPProceed(cmd), Rules: rules})
 			if err != nil {
 				return fail("analyze.watch_pipeline.failed", err)
 			}

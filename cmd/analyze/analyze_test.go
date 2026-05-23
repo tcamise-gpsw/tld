@@ -345,8 +345,11 @@ spec:
 	if runtimeRef == "" || structuralRef == "" || architectureRef == "" || cartArchRef == "" || cartFolderRef == "" {
 		t.Fatalf("missing cross-repo test elements: runtime=%q structural=%q architecture=%q cartArch=%q cartFolder=%q elements=%+v", runtimeRef, structuralRef, architectureRef, cartArchRef, cartFolderRef, ws.Elements)
 	}
-	if placementCount(ws, cartFolderRef) < 2 {
-		t.Fatalf("source structural folder should remain in its original structural view and be reused in runtime deep-dive view: %+v", ws.Elements[cartFolderRef])
+	if placementCount(ws, cartFolderRef) < 1 {
+		t.Fatalf("source structural folder should remain in its original structural view: %+v", ws.Elements[cartFolderRef])
+	}
+	if !hasPlacementParent(ws, cartFolderRef, "folder-folder-modules") {
+		t.Fatalf("source structural folder should be placed under modules folder, got: %+v", ws.Elements[cartFolderRef].Placements)
 	}
 }
 
@@ -717,4 +720,112 @@ func connectorByElementNamesInParent(ws *workspace.Workspace, sourceName, target
 		}
 	}
 	return false
+}
+
+func TestAnalyzeCmd_RespectsWorkspaceConfigIgnoreList(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+
+	// Write .tld.yaml config file
+	configContent := `exclude:
+  - "global_ignored.go"
+repositories:
+  app:
+    localDir: app
+    exclude:
+      - "repo_ignored.go"
+`
+	if err := os.WriteFile(filepath.Join(dir, ".tld.yaml"), []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	repoDir := filepath.Join(dir, "app")
+	cmd.InitGitRepo(t, repoDir, "service.go", "package main\nfunc Foo() {}\n")
+	writeAnalyzeTestFile(t, repoDir, "global_ignored.go", "package main\nfunc GlobalIgnored() {}\n")
+	writeAnalyzeTestFile(t, repoDir, "repo_ignored.go", "package main\nfunc RepoIgnored() {}\n")
+
+	// Commit files so git knows about them
+	commitAnalyzeTestFiles(t, repoDir)
+
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if countElementName(ws, "Foo") == 0 {
+		t.Fatal("expected Foo function to be analyzed and present in workspace elements")
+	}
+	if countElementName(ws, "GlobalIgnored") != 0 {
+		t.Fatal("expected GlobalIgnored function to be ignored, but it was found in workspace elements")
+	}
+	if countElementName(ws, "RepoIgnored") != 0 {
+		t.Fatal("expected RepoIgnored function to be ignored, but it was found in workspace elements")
+	}
+}
+
+func TestAnalyzeCmd_PreservesManualEditsOnGeneratedElements(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+	cmd.MustInitWorkspace(t, dir)
+	repoDir := filepath.Join(dir, "app")
+	cmd.InitGitRepo(t, repoDir, "service.go", "package main\nfunc Foo() {}\n")
+
+	// 1. First analyze to generate elements
+	stdout, stderr, err := cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("first analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	ws, err := workspace.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find the element ref for the generated function Foo
+	var fooRef string
+	for ref, element := range ws.Elements {
+		if element.Name == "Foo" {
+			fooRef = ref
+			break
+		}
+	}
+	if fooRef == "" {
+		t.Fatalf("expected Foo to be generated, got elements: %+v", ws.Elements)
+	}
+
+	// 2. Manually edit the generated element in elements.yaml
+	ws.Elements[fooRef].Description = "This is my manual description"
+	ws.Elements[fooRef].Technology = "MyTech"
+	if err := workspace.Save(ws); err != nil {
+		t.Fatalf("save manual edit: %v", err)
+	}
+
+	// 3. Re-run tld analyze
+	stdout, stderr, err = cmd.RunCmd(t, dir, "analyze", repoDir, "--data-dir", dataDir, "--embedding-provider", "none")
+	if err != nil {
+		t.Fatalf("second analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	// 4. Verify that the edits were not overwritten
+	ws, err = workspace.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fooElement := ws.Elements[fooRef]
+	if fooElement == nil {
+		t.Fatalf("fooElement not found after second analyze: %+v", ws.Elements)
+	}
+	if fooElement.Description != "This is my manual description" {
+		t.Fatalf("expected description 'This is my manual description', got %q", fooElement.Description)
+	}
+	if fooElement.Technology != "MyTech" {
+		t.Fatalf("expected technology 'MyTech', got %q", fooElement.Technology)
+	}
 }

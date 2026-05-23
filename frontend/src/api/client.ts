@@ -820,6 +820,25 @@ export const api = {
         },
       },
 
+      populate: {
+        getQuery: async (id: number): Promise<string> => {
+          const res = await fetch(apiUrl(`/views/${id}/populate-query`))
+          if (!res.ok) throw new Error('Failed to load populate query')
+          const json = await res.json() as { query: string }
+          return json.query
+        },
+        search: async (id: number, q: string, limit: number): Promise<Array<LibraryElement & { similarity_score: number }>> => {
+          const params = new URLSearchParams({ q, limit: String(limit) })
+          const res = await fetch(apiUrl(`/views/${id}/populate?${params}`))
+          if (!res.ok) throw new Error('Failed to run similarity search')
+          const json = await res.json() as { results: Array<Record<string, unknown> & { similarity_score: number }> }
+          return (json.results ?? []).map(r => ({
+            ...protoElementToLibrary(r),
+            similarity_score: r.similarity_score,
+          }))
+        },
+      },
+
       visibilityOverrides: {
         list: async (id: number): Promise<VisibilityOverride[]> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides`))

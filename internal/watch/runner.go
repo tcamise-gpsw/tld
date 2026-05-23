@@ -33,6 +33,7 @@ type RunnerOptions struct {
 	Events            *EventQueue
 	Ready             chan<- RunnerResult
 	ConfirmAfterScan  func(context.Context, ScanResult) error
+	Rules             *ignore.Rules
 }
 
 type RunnerResult struct {
@@ -66,6 +67,9 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 	}
 	r.Scanner.Progress = opts.Progress
 	r.Scanner.Logger = opts.Logger
+	if opts.Rules != nil {
+		r.Scanner.Rules = opts.Rules
+	}
 	if r.Representer == nil {
 		r.Representer = NewRepresenter(r.Store)
 	}
@@ -102,7 +106,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 
 	gitStatus, _ := gitStatusSnapshot(repoRoot)
 	emit(opts.Events, Event{Type: "scan.started", At: nowString(), Phase: "scan", WatcherMode: settings.Watcher, Languages: settings.Languages})
-	once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Rescan: opts.Rescan, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger, ConfirmAfterScan: opts.ConfirmAfterScan})
+	once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Rescan: opts.Rescan, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger, ConfirmAfterScan: opts.ConfirmAfterScan, Rules: r.Scanner.Rules})
 	if err != nil {
 		logError(ctx, opts.Logger, "watch.runner.initial_pipeline.failed", err, "repo_root", repoRoot)
 		return RunnerResult{}, err
@@ -405,7 +409,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			logInfo(ctx, opts.Logger, "watch.change.pipeline.started", "repository_id", repo.ID, "source_changed", sourceChanged, "changed_files", len(sourceChanges), "head", nextGit.HeadCommit)
 			emit(opts.Events, Event{Type: "scan.started", RepositoryID: repo.ID, At: nowString(), Phase: "scan", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(sourceChanges), Warnings: warnings})
 
-			once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Files: targetedFiles, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger})
+			once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Files: targetedFiles, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger, Rules: r.Scanner.Rules})
 			if err != nil {
 				logError(ctx, opts.Logger, "watch.change.pipeline.failed", err, "elapsed", logElapsed(pipelineStarted), "repository_id", repo.ID)
 				emit(opts.Events, Event{Type: "watch.error", RepositoryID: repo.ID, At: nowString(), Message: err.Error()})
