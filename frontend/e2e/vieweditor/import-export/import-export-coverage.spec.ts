@@ -4,6 +4,7 @@ import {
   createAndLoadDiagramWithNodes,
   createConnector,
   prepareStorage,
+  reactFlowPaneBox,
   uniqueName,
 } from '../../helpers/vieweditor'
 
@@ -30,7 +31,29 @@ test('exported Mermaid download contains node names and edge syntax', async ({ p
 
   expect(content).toContain(elements[0].name)
   expect(content).toContain(elements[1].name)
-  expect(content).toMatch(/obj_\d+:[A-Z]+ -- [A-Z]+:obj_\d+/)
+  expect(content).toContain('flowchart LR')
+  expect(content).toMatch(/node_\d+ -- "exports-to" --> node_\d+/)
+})
+
+test('canvas context menu exports Mermaid directly', async ({ page }) => {
+  const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 2, 'Context Export Content')
+  await createConnector(page, diagram.id, elements[0].id, elements[1].id)
+  await page.reload()
+
+  const box = await reactFlowPaneBox(page)
+  await page.mouse.click(box.x + box.width * 0.48, box.y + box.height * 0.38, { button: 'right' })
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByTestId('vieweditor-canvas-context-export-mermaid').click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toMatch(/^Context Export Content .*\.mermaid$/)
+
+  const path = await download.path()
+  if (!path) throw new Error('Expected download path')
+  const content = await readFile(path, 'utf8')
+  expect(content).toContain('flowchart LR')
+  expect(content).toContain(elements[0].name)
+  expect(content).toContain(elements[1].name)
 })
 
 test('export cancel closes the modal without downloading', async ({ page }) => {
@@ -53,7 +76,7 @@ test('import parse error keeps the import modal open', async ({ page }) => {
   await page.getByTestId('import-next').click()
 
   await expect(page.getByTestId('import-modal')).toBeVisible()
-  await expect(page.getByText(/Failed to parse|Unsupported|Invalid/i)).toBeVisible()
+  await expect(page.getByText(/Failed to parse|Unsupported|Invalid|Unable to detect/i)).toBeVisible()
 })
 
 test('import back preserves the current Mermaid text for editing', async ({ page }) => {

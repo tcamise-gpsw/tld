@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test'
 import {
   createAndLoadDiagramWithNodes,
   createConnector,
+  currentViewId,
+  nodeByName,
   prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
@@ -45,6 +47,44 @@ test('export modal changes options and downloads Mermaid output', async ({ page 
   await page.getByTestId('export-submit').click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toBe(`${filename}.mermaid`)
+})
+
+test('pasting fenced Mermaid imports into the open view', async ({ page }) => {
+  await createAndLoadDiagramWithNodes(page, 0, 'Paste Import Host')
+  const viewId = currentViewId(page)
+  const source = `Some markdown before.
+
+\`\`\`mermaid
+flowchart LR
+  PasteA[Paste API] --> PasteB[Paste DB]
+\`\`\`
+`
+
+  await page.getByTestId('vieweditor-canvas').click()
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+  }, source)
+
+  await expect(page).toHaveURL(new RegExp(`/views/${viewId}$`))
+  await expect(nodeByName(page, 'Paste API')).toBeVisible()
+  await expect(nodeByName(page, 'Paste DB')).toBeVisible()
+})
+
+test('pasting non-Mermaid text is ignored by canvas import', async ({ page }) => {
+  await createAndLoadDiagramWithNodes(page, 0, 'Paste Ignore Host')
+  const viewId = currentViewId(page)
+
+  await page.getByTestId('vieweditor-canvas').click()
+  await page.evaluate(() => {
+    const data = new DataTransfer()
+    data.setData('text/plain', 'this is not a diagram')
+    window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+  })
+
+  await expect(page).toHaveURL(new RegExp(`/views/${viewId}$`))
+  await expect(page.getByTestId('vieweditor-node')).toHaveCount(0)
 })
 
 test('import modal can parse invalid text without creating resources by canceling', async ({ page }) => {

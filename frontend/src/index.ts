@@ -184,7 +184,7 @@ export {
 export { vscodeBridge } from './lib/vscodeBridge'
 
 // ─── Importer ────────────────────────────────────────────────────────────────
-export { parseMermaid as parseMermaidToElements, type ParsedImport } from './pkg/importer/mermaid'
+export { parseMermaid as parseMermaidToElements, parseMermaidAsync as parseMermaidToElementsAsync, type ParsedImport } from './pkg/importer/mermaid'
 
 // ─── VS Code Messages ────────────────────────────────────────────────────────
 export * from './types/vscode-messages'

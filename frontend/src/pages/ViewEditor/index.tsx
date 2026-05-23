@@ -78,6 +78,7 @@ import {
 } from './hooks/useViewContextNeighbours'
 import { canonicalNodePairKey } from './pairKey'
 import type { ParsedImport } from '../../pkg/importer/mermaid'
+import { extractMermaidCode, parseMermaidAsync, serializeViewToMermaid, type MermaidDirection } from '../../pkg/importer/mermaid'
 import { vscodeBridge } from '../../lib/vscodeBridge'
 import type { ExtensionToWebviewMessage } from '../../types/vscode-messages'
 
@@ -249,6 +250,73 @@ function fadeMarker(marker: string | RFEdgeMarker | undefined, opacity: number) 
   }
 }
 
+function mermaidConnectorHandles(direction: MermaidDirection) {
+  if (direction === 'RL') return { source_handle: 'left', target_handle: 'right' }
+  if (direction === 'TB' || direction === 'TD') return { source_handle: 'bottom', target_handle: 'top' }
+  if (direction === 'BT') return { source_handle: 'top', target_handle: 'bottom' }
+  return { source_handle: 'right', target_handle: 'left' }
+}
+
+function layoutMermaidImport(parsed: ParsedImport, center: { x: number; y: number }) {
+  const refs = parsed.elements.map((element) => element.ref).filter(Boolean)
+  const refSet = new Set(refs)
+  const outgoing = new Map<string, string[]>()
+  const indegree = new Map<string, number>()
+  const rank = new Map<string, number>()
+  refs.forEach((ref) => {
+    outgoing.set(ref, [])
+    indegree.set(ref, 0)
+    rank.set(ref, 0)
+  })
+
+  parsed.connectors.forEach((connector) => {
+    const source = connector.sourceElementRef
+    const target = connector.targetElementRef
+    if (!refSet.has(source) || !refSet.has(target)) return
+    outgoing.get(source)?.push(target)
+    indegree.set(target, (indegree.get(target) ?? 0) + 1)
+  })
+
+  const queue = refs.filter((ref) => (indegree.get(ref) ?? 0) === 0)
+  let cursor = 0
+  while (cursor < queue.length) {
+    const ref = queue[cursor++]
+    for (const target of outgoing.get(ref) ?? []) {
+      rank.set(target, Math.max(rank.get(target) ?? 0, (rank.get(ref) ?? 0) + 1))
+      const nextIndegree = (indegree.get(target) ?? 0) - 1
+      indegree.set(target, nextIndegree)
+      if (nextIndegree === 0) queue.push(target)
+    }
+  }
+
+  const groups = new Map<number, string[]>()
+  refs.forEach((ref, index) => {
+    const refRank = cursor === refs.length ? (rank.get(ref) ?? 0) : Math.floor(index / 4)
+    const group = groups.get(refRank) ?? []
+    group.push(ref)
+    groups.set(refRank, group)
+  })
+
+  const horizontal = parsed.direction === 'LR' || parsed.direction === 'RL'
+  const reverse = parsed.direction === 'RL' || parsed.direction === 'BT'
+  const rankSpacing = 280
+  const itemSpacing = 150
+  const rankCount = groups.size || 1
+  const positions = new Map<string, { x: number; y: number }>()
+
+  Array.from(groups.entries()).sort(([a], [b]) => a - b).forEach(([groupRank, group]) => {
+    const rankOffset = (groupRank - (rankCount - 1) / 2) * rankSpacing * (reverse ? -1 : 1)
+    group.forEach((ref, index) => {
+      const itemOffset = (index - (group.length - 1) / 2) * itemSpacing
+      positions.set(ref, horizontal
+        ? { x: center.x + rankOffset, y: center.y + itemOffset }
+        : { x: center.x + itemOffset, y: center.y + rankOffset })
+    })
+  })
+
+  return positions
+}
+
 function areTranslateExtentsEqual(
   left: [[number, number], [number, number]] | undefined,
   right: [[number, number], [number, number]] | undefined,
@@ -398,6 +466,7 @@ function ViewEditorInner({
   useEffect(() => { localStorage.setItem('diag:explorerOpen', String(isExplorerOpen)) }, [isExplorerOpen])
   const [extrasOpen, setExtrasOpen] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  const isPasteImportingRef = useRef(false)
   const [isExporting, setIsExporting] = useState(false)
   const setViewEditorUi = useStore((state) => state.setViewEditorUi)
   const snapToGrid = useStore((state) => state.snapToGrid)
@@ -1905,6 +1974,15 @@ function ViewEditorInner({
   }, [rfNodesRef])
 
   // ── Export / Import ────────────────────────────────────────────────────────
+  const handleExportMermaidDirect = useCallback(() => {
+    const baseName = sanitizeExportFilename(viewName || 'view-export')
+    const downloadName = `${baseName}.mermaid`
+    const code = serializeViewToMermaid(viewElements, connectors)
+    triggerDownload(URL.createObjectURL(new Blob([code], { type: 'text/plain;charset=utf-8' })), downloadName)
+    setCanvasMenu(null)
+    toast({ status: 'success', title: 'Export complete', description: `Saved ${downloadName}` })
+  }, [connectors, setCanvasMenu, toast, viewElements, viewName])
+
   const handleExportView = useCallback(async (options: ExportOptions) => {
     const flowRoot = containerRef.current?.querySelector('.react-flow') as HTMLElement | null
     if (!flowRoot) { toast({ status: 'error', title: 'Export failed', description: 'Could not find the view canvas.' }); return }
@@ -1918,14 +1996,7 @@ function ViewEditorInner({
     try {
       setIsExporting(true)
       if (options.format === 'mermaid') {
-        let code = 'architecture-beta\n'
-        for (const obj of viewElements) {
-          const safeId = `obj_${obj.element_id}`
-          const shape = obj.kind === 'database' ? 'database' : obj.kind === 'person' ? 'person' : 'server'
-          code += `  service ${safeId}(${shape})[${obj.name}]\n`
-        }
-        code += '\n'
-        for (const connector of connectors) { code += `  obj_${connector.source_element_id}:R -- L:obj_${connector.target_element_id}\n` }
+        const code = serializeViewToMermaid(viewElements, connectors)
         triggerDownload(URL.createObjectURL(new Blob([code], { type: 'text/plain;charset=utf-8' })), downloadName)
       } else if (options.format === 'svg') {
         triggerDownload(await toSvg(flowRoot, { cacheBust: true, filter: filterNode }), downloadName)
@@ -1938,6 +2009,92 @@ function ViewEditorInner({
       toast({ status: 'error', title: 'Export failed', description: 'Please try again.' })
     } finally { setIsExporting(false) }
   }, [viewName, viewElements, connectors, toast])
+
+  const handlePasteMermaidImport = useCallback(async (event: ClipboardEvent) => {
+    if (!canEdit || isPasteImportingRef.current || textEditorState || addingElementAt) return
+    const target = event.target as HTMLElement | null
+    const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' ||
+      target?.tagName === 'SELECT' || target?.isContentEditable
+    if (isInput) return
+
+    const mermaidCode = extractMermaidCode(event.clipboardData?.getData('text/plain') ?? '')
+    if (!mermaidCode) return
+
+    const currentViewId = viewIdRef.current
+    if (!currentViewId) return
+
+    event.preventDefault()
+    isPasteImportingRef.current = true
+    try {
+      const parsed = await parseMermaidAsync(mermaidCode)
+      if (parsed.warnings.length > 0 || (parsed.elements.length === 0 && parsed.connectors.length === 0)) {
+        toast({ status: 'error', title: 'Mermaid import failed', description: parsed.warnings[0] ?? 'No compatible diagram content found.' })
+        return
+      }
+
+      const rect = containerRef.current?.getBoundingClientRect()
+      const center = rect
+        ? screenToFlowPositionRef.current({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+        : { x: 0, y: 0 }
+      const positions = layoutMermaidImport(parsed, center)
+      const createdByRef = new Map<string, WorkspaceElement>()
+
+      for (const element of parsed.elements) {
+        const created = await api.elements.create({
+          name: element.name,
+          kind: element.kind ?? 'system',
+          description: element.description ?? '',
+          technology: element.technology ?? '',
+          url: element.url ?? '',
+          tags: element.tags ?? [],
+        })
+        createdByRef.set(element.ref, created)
+      }
+
+      await Promise.all(parsed.elements.map((element) => {
+        const created = createdByRef.get(element.ref)
+        if (!created) return Promise.resolve()
+        const position = positions.get(element.ref) ?? center
+        return api.workspace.views.placements.add(currentViewId, created.id, position.x, position.y)
+      }))
+
+      const handles = mermaidConnectorHandles(parsed.direction)
+      await Promise.all(parsed.connectors.map((connector) => {
+        const source = createdByRef.get(connector.sourceElementRef)
+        const target = createdByRef.get(connector.targetElementRef)
+        if (!source || !target) return Promise.resolve()
+        return api.workspace.connectors.create(currentViewId, {
+          source_element_id: source.id,
+          target_element_id: target.id,
+          label: connector.label ?? '',
+          direction: connector.direction ?? 'forward',
+          style: connector.style ?? 'bezier',
+          source_handle: connector.sourceHandle ?? handles.source_handle,
+          target_handle: connector.targetHandle ?? handles.target_handle,
+        })
+      }))
+
+      clearEditHistory()
+      await refreshElements()
+      toast({
+        status: 'success',
+        title: 'Mermaid imported',
+        description: `Created ${parsed.elements.length} elements and ${parsed.connectors.length} connectors.`,
+        duration: 5000,
+        isClosable: true,
+      })
+    } catch (err) {
+      await refreshElements()
+      toast({ status: 'error', title: 'Mermaid import failed', description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      isPasteImportingRef.current = false
+    }
+  }, [addingElementAt, canEdit, clearEditHistory, refreshElements, textEditorState, toast, viewIdRef])
+
+  useEffect(() => {
+    window.addEventListener('paste', handlePasteMermaidImport)
+    return () => window.removeEventListener('paste', handlePasteMermaidImport)
+  }, [handlePasteMermaidImport])
 
   const handleImportView = useCallback(async (parsed: ParsedImport) => {
     const currentViewId = viewIdRef.current
@@ -2261,6 +2418,7 @@ function ViewEditorInner({
                 if (rect) showAddingElementAt(x + rect.left, y + rect.top)
                 setCanvasMenu(null)
               }}
+              onExportMermaid={handleExportMermaidDirect}
             />
 
             {/* Inline element adder */}
