@@ -133,6 +133,32 @@ func (s *Store) AddPlacement(ctx context.Context, viewID, elementID int64, x, y 
 	if err := row.Scan(&item.ID, &item.ViewID, &item.ElementID, &item.PositionX, &item.PositionY); err != nil {
 		return ElementPlacement{}, err
 	}
+
+	// Connector enrichment: Auto-include related connectors when placing an element
+	// if the opposite endpoint is already in the target view.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle
+		FROM connectors
+		WHERE (
+		  (source_element_id = ? AND target_element_id IN (SELECT element_id FROM placements WHERE view_id = ?))
+		  OR
+		  (target_element_id = ? AND source_element_id IN (SELECT element_id FROM placements WHERE view_id = ?))
+		) AND view_id != ?`, elementID, viewID, elementID, viewID, viewID)
+	if err == nil {
+		defer func() { _ = rows.Close() }()
+		var connsToInsert []Connector
+		for rows.Next() {
+			var c Connector
+			c.ViewID = viewID
+			if err := rows.Scan(&c.SourceElementID, &c.TargetElementID, &c.Label, &c.Description, &c.Relationship, &c.Direction, &c.Style, &c.URL, &c.SourceHandle, &c.TargetHandle); err == nil {
+				connsToInsert = append(connsToInsert, c)
+			}
+		}
+		for _, c := range connsToInsert {
+			_, _ = s.CreateConnector(ctx, c)
+		}
+	}
+
 	return item, nil
 }
 

@@ -41,6 +41,35 @@ func (s *Store) AllConnectors(ctx context.Context) ([]Connector, error) {
 }
 
 func (s *Store) CreateConnector(ctx context.Context, input Connector) (Connector, error) {
+	var existingID int64
+	var labelVal, relVal string
+	if input.Label != nil {
+		labelVal = *input.Label
+	}
+	if input.Relationship != nil {
+		relVal = *input.Relationship
+	}
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM connectors
+		WHERE view_id = ?
+		  AND (
+		    (source_element_id = ? AND target_element_id = ?)
+		    OR
+		    (source_element_id = ? AND target_element_id = ?)
+		  )
+		  AND COALESCE(label, '') = ?
+		  AND COALESCE(relationship, '') = ?
+		LIMIT 1`,
+		input.ViewID,
+		input.SourceElementID, input.TargetElementID,
+		input.TargetElementID, input.SourceElementID,
+		labelVal,
+		relVal,
+	).Scan(&existingID)
+	if err == nil {
+		return s.ConnectorByID(ctx, existingID)
+	}
+
 	now := nowString()
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO connectors(view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at)
