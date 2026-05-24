@@ -31,9 +31,9 @@ export interface InventoryRow {
 export interface InventoryFilters {
   type: InventoryType
   query: string
-  tag: string
+  tags: string[]
   kind: string
-  quality: string
+  qualities: string[]
 }
 
 export function flattenInventoryViews(views: ViewTreeNode[]): ViewTreeNode[] {
@@ -198,9 +198,9 @@ export function filterInventoryRows(rows: InventoryRow[], filters: InventoryFilt
   return rows.filter((row) => {
     if (filters.type !== 'all' && `${row.objectType}s` !== filters.type) return false
     if (query && !row.searchableText.includes(query)) return false
-    if (filters.tag && !row.tags.includes(filters.tag)) return false
+    if (filters.tags.length > 0 && !filters.tags.some((tag) => row.tags.includes(tag))) return false
     if (filters.kind && row.typeLabel !== filters.kind) return false
-    if (filters.quality && !row.qualityFlags.includes(filters.quality)) return false
+    if (filters.qualities.length > 0 && !filters.qualities.some((q) => row.qualityFlags.includes(q))) return false
     return true
   })
 }
