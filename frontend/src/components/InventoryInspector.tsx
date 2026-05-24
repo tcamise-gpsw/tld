@@ -291,14 +291,13 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
           left={4}
           fontSize="xs"
           fontWeight="700"
-          color="white"
           letterSpacing="0.02em"
           textTransform="uppercase"
         >
           Inspect
         </Text>
 
-        <Text fontSize="xs" color="whiteAlpha.800" fontWeight="medium" noOfLines={1} maxW="calc(100% - 160px)" textAlign="center">
+        <Text fontSize="xs" color="var(--accent)" fontWeight="700" noOfLines={1} maxW="calc(100% - 160px)" textAlign="center">
           {isSelected ? selectedRow.name : ''}
         </Text>
 
