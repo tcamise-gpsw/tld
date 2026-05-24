@@ -1,4 +1,3 @@
-import { Box } from '@chakra-ui/react'
 import { motion } from 'framer-motion'
 import { ElementBody } from '../NodeBody'
 import { ElementContainer } from '../NodeContainer'
@@ -8,7 +7,6 @@ interface RelationshipCardProps {
   type?: string
   technology?: string
   borderColor?: string
-  accentHex?: string
   onClick?: () => void
   compactLevel?: number
   testId?: string
@@ -21,7 +19,6 @@ export function RelationshipCard({
   type = '',
   technology = '',
   borderColor = 'whiteAlpha.200',
-  accentHex = '',
   onClick,
   compactLevel = 0,
   testId = 'dependencies-neighbour-card',
@@ -82,17 +79,6 @@ export function RelationshipCard({
         }
         position="relative"
       >
-        {accentHex && (
-          <Box
-            w="3px"
-            position="absolute"
-            left={0}
-            top={0}
-            bottom={0}
-            borderRadius="l"
-            style={{ background: accentHex, opacity: isSelected ? 1 : 0.6 }}
-          />
-        )}
         <ElementBody
           name={truncatedName}
           type={showType ? type : ''}
@@ -100,7 +86,7 @@ export function RelationshipCard({
           nameSize={nameSize}
           align="flex-start"
           p={cardPadding}
-          pl={accentHex ? `calc(${cardPadding}px + 4px)` : cardPadding}
+          pl={cardPadding}
         />
       </ElementContainer>
     </motion.div>

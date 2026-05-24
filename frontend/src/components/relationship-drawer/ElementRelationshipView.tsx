@@ -4,7 +4,6 @@ import { TYPE_COLORS } from '../../types'
 import type { NeighbourNode } from './types'
 import { chunkNodes, toCompactLevel } from './utils'
 import { RelationshipCard } from './RelationshipCard'
-import { TYPE_HEX } from './constants'
 import { ConnectionIndicator } from './ConnectionIndicator'
 
 interface ElementRelationshipViewProps {
@@ -58,7 +57,6 @@ export function ElementRelationshipView({
                     type={node.element.kind || ''}
                     technology={node.element.technology || ''}
                     borderColor={TYPE_COLORS[node.element.kind || ''] || 'gray'}
-                    accentHex={TYPE_HEX[node.element.kind || '']}
                     compactLevel={maxCompactLevel}
                     onClick={() => onSelectRow(`element:${node.element.id}`)}
                   />
@@ -83,7 +81,6 @@ export function ElementRelationshipView({
                       type={node.element.kind || ''}
                       technology={node.element.technology || ''}
                       borderColor={TYPE_COLORS[node.element.kind || ''] || 'gray'}
-                      accentHex={TYPE_HEX[node.element.kind || '']}
                       compactLevel={leftCompactLevel}
                       onClick={() => onSelectRow(`element:${node.element.id}`)}
                     />
@@ -102,7 +99,6 @@ export function ElementRelationshipView({
             type={selectedElement?.kind || ''}
             technology={selectedElement?.technology || ''}
             borderColor={accent}
-            accentHex={TYPE_HEX[selectedElement?.kind || '']}
             shadow={cardShadow}
             compactLevel={0}
           />
@@ -121,7 +117,6 @@ export function ElementRelationshipView({
                       type={node.element.kind || ''}
                       technology={node.element.technology || ''}
                       borderColor={TYPE_COLORS[node.element.kind || ''] || 'gray'}
-                      accentHex={TYPE_HEX[node.element.kind || '']}
                       compactLevel={rightCompactLevel}
                       onClick={() => onSelectRow(`element:${node.element.id}`)}
                     />
@@ -146,7 +141,6 @@ export function ElementRelationshipView({
                     type={node.element.kind || ''}
                     technology={node.element.technology || ''}
                     borderColor={TYPE_COLORS[node.element.kind || ''] || 'gray'}
-                    accentHex={TYPE_HEX[node.element.kind || '']}
                     compactLevel={maxCompactLevel}
                     onClick={() => onSelectRow(`element:${node.element.id}`)}
                   />
