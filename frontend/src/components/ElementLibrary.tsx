@@ -111,6 +111,7 @@ function ElementLibrary({
   const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
 
   const isFetching = useRef(false)
+  const searchIdRef = useRef(0)
   const searchRef = useRef(search)
   const fetchedSearchRef = useRef(search)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -125,12 +126,17 @@ function ElementLibrary({
   }, [deletedElementIds])
 
   const fetchElements = useCallback(async (offset: number, currentSearch: string, isInitial = false) => {
-    if (isFetching.current) return
+    if (!isInitial && isFetching.current) return
+    
+    const mySearchId = ++searchIdRef.current
     isFetching.current = true
     setLoading(true)
     try {
       const limit = 20
       const newElements = await api.elements.list({ limit, offset, search: currentSearch })
+      
+      if (mySearchId !== searchIdRef.current) return
+
       if (isInitial) {
         setElements(mergeUniqueElements([], newElements))
       } else {
@@ -138,11 +144,15 @@ function ElementLibrary({
       }
       setHasMore(newElements.length === limit)
     } catch (err) {
-      console.error('Failed to fetch elements:', err)
-      setHasMore(false)
+      if (mySearchId === searchIdRef.current) {
+        console.error('Failed to fetch elements:', err)
+        setHasMore(false)
+      }
     } finally {
-      isFetching.current = false
-      setLoading(false)
+      if (mySearchId === searchIdRef.current) {
+        isFetching.current = false
+        setLoading(false)
+      }
     }
   }, [])
 
