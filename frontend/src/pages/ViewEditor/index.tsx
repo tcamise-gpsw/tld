@@ -617,6 +617,8 @@ function ViewEditorInner({
   const rfReadyRef = useRef(false)
   const fittedContextForViewRef = useRef<number | null>(null)
   const interactionSourceIdRef = useRef<number | null>(null)
+  const multiConnectionSourceIdsRef = useRef<number[] | null>(null)
+  const [deletedLibraryElementIds, setDeletedLibraryElementIds] = useState<number[]>([])
 
   const nodeTypesMemo = useMemo(() => nodeTypes, [])
   const edgeTypesMemo = useMemo(() => edgeTypes, [])
@@ -725,6 +727,11 @@ function ViewEditorInner({
     handleElementDeleted, handleElementPermanentlyDeleted, handleElementSaved: applyElementSaved,
   } = data
   refreshElementsRef.current = refreshElements
+
+  const handleElementPermanentlyDeletedEverywhere = useCallback((elementId: number) => {
+    handleElementPermanentlyDeleted(elementId)
+    setDeletedLibraryElementIds((prev) => prev.includes(elementId) ? prev : [...prev, elementId])
+  }, [handleElementPermanentlyDeleted])
 
   const { hasSignificantOverlaps, dismiss: dismissOverlapSuggestion } = useOverlapDetection(rfNodes, viewId)
   const selectedCanvasElementIds = useMemo(() => selectedElementIds(rfNodes), [rfNodes])
@@ -1366,6 +1373,7 @@ function ViewEditorInner({
     navigateRef,
     containerRef,
     interactionSourceIdRef,
+    multiConnectionSourceIdsRef,
     hoveredZoomRef, hoverPanLockedUntilRef,
     setViewElements, setConnectors,
     setRfNodes, setRfEdges,
@@ -1375,25 +1383,31 @@ function ViewEditorInner({
     stableOnConnectTo: async (targetElementId: number) => {
       // Inline this is the real implementation, also stored in stableOnConnectToRef
       const sourceId = interactionSourceIdRef.current
+      const sourceIds = Array.from(new Set(
+        multiConnectionSourceIdsRef.current?.length ? multiConnectionSourceIdsRef.current : sourceId !== null ? [sourceId] : [],
+      )).filter((id) => id !== targetElementId)
       const cid = viewIdRef.current
-      if (sourceId === null || cid === null) return
+      if (sourceIds.length === 0 || cid === null) return
       interactionSourceIdRef.current = null
+      multiConnectionSourceIdsRef.current = null
       const interactionNodes = interactionNodesRef.current.length > 0 ? interactionNodesRef.current : rfNodesRef.current
-      const sourceNode = interactionNodes.find((n) => n.id === String(sourceId))
       const targetNode = interactionNodes.find((n) => n.id === String(targetElementId))
-      let finalSourceHandle = 'right'; let finalTargetHandle = 'left'
-      if (sourceNode && targetNode) {
-        const h = findClosestHandles(sourceNode, targetNode)
-        finalSourceHandle = h.sourceHandle; finalTargetHandle = h.targetHandle
-      }
       try {
-        const newConnector = await api.workspace.connectors.create(cid, {
-          source_element_id: sourceId, target_element_id: targetElementId,
-          source_handle: finalSourceHandle, target_handle: finalTargetHandle, direction: 'forward',
-        })
-        const connector = connectorToConnector(newConnector)
-        upsertConnectorGraphSnapshot(connector)
-        upsertStoreConnector(connector)
+        for (const nextSourceId of sourceIds) {
+          const sourceNode = interactionNodes.find((n) => n.id === String(nextSourceId))
+          let finalSourceHandle = 'right'; let finalTargetHandle = 'left'
+          if (sourceNode && targetNode) {
+            const h = findClosestHandles(sourceNode, targetNode)
+            finalSourceHandle = h.sourceHandle; finalTargetHandle = h.targetHandle
+          }
+          const newConnector = await api.workspace.connectors.create(cid, {
+            source_element_id: nextSourceId, target_element_id: targetElementId,
+            source_handle: finalSourceHandle, target_handle: finalTargetHandle, direction: 'forward',
+          })
+          const connector = connectorToConnector(newConnector)
+          upsertConnectorGraphSnapshot(connector)
+          upsertStoreConnector(connector)
+        }
         handleUnsupportedMutation()
       } catch { /* intentionally empty */ }
     },
@@ -1409,7 +1423,7 @@ function ViewEditorInner({
     setSelectedProxyConnectorDetails,
     openProxyConnectorPanel: useCallback(() => openProxyConnectorPanelRef.current(), []),
     closeProxyConnectorPanel: useCallback(() => closeProxyConnectorPanelRef.current(), []),
-    handleElementDeleted, handleElementPermanentlyDeleted,
+    handleElementDeleted, handleElementPermanentlyDeleted: handleElementPermanentlyDeletedEverywhere,
     handleConnectorDeleted: useCallback((edgeId: number, ownerViewId?: number) => {
       const vid = ownerViewId ?? viewId
       if (vid != null) removeConnectorGraphSnapshot(vid, edgeId)
@@ -2555,6 +2569,7 @@ function ViewEditorInner({
           onTapAdd={canEdit ? handleTapAdd : undefined}
           onFindElement={handleFindElement}
           onTouchDrop={canEdit ? handleTouchDrop : undefined}
+          deletedElementIds={deletedLibraryElementIds}
           noFocusLock={!!addingElementAt || !!textEditorState}
         />
 
@@ -2567,7 +2582,7 @@ function ViewEditorInner({
             const placement = viewElements.find((item) => item.element_id === elementId)
             if (placement) pushPlacementRemoveAction(placement)
             handleElementDeleted(elementId)
-          }} onPermanentDelete={handleElementPermanentlyDeleted}
+          }} onPermanentDelete={handleElementPermanentlyDeletedEverywhere}
           visibilityOverrideDelta={overrideDeltaFor('element', selectedElement?.id)}
           onPromoteVisibility={(id) => handleVisibilityOverride('element', id, 'promote')}
           onDemoteVisibility={(id) => handleVisibilityOverride('element', id, 'demote')}
