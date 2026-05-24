@@ -293,6 +293,9 @@ E--No-->C
     expect(extractMermaidCode('architecture-beta\n  service a(server)[A]')).toBe('architecture-beta\n  service a(server)[A]')
     expect(extractMermaidCode('Before\n\n```mermaid\nflowchart TB\n  A --> B\n```\nAfter')).toBe('flowchart TB\n  A --> B')
     expect(extractMermaidCode('Before\n\n```mmd\nflowchart LR\n  A --> B\n```')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('```mermaid   \nflowchart LR\n  A --> B\n```')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('```mermaid\r\nflowchart LR\n  A --> B\r\n```')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('```mmd' + '\n '.repeat(5000))).toBeNull()
     expect(extractMermaidCode('not a diagram')).toBeNull()
   })
 
