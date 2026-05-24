@@ -242,7 +242,7 @@ function convertArchitectureBetaSource(result: ParsedImport, source: string) {
       return
     }
 
-    const edgeMatch = line.match(/^([A-Za-z_][\w.-]*(?:\{group\})?):([TBLR])\s*(<)?--(>)?\s*([TBLR]):([A-Za-z_][\w.-]*(?:\{group\})?)(?:\s*:\s*(.+))?$/i)
+    const edgeMatch = line.match(/^([A-Za-z_][\w.-]*(?:\{group\})?):([TBLR])\s*(<)?--(>)?\s*([TBLR]):([A-Za-z_][\w.-]*(?:\{group\})?)(?:\s*:(.*))?$/i)
     if (edgeMatch) {
       const [, rawSource, sourceSide, leftArrow = '', rightArrow = '', targetSide, rawTarget, label = ''] = edgeMatch
       const sourceRef = stripArchitectureGroupModifier(rawSource)
