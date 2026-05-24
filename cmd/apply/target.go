@@ -117,7 +117,7 @@ func (r localRunner) UpdateViewName(ctx context.Context, viewID int32, name stri
 	if err != nil {
 		return nil, err
 	}
-	return adapter.UpdateView(ctx, viewID, uuid.Nil, name, existing.LevelLabel)
+	return adapter.UpdateView(ctx, viewID, uuid.Nil, name, existing.Description, existing.LevelLabel, nil)
 }
 
 func (r localRunner) SupportsDryRun() bool { return false }

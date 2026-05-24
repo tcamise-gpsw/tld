@@ -22,9 +22,9 @@ test('home redirects to the first available root diagram', async ({ page }) => {
 test('top navigation opens core pages and marks route changes', async ({ page }) => {
   await createDiagram(page, uniqueName('Top Nav Diagram'))
 
-  await page.getByTestId('topnav-links').click()
-  await expect(page).toHaveURL(/\/dependencies$/)
-  await expect(page.getByTestId('dependencies-page')).toBeVisible()
+  await page.getByTestId('topnav-inventory').click()
+  await expect(page).toHaveURL(/\/inventory$/)
+  await expect(page.getByTestId('inventory-page')).toBeVisible()
 
   await page.getByTestId('topnav-diagrams').click()
   await expect(page).toHaveURL(/\/views(\?.*)?$/)
@@ -55,8 +55,8 @@ test('mobile bottom navigation reaches app pages', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 760 })
   await createDiagram(page, uniqueName('Mobile Nav'))
 
-  await page.getByTestId('mobile-topnav-links').dispatchEvent('click')
-  await expect(page).toHaveURL(/\/dependencies$/)
+  await page.getByTestId('mobile-topnav-inventory').dispatchEvent('click')
+  await expect(page).toHaveURL(/\/inventory$/)
 
   await page.getByTestId('mobile-topnav-diagrams').dispatchEvent('click')
   await expect(page).toHaveURL(/\/views(\?.*)?$/)

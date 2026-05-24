@@ -6,7 +6,6 @@ export const onboardingStorage = {
   explorePage: 'explore_page_tutorial_v1_core',
   viewGrid: 'viewgrid_tutorial_v2_core',
   shown: 'onboarding_shown',
-  dependencies: 'dependencies_tutorial_v1_core',
   sharedZoom: 'shared_zoom_onboarding_dismissed',
 }
 
@@ -17,7 +16,6 @@ export async function prepareStorage(page: Page) {
     localStorage.setItem(keys.explorePage, '1')
     localStorage.setItem(keys.viewGrid, '1')
     localStorage.setItem(keys.shown, '1')
-    localStorage.setItem(keys.dependencies, '1')
     localStorage.setItem(keys.sharedZoom, 'true')
     localStorage.setItem('diag:libraryOpen', 'true')
     localStorage.setItem('diag:explorerOpen', 'true')
@@ -256,7 +254,7 @@ export async function getView(page: Page, viewId: number) {
   return json.view as { id: number; name: string; levelLabel?: string; level_label?: string; parentViewId?: number | null; parent_view_id?: number | null }
 }
 
-export async function updateView(page: Page, viewId: number, data: { name?: string; levelLabel?: string }) {
+export async function updateView(page: Page, viewId: number, data: { name?: string; description?: string; levelLabel?: string; tags?: string[] }) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/UpdateView', {
     data: { viewId, ...data },
   })
@@ -309,6 +307,7 @@ export async function createConnector(page: Page, viewId: number, sourceElementI
   direction?: string
   style?: string
   url?: string
+  tags?: string[]
 } = {}) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/CreateConnector', {
     data: {
@@ -321,6 +320,7 @@ export async function createConnector(page: Page, viewId: number, sourceElementI
       description: data.description ?? '',
       relationship: data.relationship ?? '',
       url: data.url ?? '',
+      tags: data.tags ?? [],
     },
   })
   expect(response.ok()).toBeTruthy()
@@ -416,7 +416,7 @@ export async function createAndLoadDiagramWithNodes(page: Page, count: number, p
   return { diagram, elements }
 }
 
-export async function createDependencyGraph(page: Page, prefix = 'Dependency') {
+export async function createConnectorGraph(page: Page, prefix = 'Connector') {
   const diagram = await createApiView(page, uniqueName(`${prefix} Diagram`))
   const center = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Center`), kind: 'service', technology: 'go' }, 480, 260)
   const incoming = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Incoming`), kind: 'api', technology: 'typescript' }, 180, 260)

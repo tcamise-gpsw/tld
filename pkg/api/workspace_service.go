@@ -44,6 +44,27 @@ func intToInt32(n int) int32 {
 	}
 }
 
+func paginateSlice[T any](items []T, limit, offset int32) []T {
+	if len(items) == 0 {
+		return items
+	}
+	start := int(offset)
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(items) {
+		return items[:0]
+	}
+	end := len(items)
+	if limit > 0 {
+		limitEnd := start + int(limit)
+		if limitEnd < end {
+			end = limitEnd
+		}
+	}
+	return items[start:end]
+}
+
 // ─── CLI RPCs ─────────────────────────────────────────────────────────────────
 
 func (s *WorkspaceService) CreateView(
@@ -553,8 +574,16 @@ func (s *WorkspaceService) UpdateView(
 		}
 		label = existing.LevelLabel
 	}
+	description := req.Msg.Description
+	if description == nil {
+		existing, err := s.Store.GetView(ctx, viewID, workspaceID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("view not found"))
+		}
+		description = existing.Description
+	}
 
-	v, err := s.Store.UpdateView(ctx, viewID, workspaceID, name, label)
+	v, err := s.Store.UpdateView(ctx, viewID, workspaceID, name, description, label, req.Msg.Tags)
 	if err != nil {
 		return nil, storeErr("update view", err)
 	}
@@ -914,6 +943,10 @@ func (s *WorkspaceService) ListConnectors(
 	if err != nil {
 		return nil, storeErr("list connectors", err)
 	}
+	connectors = paginateSlice(connectors, req.Msg.GetLimit(), req.Msg.GetOffset())
+	if connectors == nil {
+		connectors = []*diagv1.Connector{}
+	}
 	return connect.NewResponse(&diagv1.ListConnectorsResponse{Connectors: connectors}), nil
 }
 
@@ -1049,6 +1082,7 @@ func (s *WorkspaceService) UpdateConnector(
 		Label: label, Description: description,
 		Relationship: relationship, Direction: direction, Style: style,
 		URL: url, SourceHandle: sourceHandle, TargetHandle: targetHandle,
+		Tags: m.Tags,
 	})
 	if err != nil {
 		return nil, storeErr("update connector", err)

@@ -292,6 +292,7 @@ interface ProtoDiagram {
   created_at?: string
   updatedAt?: string
   updated_at?: string
+  tags?: string[]
   parent_view_id?: number | null
   parentViewId?: number | null
   children?: ProtoDiagram[]
@@ -306,6 +307,7 @@ function mapDiagram(d: ProtoDiagram): ViewTreeNode {
     name: d.name,
     description: d.description ?? null,
     level_label: d.levelLabel ?? d.level_label ?? null,
+    tags: (d.tags ?? []) as string[],
     level: d.level ?? 0,
     depth: d.depth ?? 0,
     created_at: d.createdAt ?? d.created_at ?? '',
@@ -356,7 +358,8 @@ function diagramToView(d: ProtoDiagram): View {
       : null,
     name: d.name,
     label: d.levelLabel ?? d.level_label ?? null,
-    is_root: (d.parent_view_id ?? null) === null,
+    tags: (d.tags ?? []) as string[],
+    is_root: (d.parentViewId ?? d.parent_view_id ?? null) === null,
     created_at: d.createdAt ?? d.created_at ?? new Date().toISOString(),
     updated_at: d.updatedAt ?? d.updated_at ?? new Date().toISOString(),
   }
@@ -444,6 +447,7 @@ function protoConnector(e: Record<string, unknown>): Connector {
     url: (e.url ?? null) as string | null,
     source_handle: (e.source_handle ?? e.sourceHandle ?? null) as string | null,
     target_handle: (e.target_handle ?? e.targetHandle ?? null) as string | null,
+    tags: (e.tags ?? []) as string[],
     created_at: String(e.created_at ?? e.createdAt ?? new Date().toISOString()),
     updated_at: String(e.updated_at ?? e.updatedAt ?? new Date().toISOString()),
   }
@@ -463,6 +467,7 @@ function protoDependencyConnector(e: Record<string, unknown>): DependencyConnect
     url: (e.url ?? null) as string | null,
     source_handle: (e.source_handle ?? e.sourceHandle ?? null) as string | null,
     target_handle: (e.target_handle ?? e.targetHandle ?? null) as string | null,
+    tags: (e.tags ?? []) as string[],
     created_at: String(e.created_at ?? e.createdAt ?? ''),
     updated_at: String(e.updated_at ?? e.updatedAt ?? ''),
   }
@@ -674,6 +679,7 @@ export const api = {
             owner_element_id: v.owner_element_id != null ? Number(v.owner_element_id) : null,
             name: String(v.name ?? ''),
             label: (v.label ?? null) as string | null,
+            tags: (v.tags ?? []) as string[],
             is_root: Boolean(v.is_root ?? false),
             created_at: String(v.created_at ?? new Date().toISOString()),
             updated_at: String(v.updated_at ?? new Date().toISOString()),
@@ -784,9 +790,9 @@ export const api = {
           return diagramToView(json.view)
         }),
 
-      update: (id: number, data: { name: string; label?: string }): Promise<View> =>
+      update: (id: number, data: { name: string; description?: string; label?: string; tags?: string[] }): Promise<View> =>
         rpc(async () => {
-          const res = await workspaceClient.updateView({ viewId: id, name: data.name, levelLabel: data.label ?? undefined })
+          const res = await workspaceClient.updateView({ viewId: id, name: data.name, description: data.description ?? undefined, levelLabel: data.label ?? undefined, tags: data.tags })
           const json = j<{ view: ProtoDiagram }>(UpdateViewResponseSchema, res)
           return diagramToView(json.view)
         }),
@@ -925,9 +931,13 @@ export const api = {
     },
 
     connectors: {
-      list: (diagramId: number): Promise<Connector[]> =>
+      list: (diagramId: number, params?: { limit?: number; offset?: number }): Promise<Connector[]> =>
         rpc(async () => {
-          const res = await workspaceClient.listConnectors({ viewId: diagramId })
+          const res = await workspaceClient.listConnectors({
+            viewId: diagramId,
+            limit: params?.limit ?? 0,
+            offset: params?.offset ?? 0,
+          })
           const json = j<{ connectors: Record<string, unknown>[] }>(ListConnectorsResponseSchema, res)
           return (json.connectors ?? []).map(protoConnector)
         }),
@@ -945,6 +955,7 @@ export const api = {
           url?: string
           source_handle?: string | null
           target_handle?: string | null
+          tags?: string[]
         },
       ): Promise<Connector> =>
         rpc(async () => {
@@ -960,13 +971,14 @@ export const api = {
             url: data.url ?? undefined,
             sourceHandle: data.source_handle ?? undefined,
             targetHandle: data.target_handle ?? undefined,
+            tags: data.tags,
           })
           const json = j<{ connector: Record<string, unknown> }>(CreateConnectorResponseSchema, res)
           return protoConnector(json.connector ?? {})
         }),
 
       update: (
-        _diagramId: number,
+        diagramId: number,
         connectorId: number,
         data: {
           source_element_id?: number
@@ -979,10 +991,12 @@ export const api = {
           url?: string
           source_handle?: string | null
           target_handle?: string | null
+          tags?: string[]
         },
       ): Promise<Connector> =>
         rpc(async () => {
           const res = await workspaceClient.updateConnector({
+            viewId: diagramId,
             connectorId,
             sourceElementId: data.source_element_id ?? undefined,
             targetElementId: data.target_element_id ?? undefined,
@@ -994,6 +1008,7 @@ export const api = {
             url: data.url ?? undefined,
             sourceHandle: data.source_handle ?? undefined,
             targetHandle: data.target_handle ?? undefined,
+            tags: data.tags,
           })
           const json = j<{ connector: Record<string, unknown> }>(UpdateConnectorResponseSchema, res)
           return protoConnector(json.connector ?? {})
@@ -1020,7 +1035,11 @@ export const api = {
                 totalCount: res.pagination ? Number(res.pagination.totalCount) : undefined,
               }
             }),
-            workspaceClient.listConnectors({ viewId: 0 })
+            workspaceClient.listConnectors({
+              viewId: 0,
+              limit: params.limit ?? 0,
+              offset: params.offset ?? 0,
+            })
               .then((res) => {
                 const connectorJson = j<{ connectors: Record<string, unknown>[] }>(ListConnectorsResponseSchema, res)
                 return (connectorJson.connectors ?? []).map(protoDependencyConnector)

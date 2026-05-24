@@ -7,7 +7,7 @@ type ViewStore interface {
 	Views(ctx context.Context) ([]ViewSummary, error)
 	ViewByID(ctx context.Context, id int64) (ViewTreeNode, error)
 	CreateView(ctx context.Context, name string, levelLabel *string, ownerElementID *int64) (ViewSummary, error)
-	UpdateView(ctx context.Context, id int64, name *string, levelLabel *string) (ViewSummary, error)
+	UpdateView(ctx context.Context, id int64, name *string, description *string, levelLabel *string, tags []string) (ViewSummary, error)
 	SetViewLevel(ctx context.Context, id int64, level int) error
 	DeleteView(ctx context.Context, id int64) error
 	Placements(ctx context.Context, viewID int64) ([]PlacedElement, error)
