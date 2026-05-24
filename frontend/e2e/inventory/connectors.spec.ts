@@ -21,11 +21,16 @@ function connectorCards(page: Page) {
   return page.locator('[data-testid="inventory-connector-card"], [data-testid="dependencies-neighbour-card"]')
 }
 
+function selectedCard(page: Page) {
+  return page.getByTestId('inventory-selected-card')
+}
+
 test('search empty state can be cleared in inventory', async ({ page }) => {
   await page.goto('/inventory')
   await page.getByTestId('inventory-search').fill(uniqueName('no-match'))
 
-  await expect(page.getByText('0 of')).toBeVisible()
+  await expect(page.getByText('No matching objects')).toBeVisible()
+  await expect(page.getByText(/^0 \//)).toBeVisible()
   await page.getByTestId('inventory-search').fill('')
   await expect(page.getByTestId('inventory-search')).toHaveValue('')
 })
@@ -38,7 +43,8 @@ test('lists elements, totals, and connector counts from the workspace', async ({
 
   await expect(page.getByTestId('inventory-row').filter({ hasText: graph.center.name }).first()).toBeVisible()
   await expect(page.getByText(graph.center.name, { exact: false }).first()).toBeVisible()
-  await expect(connectorCards(page)).toHaveCount(5)
+  await expect(selectedCard(page)).toContainText(graph.center.name.slice(0, 28))
+  await expect(connectorCards(page)).toHaveCount(4)
 })
 
 test('query param selects an element and renders its connector graph', async ({ page }) => {
@@ -49,7 +55,8 @@ test('query param selects an element and renders its connector graph', async ({ 
 
   await expect(page).toHaveURL(new RegExp(`/inventory\\?object=element:${graph.center.id}`))
   await expect(page.getByText(graph.center.name, { exact: false }).first()).toBeVisible()
-  await expect(connectorCards(page)).toHaveCount(5)
+  await expect(selectedCard(page)).toContainText(graph.center.name.slice(0, 28))
+  await expect(connectorCards(page)).toHaveCount(4)
 })
 
 test('connector graph groups incoming outgoing bidirectional and undirected connectors', async ({ page }) => {
@@ -57,13 +64,14 @@ test('connector graph groups incoming outgoing bidirectional and undirected conn
 
   await page.goto(`/inventory?object=element:${graph.center.id}`)
 
-  const center = neighbourCard(page, graph.center.name)
+  const center = selectedCard(page)
   const incoming = neighbourCard(page, graph.incoming.name)
   const outgoing = neighbourCard(page, graph.outgoing.name)
   const both = neighbourCard(page, graph.both.name)
   const undirected = neighbourCard(page, graph.undirected.name)
 
   await expect(center).toBeVisible()
+  await expect(center).toContainText(graph.center.name.slice(0, 28))
   await expect(incoming).toBeVisible()
   await expect(outgoing).toBeVisible()
   await expect(both).toBeVisible()
