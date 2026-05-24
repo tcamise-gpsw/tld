@@ -250,7 +250,7 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
       overflow="hidden"
       position="relative"
       transition={isDragging ? 'none' : 'height 0.2s cubic-bezier(0.16, 1, 0.3, 1)'}
-      style={{ height: isExpanded ? `${drawerHeight}px` : '40px' }}
+      style={{ height: isExpanded ? `${drawerHeight}px` : '48px' }}
       zIndex={20}
     >
       {/* Top Resizer line */}
@@ -273,8 +273,7 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
 
       {/* Header bar */}
       <Flex
-        h="40px"
-        px={4}
+        h="48px"
         align="center"
         justify="center"
         borderBottom={isExpanded ? '1px solid' : 'none'}
@@ -287,7 +286,19 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
         _hover={{ bg: 'whiteAlpha.50' }}
         position="relative"
       >
-        <Text fontSize="xs" color="whiteAlpha.800" fontWeight="medium" noOfLines={1} maxW="calc(100% - 48px)" textAlign="center">
+        <Text
+          position="absolute"
+          left={4}
+          fontSize="xs"
+          fontWeight="700"
+          color="white"
+          letterSpacing="0.02em"
+          textTransform="uppercase"
+        >
+          Inspect
+        </Text>
+
+        <Text fontSize="xs" color="whiteAlpha.800" fontWeight="medium" noOfLines={1} maxW="calc(100% - 160px)" textAlign="center">
           {isSelected ? selectedRow.name : ''}
         </Text>
 
