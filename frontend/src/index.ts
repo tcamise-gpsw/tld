@@ -11,7 +11,8 @@
 export { default as ViewEditor, type ViewEditorPermissions } from './pages/ViewEditor'
 export { default as ViewsPage } from './pages/Views'
 export { default as ViewsGrid } from './pages/ViewsGrid'
-export { default as Dependencies } from './pages/Dependencies'
+export { default as Inventory } from './pages/Inventory'
+export { default as Dependencies } from './pages/Inventory'
 export { default as InfiniteZoom, SharedInfiniteZoom } from './pages/InfiniteZoom'
 export { default as Settings } from './pages/Settings'
 export { default as AppearanceSettings } from './pages/AppearanceSettings'
@@ -76,7 +77,6 @@ export { ViewEditorContext, useViewEditorContext } from './pages/ViewEditor/cont
 
 // Onboarding components
 export { default as ViewEditorOnboarding } from './components/ViewEditorOnboarding'
-export { default as DependenciesOnboarding } from './components/DependenciesOnboarding'
 export { default as ViewsGridOnboarding } from './components/ViewsGridOnboarding'
 export { default as ExploreOnboarding } from './components/ExploreOnboarding'
 export { default as ExplorePageOnboarding } from './components/ExplorePageOnboarding'
@@ -184,7 +184,7 @@ export {
 export { vscodeBridge } from './lib/vscodeBridge'
 
 // ─── Importer ────────────────────────────────────────────────────────────────
-export { parseMermaid as parseMermaidToElements, type ParsedImport } from './pkg/importer/mermaid'
+export { parseMermaid as parseMermaidToElements, parseMermaidAsync as parseMermaidToElementsAsync, type ParsedImport } from './pkg/importer/mermaid'
 
 // ─── VS Code Messages ────────────────────────────────────────────────────────
 export * from './types/vscode-messages'

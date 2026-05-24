@@ -42,6 +42,7 @@ interface Props {
   onTapAdd?: (obj: LibraryElement) => void
   onFindElement?: (id: number) => void
   onTouchDrop?: (obj: LibraryElement, clientX: number, clientY: number) => void
+  deletedElementIds?: readonly number[]
   noFocusLock?: boolean
 }
 
@@ -97,6 +98,7 @@ function ElementLibrary({
   onTapAdd,
   onFindElement,
   onTouchDrop,
+  deletedElementIds = [],
   noFocusLock,
 }: Props) {
   const { canEdit } = useViewEditorContext()
@@ -109,6 +111,7 @@ function ElementLibrary({
   const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
 
   const isFetching = useRef(false)
+  const searchIdRef = useRef(0)
   const searchRef = useRef(search)
   const fetchedSearchRef = useRef(search)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -116,13 +119,24 @@ function ElementLibrary({
   const [listViewportHeight, setListViewportHeight] = useState(600)
   useEffect(() => { searchRef.current = search }, [search])
 
+  useEffect(() => {
+    if (deletedElementIds.length === 0) return
+    const deletedIds = new Set(deletedElementIds)
+    setElements((prev) => prev.filter((element) => !deletedIds.has(element.id)))
+  }, [deletedElementIds])
+
   const fetchElements = useCallback(async (offset: number, currentSearch: string, isInitial = false) => {
-    if (isFetching.current) return
+    if (!isInitial && isFetching.current) return
+    
+    const mySearchId = ++searchIdRef.current
     isFetching.current = true
     setLoading(true)
     try {
       const limit = 20
       const newElements = await api.elements.list({ limit, offset, search: currentSearch })
+      
+      if (mySearchId !== searchIdRef.current) return
+
       if (isInitial) {
         setElements(mergeUniqueElements([], newElements))
       } else {
@@ -130,11 +144,15 @@ function ElementLibrary({
       }
       setHasMore(newElements.length === limit)
     } catch (err) {
-      console.error('Failed to fetch elements:', err)
-      setHasMore(false)
+      if (mySearchId === searchIdRef.current) {
+        console.error('Failed to fetch elements:', err)
+        setHasMore(false)
+      }
     } finally {
-      isFetching.current = false
-      setLoading(false)
+      if (mySearchId === searchIdRef.current) {
+        isFetching.current = false
+        setLoading(false)
+      }
     }
   }, [])
 
@@ -584,7 +602,7 @@ function ElementLibrary({
       side="left"
       width="300px"
       hasBackdrop={false}
-      noFocusLock={noFocusLock}
+      noFocusLock={noFocusLock || !isMobile}
       zIndex={1000}
     >
       <PanelHeader title="Element Library" onClose={onClose} hasCloseButton={isMobile} />

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -17,6 +18,14 @@ import (
 	"github.com/mertcikla/tld/v2/pkg/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+func jsonString(value any, fallback string) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fallback
+	}
+	return string(data)
+}
 
 var _ api.Store = (*APIAdapter)(nil)
 
@@ -116,9 +125,9 @@ func (a *APIAdapter) CreateView(ctx context.Context, _ uuid.UUID, ownerElementID
 	return a.GetView(ctx, int32(view.ID), uuid.Nil)
 }
 
-func (a *APIAdapter) UpdateView(ctx context.Context, id int32, _ uuid.UUID, name string, label *string) (*diagv1.View, error) {
+func (a *APIAdapter) UpdateView(ctx context.Context, id int32, _ uuid.UUID, name string, description *string, label *string, tags []string) (*diagv1.View, error) {
 	nameCopy := name
-	view, err := a.Store.legacy.UpdateView(ctx, int64(id), &nameCopy, label)
+	view, err := a.Store.legacy.UpdateView(ctx, int64(id), &nameCopy, description, label, tags)
 	if err != nil {
 		return nil, err
 	}
@@ -330,6 +339,7 @@ func (a *APIAdapter) CreateConnector(ctx context.Context, _ uuid.UUID, input api
 		URL:             input.URL,
 		SourceHandle:    input.SourceHandle,
 		TargetHandle:    input.TargetHandle,
+		Tags:            cloneStrings(input.Tags),
 	})
 	if err != nil {
 		return nil, err
@@ -340,10 +350,10 @@ func (a *APIAdapter) CreateConnector(ctx context.Context, _ uuid.UUID, input api
 func (a *APIAdapter) createConnectorWithID(ctx context.Context, id int32, input api.ConnectorInput) (*diagv1.Connector, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := a.Store.legacy.DB().ExecContext(ctx, `
-		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, input.ViewID, input.SourceID, input.TargetID, input.Label, input.Description, input.Relationship,
-		input.Direction, input.Style, input.URL, input.SourceHandle, input.TargetHandle, now, now)
+		input.Direction, input.Style, input.URL, input.SourceHandle, input.TargetHandle, jsonString(input.Tags, "[]"), now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -368,6 +378,7 @@ func (a *APIAdapter) UpdateConnector(ctx context.Context, id int32, _ uuid.UUID,
 		URL:             input.URL,
 		SourceHandle:    input.SourceHandle,
 		TargetHandle:    input.TargetHandle,
+		Tags:            cloneStrings(input.Tags),
 	})
 	if err != nil {
 		return nil, err
@@ -580,7 +591,7 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 			}
 			var view *diagv1.View
 			if planned.GetViewId() != 0 {
-				view, err = a.UpdateView(ctx, planned.GetViewId(), uuid.Nil, viewName, planned.ViewLabel)
+				view, err = a.UpdateView(ctx, planned.GetViewId(), uuid.Nil, viewName, nil, planned.ViewLabel, nil)
 				if errors.Is(err, sql.ErrNoRows) {
 					ownerID := element.GetId()
 					view, err = a.CreateView(ctx, uuid.Nil, &ownerID, viewName, planned.ViewLabel, false)
@@ -1041,6 +1052,7 @@ func viewNodeToProto(node app.ViewTreeNode, workspaceID uuid.UUID) *diagv1.View 
 		Name:      node.Name,
 		Level:     int32(node.Level),
 		Depth:     int32(node.Depth),
+		Tags:      cloneStrings(node.Tags),
 		CreatedAt: ts(node.CreatedAt),
 		UpdatedAt: ts(node.UpdatedAt),
 	}
@@ -1204,6 +1216,7 @@ func connectorToProto(connector app.Connector) *diagv1.Connector {
 		Url:             connector.URL,
 		SourceHandle:    connector.SourceHandle,
 		TargetHandle:    connector.TargetHandle,
+		Tags:            cloneStrings(connector.Tags),
 		CreatedAt:       ts(connector.CreatedAt),
 		UpdatedAt:       ts(connector.UpdatedAt),
 	}

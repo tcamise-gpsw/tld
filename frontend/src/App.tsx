@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet, useSearchParams } from 'react-router-dom'
 import { Box, Spinner, Center } from '@chakra-ui/react'
 import { api } from './api/client'
 import ViewEditor from './pages/ViewEditor'
 import ViewsPage from './pages/Views'
-import Dependencies from './pages/Dependencies'
+import Inventory from './pages/Inventory'
 import { SharedInfiniteZoom } from './pages/InfiniteZoom'
 import Settings from './pages/Settings'
 import AppearanceSettings from './pages/AppearanceSettings'
@@ -93,6 +93,13 @@ function HomeRedirect() {
   return <Navigate to={target || '/views'} replace />
 }
 
+function DependenciesRedirect() {
+  const [searchParams] = useSearchParams()
+  const elementId = searchParams.get('element')
+  const target = elementId ? `/inventory?object=element:${elementId}` : '/inventory'
+  return <Navigate to={target} replace />
+}
+
 export default function App() {
   const [ready, setReady] = useState(false)
 
@@ -129,7 +136,8 @@ export default function App() {
             <Route index element={<HomeRedirect />} />
             <Route path="views" element={<ViewsPage />} />
             <Route path="views/:id" element={<ViewEditor />} />
-            <Route path="dependencies" element={<Dependencies />} />
+            <Route path="inventory" element={<Inventory />} />
+            <Route path="dependencies" element={<DependenciesRedirect />} />
             <Route path="explore" element={<Navigate to="/views" replace />} />
             <Route path="settings" element={<Settings />}>
               <Route index element={<Navigate to="appearance" replace />} />

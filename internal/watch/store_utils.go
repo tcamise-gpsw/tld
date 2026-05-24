@@ -837,6 +837,16 @@ func buildParameterList(ids []int64) (string, []any) {
 	return strings.Join(placeholders, ","), args
 }
 
+func buildParameterListStrings(strs []string) (string, []any) {
+	args := make([]any, len(strs))
+	placeholders := make([]string, len(strs))
+	for i, s := range strs {
+		placeholders[i] = "?"
+		args[i] = s
+	}
+	return strings.Join(placeholders, ","), args
+}
+
 func scanReferences(rows *sql.Rows) ([]Reference, error) {
 	var out []Reference
 	for rows.Next() {
@@ -876,6 +886,10 @@ func snapshotDiff(snapshot watchResourceSnapshot, changeType string, beforeHash,
 
 func rawFactSnapshot(snapshot watchResourceSnapshot) bool {
 	return snapshot.OwnerType == "fact" && snapshot.ResourceType == "fact"
+}
+
+func rawDependencyImportSnapshot(snapshot watchResourceSnapshot) bool {
+	return rawFactSnapshot(snapshot) && strings.Contains(snapshot.OwnerKey, ":dependency.import:")
 }
 
 func previousRawSnapshotForMaterialized(previous, current map[string]watchResourceSnapshot, snapshot watchResourceSnapshot) (watchResourceSnapshot, string, bool, bool) {

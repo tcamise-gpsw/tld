@@ -179,6 +179,7 @@ interface CanvasInteractionOptions {
   navigateRef: React.MutableRefObject<(path: string) => void>
   containerRef: React.MutableRefObject<HTMLDivElement | null>
   interactionSourceIdRef: React.MutableRefObject<number | null>
+  multiConnectionSourceIdsRef: React.MutableRefObject<number[] | null>
   hoveredZoomRef: React.MutableRefObject<{ elementId: number | null; type: 'in' | 'out' | null } | null>
   hoverPanLockedUntilRef: React.MutableRefObject<number>
   setViewElements: React.Dispatch<React.SetStateAction<PlacedElement[]>>
@@ -271,6 +272,7 @@ export function useCanvasInteractions({
   navigateRef,
   containerRef,
   interactionSourceIdRef,
+  multiConnectionSourceIdsRef,
   hoveredZoomRef,
   hoverPanLockedUntilRef,
   setViewElements: _setViewElements,
@@ -361,6 +363,21 @@ export function useCanvasInteractions({
   pendingConnectionSourceRef.current = pendingConnectionSource
   const clickConnectModeRef = useRef(clickConnectMode)
   clickConnectModeRef.current = clickConnectMode
+
+  const clearConnectionSourceRefs = useCallback(() => {
+    interactionSourceIdRef.current = null
+    multiConnectionSourceIdsRef.current = null
+    pendingConnectionSourceHandleRef.current = null
+  }, [interactionSourceIdRef, multiConnectionSourceIdsRef])
+
+  const activeConnectionSourceIds = useCallback((fallbackSourceId: number | null, targetElementId: number) => {
+    const sourceIds = multiConnectionSourceIdsRef.current?.length
+      ? multiConnectionSourceIdsRef.current
+      : fallbackSourceId !== null
+        ? [fallbackSourceId]
+        : []
+    return Array.from(new Set(sourceIds)).filter((sourceId) => sourceId !== targetElementId)
+  }, [multiConnectionSourceIdsRef])
   const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null)
 
   const touchStateRef = useRef<{
@@ -455,9 +472,11 @@ export function useCanvasInteractions({
     if (!canEdit || viewId === null || !addingElementAt || addingElementAt.mode !== 'add') return
     const { flowX, flowY } = addingElementAt
     const sourceId = pendingConnectionSourceRef.current
+    const pendingSourceIds = multiConnectionSourceIdsRef.current?.length ? [...multiConnectionSourceIdsRef.current] : null
     const pendingSourceHandle = pendingConnectionSourceHandleRef.current
     setAddingElementAt(null)
     setPendingConnectionSource(null)
+    multiConnectionSourceIdsRef.current = null
     pendingConnectionSourceHandleRef.current = null
     try {
       const obj = await api.elements.create({ name, kind: '' })
@@ -466,29 +485,33 @@ export function useCanvasInteractions({
       await refreshElements()
       const placed = viewElementsRef.current.find((element) => element.element_id === obj.id)
       if (placed) upsertPlacementGraphSnapshot(viewId, placed)
-      if (sourceId !== null && sourceId !== obj.id) {
-        const sourceNode = rfNodesRef.current.find((n) => n.id === String(sourceId))
+      const sourceIds = Array.from(new Set(pendingSourceIds ?? (sourceId !== null ? [sourceId] : [])))
+        .filter((nextSourceId) => nextSourceId !== obj.id)
+      for (const nextSourceId of sourceIds) {
+        const sourceNode = rfNodesRef.current.find((n) => n.id === String(nextSourceId))
         const { sourceHandle, targetHandle } = sourceNode
           ? findClosestHandleToPoint(sourceNode, flowX, flowY)
           : { sourceHandle: 'right', targetHandle: 'left' }
         const newConnector = await api.workspace.connectors.create(viewId, {
-          source_element_id: sourceId, target_element_id: obj.id,
+          source_element_id: nextSourceId, target_element_id: obj.id,
           source_handle: pendingSourceHandle ?? sourceHandle, target_handle: targetHandle, direction: 'forward',
         })
         const connector = connectorToConnector(newConnector)
         await finalizeConnectorCreate(connector)
-        onUnsupportedMutation?.()
       }
+      if (sourceIds.length > 0) onUnsupportedMutation?.()
     } catch { /* intentionally empty */ }
-  }, [addingElementAt, canEdit, finalizeConnectorCreate, onUnsupportedMutation, refreshElements, rfNodesRef, viewId, viewElementsRef])
+  }, [addingElementAt, canEdit, finalizeConnectorCreate, multiConnectionSourceIdsRef, onUnsupportedMutation, refreshElements, rfNodesRef, viewId, viewElementsRef])
 
   const handleConfirmExistingElement = useCallback(async (obj: LibraryElement) => {
     if (!canEdit || viewId === null || !addingElementAt || addingElementAt.mode !== 'add') return
     const { flowX, flowY } = addingElementAt
     const sourceId = pendingConnectionSourceRef.current
+    const sourceIds = activeConnectionSourceIds(sourceId, obj.id)
     const pendingSourceHandle = pendingConnectionSourceHandleRef.current
     setAddingElementAt(null)
     setPendingConnectionSource(null)
+    multiConnectionSourceIdsRef.current = null
     pendingConnectionSourceHandleRef.current = null
     try {
       if (!existingElementIds.has(obj.id)) {
@@ -498,8 +521,8 @@ export function useCanvasInteractions({
         const placed = viewElementsRef.current.find((element) => element.element_id === obj.id)
         if (placed) upsertPlacementGraphSnapshot(viewId, placed)
       }
-      if (sourceId !== null && sourceId !== obj.id) {
-        const sourceNode = rfNodesRef.current.find((n) => n.id === String(sourceId))
+      for (const nextSourceId of sourceIds) {
+        const sourceNode = rfNodesRef.current.find((n) => n.id === String(nextSourceId))
         const targetNode = rfNodesRef.current.find((n) => n.id === String(obj.id))
         const { sourceHandle, targetHandle } = sourceNode && targetNode
           ? findClosestHandles(sourceNode, targetNode)
@@ -507,42 +530,46 @@ export function useCanvasInteractions({
             ? findClosestHandleToPoint(sourceNode, flowX, flowY)
             : { sourceHandle: 'right', targetHandle: 'left' }
         const newConnector = await api.workspace.connectors.create(viewId, {
-          source_element_id: sourceId, target_element_id: obj.id,
+          source_element_id: nextSourceId, target_element_id: obj.id,
           source_handle: pendingSourceHandle ?? sourceHandle, target_handle: targetHandle, direction: 'forward',
         })
         const connector = connectorToConnector(newConnector)
         await finalizeConnectorCreate(connector)
-        onUnsupportedMutation?.()
       }
+      if (sourceIds.length > 0) onUnsupportedMutation?.()
     } catch { /* intentionally empty */ }
-  }, [addingElementAt, canEdit, existingElementIds, finalizeConnectorCreate, onUnsupportedMutation, refreshElements, rfNodesRef, viewId, viewElementsRef])
+  }, [activeConnectionSourceIds, addingElementAt, canEdit, existingElementIds, finalizeConnectorCreate, multiConnectionSourceIdsRef, onUnsupportedMutation, refreshElements, rfNodesRef, viewId, viewElementsRef])
 
   const handleConfirmConnectExistingElement = useCallback(async (obj: LibraryElement) => {
     if (!canEdit || viewId === null || !addingElementAt || addingElementAt.mode !== 'connect') return
     const { flowX, flowY } = addingElementAt
     const sourceId = pendingConnectionSourceRef.current
+    const sourceIds = activeConnectionSourceIds(sourceId, obj.id)
     const pendingSourceHandle = pendingConnectionSourceHandleRef.current
     setAddingElementAt(null)
     setPendingConnectionSource(null)
+    multiConnectionSourceIdsRef.current = null
     pendingConnectionSourceHandleRef.current = null
-    if (sourceId == null || sourceId === obj.id) return
+    if (sourceIds.length === 0) return
     try {
-      const sourceNode = rfNodesRef.current.find((n) => n.id === String(sourceId))
-      const { sourceHandle, targetHandle } = sourceNode
-        ? findClosestHandleToPoint(sourceNode, flowX, flowY)
-        : { sourceHandle: 'right', targetHandle: 'left' }
-      const newConnector = await api.workspace.connectors.create(viewId, {
-        source_element_id: sourceId,
-        target_element_id: obj.id,
-        source_handle: pendingSourceHandle ?? sourceHandle,
-        target_handle: targetHandle,
-        direction: 'forward',
-      })
-      const connector = connectorToConnector(newConnector)
-      await finalizeConnectorCreate(connector)
+      for (const nextSourceId of sourceIds) {
+        const sourceNode = rfNodesRef.current.find((n) => n.id === String(nextSourceId))
+        const { sourceHandle, targetHandle } = sourceNode
+          ? findClosestHandleToPoint(sourceNode, flowX, flowY)
+          : { sourceHandle: 'right', targetHandle: 'left' }
+        const newConnector = await api.workspace.connectors.create(viewId, {
+          source_element_id: nextSourceId,
+          target_element_id: obj.id,
+          source_handle: pendingSourceHandle ?? sourceHandle,
+          target_handle: targetHandle,
+          direction: 'forward',
+        })
+        const connector = connectorToConnector(newConnector)
+        await finalizeConnectorCreate(connector)
+      }
       onUnsupportedMutation?.()
     } catch { /* intentionally empty */ }
-  }, [addingElementAt, canEdit, finalizeConnectorCreate, onUnsupportedMutation, rfNodesRef, viewId])
+  }, [activeConnectionSourceIds, addingElementAt, canEdit, finalizeConnectorCreate, multiConnectionSourceIdsRef, onUnsupportedMutation, rfNodesRef, viewId])
 
   // ── Zoom-in / zoom-out stable callbacks ───────────────────────────────────
   const stableOnZoomIn = useCallback(async (elementId: number) => {
@@ -672,7 +699,8 @@ export function useCanvasInteractions({
     if (!canEdit) return
     const cid = viewIdRef.current
     const sourceElementId = interactionSourceIdRef.current
-    if (cid === null || sourceElementId === null || sourceElementId === targetElementId) return
+    const sourceIds = activeConnectionSourceIds(sourceElementId, targetElementId)
+    if (cid === null || sourceIds.length === 0) return
 
     const sourceHandle = pendingConnectionSourceHandleRef.current ??
       (clickConnectModeRef.current?.sourceHandle
@@ -682,24 +710,27 @@ export function useCanvasInteractions({
 
     setInteractionSourceId(null)
     setPendingConnectionSource(null)
+    multiConnectionSourceIdsRef.current = null
     pendingConnectionSourceHandleRef.current = null
     setClickConnectMode(null)
     setClickConnectCursorPos(null)
     setConnectGhostPos(null)
 
     try {
-      const newConnector = await api.workspace.connectors.create(cid, {
-        source_element_id: sourceElementId,
-        target_element_id: targetElementId,
-        source_handle: sourceHandle,
-        target_handle: logicalTargetHandle,
-        direction: 'forward',
-      })
-      const connector = connectorToConnector(newConnector)
-      await finalizeConnectorCreate(connector)
+      for (const nextSourceId of sourceIds) {
+        const newConnector = await api.workspace.connectors.create(cid, {
+          source_element_id: nextSourceId,
+          target_element_id: targetElementId,
+          source_handle: sourceHandle,
+          target_handle: logicalTargetHandle,
+          direction: 'forward',
+        })
+        const connector = connectorToConnector(newConnector)
+        await finalizeConnectorCreate(connector)
+      }
       onUnsupportedMutation?.()
     } catch { /* intentionally empty */ }
-  }, [canEdit, finalizeConnectorCreate, interactionSourceIdRef, onUnsupportedMutation, viewIdRef])
+  }, [activeConnectionSourceIds, canEdit, finalizeConnectorCreate, interactionSourceIdRef, multiConnectionSourceIdsRef, onUnsupportedMutation, viewIdRef])
 
   const stableOnInteractionStart = useCallback((elementId: number, options?: InteractionStartOptions) => {
     if (!canEdit) return
@@ -720,6 +751,7 @@ export function useCanvasInteractions({
       }
 
       pendingConnectionSourceHandleRef.current = getLogicalHandleId(sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? DEFAULT_SOURCE_HANDLE_SIDE
+      multiConnectionSourceIdsRef.current = null
       setInteractionSourceId(elementId)
       setPendingConnectionSource(null)
       setAddingElementAt(null)
@@ -736,6 +768,7 @@ export function useCanvasInteractions({
     const nextSourceId = isCancelling ? null : elementId
 
     if (isCancelling) pendingConnectionSourceHandleRef.current = null
+    multiConnectionSourceIdsRef.current = null
     setInteractionSourceId(nextSourceId)
 
     if (isCancelling) {
@@ -743,7 +776,18 @@ export function useCanvasInteractions({
       setClickConnectCursorPos(null)
       setConnectGhostPos(null)
     }
-  }, [canEdit, connectClickModeToHandle, interactionSourceIdRef])
+  }, [canEdit, connectClickModeToHandle, interactionSourceIdRef, multiConnectionSourceIdsRef])
+
+  const stableOnConnectToAndReset = useCallback(async (targetElementId: number) => {
+    await stableOnConnectTo(targetElementId)
+    setInteractionSourceId(null)
+    setPendingConnectionSource(null)
+    multiConnectionSourceIdsRef.current = null
+    pendingConnectionSourceHandleRef.current = null
+    setClickConnectMode(null)
+    setClickConnectCursorPos(null)
+    setConnectGhostPos(null)
+  }, [multiConnectionSourceIdsRef, stableOnConnectTo])
 
   // ── Node/connector changes ─────────────────────────────────────────────────────
   const onNodesChange = useCallback((changes: NodeChange[]) => {
@@ -1218,22 +1262,26 @@ export function useCanvasInteractions({
       if (nearNode) {
         const targetId = resolveElementIdFromNode(nearNode)
         if (targetId === null) return
-        stableOnConnectTo(targetId)
+        stableOnConnectToAndReset(targetId)
       } else {
         setInteractionSourceId(null)
         setPendingConnectionSource(sourceId)
         pendingConnectionSourceHandleRef.current = clickConnectModeRef.current?.sourceHandle
           ? getLogicalHandleId(clickConnectModeRef.current.sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? DEFAULT_SOURCE_HANDLE_SIDE
           : pendingConnectionSourceHandleRef.current
+        setClickConnectMode(null)
+        setClickConnectCursorPos(null)
+        setConnectGhostPos(null)
         showAddingElementAt(e.clientX, e.clientY, true, 'connect', e.shiftKey)
       }
       return
     }
     setInteractionSourceId(null)
+    multiConnectionSourceIdsRef.current = null
     setPendingConnectionSource(null)
     pendingConnectionSourceHandleRef.current = null
     setAddingElementAt(null)
-  }, [stableOnConnectTo, showAddingElementAt, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, getInteractionNodes, interactionSourceIdRef, setSelectedElement, setSelectedEdge, setSelectedProxyConnectorDetails])
+  }, [stableOnConnectToAndReset, showAddingElementAt, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, getInteractionNodes, interactionSourceIdRef, multiConnectionSourceIdsRef, setSelectedElement, setSelectedEdge, setSelectedProxyConnectorDetails])
 
   const onPaneContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -1256,7 +1304,6 @@ export function useCanvasInteractions({
     isMovingRef.current = true
     setCanvasMenu(null)
     setConnectorLongPressMenu(null)
-    setAddingElementAt(null)
     onMoveStateChange?.(true)
   }, [onMoveStateChange])
 
@@ -1387,8 +1434,7 @@ export function useCanvasInteractions({
         }
         reconnectPickingRef.current = null
         pendingConnectionSourceRef.current = null
-        pendingConnectionSourceHandleRef.current = null
-        interactionSourceIdRef.current = null
+        clearConnectionSourceRefs()
         clickConnectModeRef.current = null
         setReconnectPicking(null)
         setConnectorLongPressMenu(null)
@@ -1408,6 +1454,26 @@ export function useCanvasInteractions({
       if (key === 'backspace' || key === 'delete' || key === 'r') {
         if (!canEdit) return
         e.preventDefault()
+        const selectedElementNodes = rfNodesRef.current.filter((node) => node.selected && node.type === 'elementNode' && parseNumericId(node.id) !== null)
+        const selectedElementIds = selectedElementNodes
+          .map((node) => parseNumericId(node.id))
+          .filter((id): id is number => id !== null)
+        if (selectedElementIds.length > 1) {
+          if (key === 'r' && e.shiftKey) {
+            await Promise.all(selectedElementIds.map((elementId) =>
+              api.elements.delete('', elementId).then(() => {
+                handleElementPermanentlyDeleted(elementId)
+              }).catch(() => { /* intentionally empty */ })
+            ))
+            setSelectedElement(null)
+            setSelectedEdge(null)
+            closeElementPanel()
+            closeConnectorPanel()
+          } else if (onSelectionRemoveFromView) {
+            await onSelectionRemoveFromView()
+          }
+          return
+        }
         if (selectedElement) {
           if (key === 'r' && e.shiftKey) {
             api.elements.delete('', selectedElement.id).then(() => {
@@ -1424,7 +1490,6 @@ export function useCanvasInteractions({
           const connectorId = getConnectorDeletionTarget(selectedConnector)
           if (connectorId === null) {
             if (key !== 'r' && onSelectionRemoveFromView) {
-              const selectedElementNodes = rfNodesRef.current.filter((node) => node.selected && node.type === 'elementNode' && parseNumericId(node.id) !== null)
               if (selectedElementNodes.length > 0) await onSelectionRemoveFromView()
             }
             return
@@ -1458,8 +1523,19 @@ export function useCanvasInteractions({
         return
       }
       if (key === 'e') {
-        if (!canEdit || !selectedElement) return
-        const node = rfNodesRef.current.find((n) => n.id === String(selectedElement.id))
+        if (!canEdit) return
+        const selectedElementIds = rfNodesRef.current
+          .filter((node) => node.selected && node.type === 'elementNode')
+          .map((node) => parseNumericId(node.id))
+          .filter((id): id is number => id !== null)
+        const sourceElementIds = selectedElementIds.length > 1
+          ? selectedElementIds
+          : selectedElement
+            ? [selectedElement.id]
+            : []
+        if (sourceElementIds.length === 0) return
+        const primarySourceId = sourceElementIds[0]
+        const node = rfNodesRef.current.find((n) => n.id === String(primarySourceId))
         if (!node) return
         const cursor = lastMousePosRef.current
         const flowCursor = cursor
@@ -1470,10 +1546,12 @@ export function useCanvasInteractions({
           sourceNodeId: node.id,
           sourceHandle: ensureVisualHandleId(sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? sourceHandle,
         }
+        suppressNextPaneClickRef.current = false
+        multiConnectionSourceIdsRef.current = sourceElementIds.length > 1 ? sourceElementIds : null
         clickConnectModeRef.current = nextClickConnectMode
-        interactionSourceIdRef.current = selectedElement.id
+        interactionSourceIdRef.current = primarySourceId
         setClickConnectMode(nextClickConnectMode)
-        setInteractionSourceId(selectedElement.id)
+        setInteractionSourceId(primarySourceId)
         if (cursor) setClickConnectCursorPos({ x: cursor.clientX, y: cursor.clientY })
         return
       }
@@ -1591,7 +1669,7 @@ export function useCanvasInteractions({
     }
     window.addEventListener('keydown', handler, { capture: true })
     return () => window.removeEventListener('keydown', handler, { capture: true })
-  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, onSelectionRemoveFromView, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, clickConnectMode, setClickConnectMode, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef, interactionSourceIdRef, onFitView, setGlobalSnapToGrid, snapToGrid, libraryOpen, openLibrary, toggleLibrary, toggleExplorer, zoomIn, zoomOut])
+  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, onSelectionRemoveFromView, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, clickConnectMode, setClickConnectMode, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef, interactionSourceIdRef, multiConnectionSourceIdsRef, clearConnectionSourceRefs, onFitView, setGlobalSnapToGrid, snapToGrid, libraryOpen, openLibrary, toggleLibrary, toggleExplorer, zoomIn, zoomOut])
 
   // ── DnD handlers ──────────────────────────────────────────────────────────
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -1706,7 +1784,7 @@ export function useCanvasInteractions({
     stableOnNavigateToView,
     stableOnHoverZoom,
     stableOnRemoveElement,
-    stableOnConnectTo,
+    stableOnConnectTo: stableOnConnectToAndReset,
     stableOnInteractionStart,
     stableOnStartHandleReconnect,
     stableOnReconnectPick,

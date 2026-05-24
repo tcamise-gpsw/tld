@@ -19,6 +19,7 @@ interface Props {
   autoFocus?: boolean
   noFocusLock?: boolean
   'data-testid'?: string
+  isInline?: boolean
 }
 
 export default function SlidingPanel({
@@ -36,13 +37,8 @@ export default function SlidingPanel({
   autoFocus = false,
   noFocusLock = false,
   'data-testid': dataTestId,
+  isInline = false,
 }: Props) {
-  // Use width if it's a fixed value, otherwise default to a safe offscreen distance
-  const resolvedWidth = typeof width === 'string' ? width : '320px'
-  const isFixed = resolvedWidth.endsWith('px')
-  const widthVal = isFixed ? parseInt(resolvedWidth) : 320
-  const offset = side === 'right' ? widthVal + 24 : -(widthVal + 24)
-
   // Prevent wheel events from propagating to the canvas (React Flow would pan/zoom)
   const boxRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -52,6 +48,31 @@ export default function SlidingPanel({
     el.addEventListener('wheel', handler, { passive: true })
     return () => el.removeEventListener('wheel', handler)
   }, [isOpen])
+
+  if (isInline) {
+    return (
+      <Box
+        data-testid={dataTestId}
+        ref={boxRef}
+        w="full"
+        h="full"
+        overflow="hidden"
+        display="flex"
+        flexDir="column"
+        bg="transparent"
+      >
+        <Box display="flex" flexDirection="column" flex="1 1 auto" minHeight={0} height="100%">
+          {children}
+        </Box>
+      </Box>
+    )
+  }
+
+  // Use width if it's a fixed value, otherwise default to a safe offscreen distance
+  const resolvedWidth = typeof width === 'string' ? width : '320px'
+  const isFixed = resolvedWidth.endsWith('px')
+  const widthVal = isFixed ? parseInt(resolvedWidth) : 320
+  const offset = side === 'right' ? widthVal + 24 : -(widthVal + 24)
 
   return (
     <>

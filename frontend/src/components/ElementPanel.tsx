@@ -224,6 +224,7 @@ export interface ElementPanelProps extends ElementPanelSlots {
   hasBackdrop?: boolean
   availableTags?: string[]
   noFocusLock?: boolean
+  isInline?: boolean
 }
 
 /**
@@ -252,6 +253,7 @@ function ElementPanel({
   availableTags = [],
   noFocusLock,
   elementPanelAfterContentSlot,
+  isInline = false,
 }: ElementPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isEdit = !!element
@@ -720,8 +722,9 @@ function ElementPanel({
         hasBackdrop={hasBackdrop}
         autoFocus={true}
         noFocusLock={noFocusLock}
+        isInline={isInline}
       >
-        <PanelHeader title={isEdit ? 'Edit Element' : 'New Element'} onClose={handleClose} />
+        <PanelHeader title={isEdit ? 'Edit Element' : 'New Element'} onClose={handleClose} hasCloseButton={!isInline} isInline={isInline} />
 
         {/* Body */}
         <ScrollIndicatorWrapper px={4} py={4}>
@@ -1169,17 +1172,19 @@ function ElementPanel({
 
             {isEdit && canEdit && (
               <HStack borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1} spacing={2}>
-                <Button
-                  data-testid="element-panel-remove"
-                  variant="ghost"
-                  size="sm"
-                  color="gray.400"
-                  _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
-                  onClick={handleDelete}
-                  flex={1}
-                >
-                  Remove
-                </Button>
+                {viewId != null && (
+                  <Button
+                    data-testid="element-panel-remove"
+                    variant="ghost"
+                    size="sm"
+                    color="gray.400"
+                    _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                    onClick={handleDelete}
+                    flex={1}
+                  >
+                    Remove
+                  </Button>
+                )}
                 <Button
                   data-testid="element-panel-delete-permanent"
                   variant="ghost"
@@ -1197,7 +1202,7 @@ function ElementPanel({
         </ScrollIndicatorWrapper>
 
         {/* Footer */}
-        {!autoSaveEdit && (
+        {!autoSaveEdit && !isInline && (
           <HStack px={4} py={3} justify="flex-end" flexShrink={0}>
             <Button variant="ghost" size="sm" onClick={handleClose}>
               Cancel

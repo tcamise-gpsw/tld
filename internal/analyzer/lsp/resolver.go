@@ -32,15 +32,22 @@ type EventLogger interface {
 }
 
 type ResolverConfig struct {
-	Enabled          bool
-	HealthInterval   time.Duration
-	MemoryLimitBytes int64
-	Logger           EventLogger
+	Enabled           bool
+	HealthInterval    time.Duration
+	DefinitionTimeout time.Duration
+	MemoryLimitBytes  int64
+	Logger            EventLogger
 }
 
 type DefinitionLocation struct {
 	FilePath string
 	Line     int
+}
+
+type CallLocation struct {
+	FilePath string
+	Line     int
+	Name     string
 }
 
 type StatusSnapshot struct {
@@ -79,9 +86,10 @@ type MultiLanguageResolver struct {
 
 func NewMultiLanguageResolver(rootDir string) *MultiLanguageResolver {
 	return NewMultiLanguageResolverWithConfig(rootDir, ResolverConfig{
-		Enabled:          true,
-		HealthInterval:   time.Minute,
-		MemoryLimitBytes: 1073741824,
+		Enabled:           true,
+		HealthInterval:    time.Minute,
+		DefinitionTimeout: 10 * time.Second,
+		MemoryLimitBytes:  4294967296,
 	})
 }
 
@@ -89,8 +97,11 @@ func NewMultiLanguageResolverWithConfig(rootDir string, cfg ResolverConfig) *Mul
 	if cfg.HealthInterval <= 0 {
 		cfg.HealthInterval = time.Minute
 	}
+	if cfg.DefinitionTimeout <= 0 {
+		cfg.DefinitionTimeout = 10 * time.Second
+	}
 	if cfg.MemoryLimitBytes <= 0 {
-		cfg.MemoryLimitBytes = 1073741824
+		cfg.MemoryLimitBytes = 4294967296
 	}
 	return &MultiLanguageResolver{
 		RootDir:  rootDir,
@@ -135,7 +146,13 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 	if ref.Column > 0 {
 		column = ref.Column - 1
 	}
-	locations, err := session.Definition(ctx, &protocol.DefinitionParams{
+	definitionCtx := ctx
+	cancel := func() {}
+	if r.cfg.DefinitionTimeout > 0 {
+		definitionCtx, cancel = context.WithTimeout(ctx, r.cfg.DefinitionTimeout)
+	}
+	defer cancel()
+	locations, err := session.Definition(definitionCtx, &protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(ref.FilePath)},
 			Position: protocol.Position{
@@ -145,7 +162,7 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 		},
 	})
 	if err != nil {
-		r.restartAfterFailure(ctx, language, "definition", err)
+		r.markFailed(ctx, language, "definition", err)
 		return nil, err
 	}
 	resolved := make([]DefinitionLocation, 0, len(locations))
@@ -160,6 +177,69 @@ func (r *MultiLanguageResolver) ResolveDefinitions(ctx context.Context, ref anal
 		})
 	}
 	return resolved, nil
+}
+
+func (r *MultiLanguageResolver) IncomingCalls(ctx context.Context, filePath string, line, column int) ([]CallLocation, error) {
+	if r == nil || r.RootDir == "" || filePath == "" || line <= 0 {
+		return nil, nil
+	}
+	language, ok := analyzer.DetectLanguage(filePath)
+	if !ok {
+		return nil, nil
+	}
+	session, ok, err := r.sessionForLanguage(ctx, language)
+	if err != nil || !ok {
+		return nil, err
+	}
+	if !session.SupportsCallHierarchy() {
+		return nil, nil
+	}
+	if err := r.openDocument(ctx, session, filePath); err != nil {
+		r.markFailed(ctx, language, "open_document", err)
+		return nil, err
+	}
+	if column <= 0 {
+		column = 1
+	}
+	callCtx := ctx
+	cancel := func() {}
+	if r.cfg.DefinitionTimeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, r.cfg.DefinitionTimeout)
+	}
+	defer cancel()
+	items, err := session.PrepareCallHierarchy(callCtx, &protocol.CallHierarchyPrepareParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(filePath)},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),
+				Character: uint32(column - 1),
+			},
+		},
+	})
+	if err != nil {
+		r.markFailed(ctx, language, "call_hierarchy_prepare", err)
+		return nil, err
+	}
+	var calls []CallLocation
+	for _, item := range items {
+		incoming, err := session.IncomingCalls(callCtx, item)
+		if err != nil {
+			r.markFailed(ctx, language, "incoming_calls", err)
+			return nil, err
+		}
+		for _, call := range incoming {
+			filePath := filepath.Clean(call.From.URI.Filename())
+			if filePath == "" {
+				continue
+			}
+			calls = append(calls, CallLocation{
+				FilePath: filePath,
+				Line:     int(call.From.Range.Start.Line) + 1,
+				Name:     call.From.Name,
+			})
+		}
+	}
+	return calls, nil
 }
 
 func (r *MultiLanguageResolver) Snapshot() StatusSnapshot {
@@ -199,7 +279,7 @@ func (r *MultiLanguageResolver) sessionForLanguage(ctx context.Context, language
 		return nil, false, nil
 	}
 	status := r.ensureRequestedLocked(language)
-	if status.State == StateUnavailable || status.State == StateDisabled {
+	if status.State == StateUnavailable || status.State == StateDisabled || status.State == StateFailed || status.State == StateMemoryLimited {
 		r.mu.Unlock()
 		return nil, false, nil
 	}
@@ -311,11 +391,11 @@ func (r *MultiLanguageResolver) openDocument(ctx context.Context, session *Sessi
 	return nil
 }
 
-func (r *MultiLanguageResolver) restartAfterFailure(ctx context.Context, language analyzer.Language, reason string, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.restartLocked(ctx, language, reason, err)
-}
+// func (r *MultiLanguageResolver) restartAfterFailure(ctx context.Context, language analyzer.Language, reason string, err error) {
+// 	r.mu.Lock()
+// 	defer r.mu.Unlock()
+// 	r.restartLocked(ctx, language, reason, err)
+// }
 
 func (r *MultiLanguageResolver) markFailed(ctx context.Context, language analyzer.Language, reason string, err error) {
 	r.mu.Lock()

@@ -211,6 +211,8 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 		{"watch.thresholds.max_expanded_connectors_per_group", cfg.Watch.Thresholds.MaxExpandedConnectorsPerGroup},
 		{"watch.scale.max_tracked_files", cfg.Watch.Scale.MaxTrackedFiles},
 		{"watch.scale.max_limited_files", cfg.Watch.Scale.MaxLimitedFiles},
+		{"watch.scale.max_recent_files", cfg.Watch.Scale.MaxRecentFiles},
+		{"watch.scale.max_caller_depth", cfg.Watch.Scale.MaxCallerDepth},
 	} {
 		if item.value <= 0 {
 			add(item.key, "must be positive")
@@ -335,7 +337,9 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "watch.thresholds.max_expanded_connectors_per_group", Description: "File-pair connector expansion limit before folder-level collapse."},
 	{Key: "watch.scale.strategy", Env: []string{"TLD_WATCH_SCALE_STRATEGY"}, Description: "Huge-repo scan strategy: auto, full, limited, or abort."},
 	{Key: "watch.scale.max_tracked_files", Env: []string{"TLD_WATCH_SCALE_MAX_TRACKED_FILES"}, Description: "Tracked-file threshold before auto limited view."},
-	{Key: "watch.scale.max_limited_files", Env: []string{"TLD_WATCH_SCALE_MAX_LIMITED_FILES"}, Description: "Maximum high-signal files selected in limited view."},
+	{Key: "watch.scale.max_limited_files", Env: []string{"TLD_WATCH_SCALE_MAX_LIMITED_FILES"}, Description: "Maximum files selected in limited view after recent-file, anchor, neighbor, and caller expansion."},
+	{Key: "watch.scale.max_recent_files", Env: []string{"TLD_WATCH_SCALE_MAX_RECENT_FILES"}, Description: "Maximum recently changed local-git-history files used as limited-view seeds."},
+	{Key: "watch.scale.max_caller_depth", Env: []string{"TLD_WATCH_SCALE_MAX_CALLER_DEPTH"}, Description: "Maximum incoming caller depth used during limited-view expansion."},
 	{Key: "watch.lsp.enabled", Env: []string{"TLD_WATCH_LSP_ENABLED"}, Description: "Enable language-server definition resolution during watch/analyze scans."},
 	{Key: "watch.lsp.health_interval", Env: []string{"TLD_WATCH_LSP_HEALTH_INTERVAL"}, Description: "Minimum interval between language-server health checks."},
 	{Key: "watch.lsp.memory_limit_bytes", Env: []string{"TLD_WATCH_LSP_MEMORY_LIMIT_BYTES"}, Description: "Per-language-server RSS limit before the server is restarted."},
@@ -462,6 +466,8 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"watch.scale.strategy", "TLD_WATCH_SCALE_STRATEGY"},
 		{"watch.scale.max_tracked_files", "TLD_WATCH_SCALE_MAX_TRACKED_FILES"},
 		{"watch.scale.max_limited_files", "TLD_WATCH_SCALE_MAX_LIMITED_FILES"},
+		{"watch.scale.max_recent_files", "TLD_WATCH_SCALE_MAX_RECENT_FILES"},
+		{"watch.scale.max_caller_depth", "TLD_WATCH_SCALE_MAX_CALLER_DEPTH"},
 		{"watch.lsp.enabled", "TLD_WATCH_LSP_ENABLED"},
 		{"watch.lsp.health_interval", "TLD_WATCH_LSP_HEALTH_INTERVAL"},
 		{"watch.lsp.memory_limit_bytes", "TLD_WATCH_LSP_MEMORY_LIMIT_BYTES"},
@@ -601,6 +607,18 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.Watch.Scale.MaxLimitedFiles = v
+	case "watch.scale.max_recent_files":
+		v, err := parseInt(value)
+		if err != nil {
+			return err
+		}
+		cfg.Watch.Scale.MaxRecentFiles = v
+	case "watch.scale.max_caller_depth":
+		v, err := parseInt(value)
+		if err != nil {
+			return err
+		}
+		cfg.Watch.Scale.MaxCallerDepth = v
 	case "watch.lsp.enabled":
 		v, err := parseBool(value)
 		if err != nil {
@@ -835,6 +853,10 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.Watch.Scale.MaxTrackedFiles
 	case "watch.scale.max_limited_files":
 		return cfg.Watch.Scale.MaxLimitedFiles
+	case "watch.scale.max_recent_files":
+		return cfg.Watch.Scale.MaxRecentFiles
+	case "watch.scale.max_caller_depth":
+		return cfg.Watch.Scale.MaxCallerDepth
 	case "watch.lsp.enabled":
 		return cfg.Watch.LSP.Enabled
 	case "watch.lsp.health_interval":
@@ -950,7 +972,9 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	addScalar(scale, "strategy", cfg.Watch.Scale.Strategy, desc("watch.scale.strategy"))
 	addScalar(scale, "max_tracked_files", cfg.Watch.Scale.MaxTrackedFiles, desc("watch.scale.max_tracked_files"))
 	addScalar(scale, "max_limited_files", cfg.Watch.Scale.MaxLimitedFiles, desc("watch.scale.max_limited_files"))
-	appendUnknownEntries(scale, mappingValueNode(mappingValueNode(existing, "watch"), "scale"), setOf("strategy", "max_tracked_files", "max_limited_files"))
+	addScalar(scale, "max_recent_files", cfg.Watch.Scale.MaxRecentFiles, desc("watch.scale.max_recent_files"))
+	addScalar(scale, "max_caller_depth", cfg.Watch.Scale.MaxCallerDepth, desc("watch.scale.max_caller_depth"))
+	appendUnknownEntries(scale, mappingValueNode(mappingValueNode(existing, "watch"), "scale"), setOf("strategy", "max_tracked_files", "max_limited_files", "max_recent_files", "max_caller_depth"))
 	addMap(watchNode, "scale", scale, "Huge-repo detection and limited-view settings.")
 
 	lsp := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}

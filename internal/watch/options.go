@@ -72,6 +72,8 @@ func ResolveSettings(cfg *workspace.Config, languages []string, watcherMode, pol
 			Strategy:        cfg.Watch.Scale.Strategy,
 			MaxTrackedFiles: cfg.Watch.Scale.MaxTrackedFiles,
 			MaxLimitedFiles: cfg.Watch.Scale.MaxLimitedFiles,
+			MaxRecentFiles:  cfg.Watch.Scale.MaxRecentFiles,
+			MaxCallerDepth:  cfg.Watch.Scale.MaxCallerDepth,
 		}
 		settings.LSP = LSPConfig{
 			Enabled:          cfg.Watch.LSP.Enabled,

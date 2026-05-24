@@ -19,6 +19,8 @@ type scanPlan struct {
 	SkippedTrackedFiles int
 	Limited             bool
 	Files               []string
+	RecentFiles         []string
+	AnchorFiles         []string
 	Warnings            []string
 }
 
@@ -54,14 +56,98 @@ func planScan(repoRoot string, settings Settings, rules *ignore.Rules) (scanPlan
 	}
 	plan.Mode = "limited"
 	plan.Limited = true
-	plan.Files = selectLimitedFiles(repoRoot, tracked.Files, settings, rules)
+	if tracked.Capped {
+		if fullTracked, err := tldgit.ListTrackedFiles(repoRoot, 0); err == nil {
+			tracked = fullTracked
+			plan.TrackedFiles = tracked.Total
+		} else {
+			plan.Warnings = append(plan.Warnings, "limited view: tracked-file listing capped before anchor selection: "+err.Error())
+		}
+	}
+	plan.RecentFiles = selectRecentFiles(repoRoot, settings, rules)
+	if len(plan.RecentFiles) == 0 {
+		plan.Warnings = append(plan.Warnings, "limited view: local git history did not return recent files; falling back to tracked file order")
+		plan.RecentFiles = selectTrackedFallbackFiles(repoRoot, tracked.Files, settings, rules)
+	}
+	plan.AnchorFiles = selectAnchorFiles(repoRoot, tracked.Files, settings, rules)
+	plan.Files = uniqueLimitedAbsFiles(append(append([]string{}, plan.RecentFiles...), plan.AnchorFiles...), settings.Scale.MaxLimitedFiles)
 	plan.SelectedFiles = len(plan.Files)
 	plan.SkippedTrackedFiles = max(tracked.Total-len(plan.Files), 0)
-	plan.Warnings = append(plan.Warnings, fmt.Sprintf("limited view: %s; selected %d high-signal files out of %d tracked files", plan.Reason, plan.SelectedFiles, plan.TrackedFiles))
+	plan.Warnings = append(plan.Warnings, fmt.Sprintf("limited view: %s; selected %d recent/anchor files out of %d tracked files", plan.Reason, plan.SelectedFiles, plan.TrackedFiles))
 	return plan, nil
 }
 
-func selectLimitedFiles(repoRoot string, tracked []string, settings Settings, rules *ignore.Rules) []string {
+func selectRecentFiles(repoRoot string, settings Settings, rules *ignore.Rules) []string {
+	settings = NormalizeSettings(settings)
+	recent, err := tldgit.RecentChangedFiles(repoRoot, settings.Scale.MaxRecentFiles)
+	if err != nil {
+		return nil
+	}
+	return filterLimitedRelFiles(repoRoot, recent, settings, rules, settings.Scale.MaxRecentFiles)
+}
+
+func uniqueLimitedAbsFiles(files []string, limit int) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(files))
+	for _, file := range files {
+		file = filepath.Clean(file)
+		if file == "" {
+			continue
+		}
+		if _, ok := seen[file]; ok {
+			continue
+		}
+		seen[file] = struct{}{}
+		out = append(out, file)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func selectTrackedFallbackFiles(repoRoot string, tracked []string, settings Settings, rules *ignore.Rules) []string {
+	settings = NormalizeSettings(settings)
+	return filterLimitedRelFiles(repoRoot, tracked, settings, rules, settings.Scale.MaxRecentFiles)
+}
+
+func filterLimitedRelFiles(repoRoot string, relFiles []string, settings Settings, rules *ignore.Rules, limit int) []string {
+	settings = NormalizeSettings(settings)
+	allowed := map[string]struct{}{}
+	for _, language := range settings.Languages {
+		allowed[language] = struct{}{}
+	}
+	if rules == nil {
+		rules = &ignore.Rules{}
+	}
+	files := make([]string, 0, min(limit, len(relFiles)))
+	seen := map[string]struct{}{}
+	for _, rel := range relFiles {
+		rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+		if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || rules.ShouldIgnorePath(rel) {
+			continue
+		}
+		abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
+		language, parseable, ok := watchedFileLanguage(abs)
+		if !ok {
+			continue
+		}
+		if parseable && !languageAllowed(language, allowed) {
+			continue
+		}
+		if _, ok := seen[rel]; ok {
+			continue
+		}
+		seen[rel] = struct{}{}
+		files = append(files, abs)
+		if limit > 0 && len(files) >= limit {
+			break
+		}
+	}
+	return files
+}
+
+func selectAnchorFiles(repoRoot string, tracked []string, settings Settings, rules *ignore.Rules) []string {
 	settings = NormalizeSettings(settings)
 	allowed := map[string]struct{}{}
 	for _, language := range settings.Languages {
@@ -81,13 +167,13 @@ func selectLimitedFiles(repoRoot string, tracked []string, settings Settings, ru
 		if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || rules.ShouldIgnorePath(rel) {
 			continue
 		}
-		score := highSignalScore(rel)
-		abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
-		language, parseable, ok := watchedFileLanguage(abs)
-		if score == 0 || !ok {
+		score := repoSignalAnchorScore(rel)
+		if score == 0 {
 			continue
 		}
-		if parseable && !languageAllowed(language, allowed) {
+		abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
+		language, parseable, ok := watchedFileLanguage(abs)
+		if !ok || (parseable && !languageAllowed(language, allowed)) {
 			continue
 		}
 		if _, ok := seen[rel]; ok {
@@ -102,7 +188,7 @@ func selectLimitedFiles(repoRoot string, tracked []string, settings Settings, ru
 		}
 		return candidates[i].path < candidates[j].path
 	})
-	limit := min(settings.Scale.MaxLimitedFiles, len(candidates))
+	limit := min(50, len(candidates))
 	files := make([]string, 0, limit)
 	for _, candidate := range candidates[:limit] {
 		files = append(files, candidate.path)
@@ -111,7 +197,7 @@ func selectLimitedFiles(repoRoot string, tracked []string, settings Settings, ru
 	return files
 }
 
-func highSignalScore(rel string) int {
+func repoSignalAnchorScore(rel string) int {
 	base := strings.ToLower(filepath.Base(rel))
 	relLower := strings.ToLower(filepath.ToSlash(rel))
 	switch {

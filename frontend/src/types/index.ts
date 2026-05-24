@@ -48,6 +48,7 @@ export interface View {
   owner_element_id: number | null
   name: string
   label: string | null
+  tags: string[]
   is_root: boolean
   created_at: string
   updated_at: string
@@ -114,6 +115,7 @@ export interface Connector {
   url: string | null
   source_handle: string | null
   target_handle: string | null
+  tags?: string[]
   created_at: string
   updated_at: string
 }
@@ -124,6 +126,7 @@ export interface ViewTreeNode {
   name: string
   description: string | null
   level_label: string | null
+  tags?: string[]
   level: number
   depth: number
   created_at: string
@@ -173,6 +176,7 @@ export interface DependencyConnector {
   url?: string | null
   source_handle?: string | null
   target_handle?: string | null
+  tags: string[]
   created_at: string
   updated_at: string
 }

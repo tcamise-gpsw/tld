@@ -326,6 +326,10 @@ function ElementNode({ data, selected }: Props) {
     }
     return next
   }, [data.reconnectCandidates])
+  const selectedElementCount = useStore((state) =>
+    Array.from(state.nodeInternals.values()).filter((node) => node.selected && node.type === 'elementNode').length,
+  )
+  const isMultiSelected = selectedElementCount > 1
 
   const nodeLogoUrl = resolveElementIconUrl(data.logo_url, data.technology_connectors) ?? undefined
 
@@ -850,10 +854,12 @@ function ElementNode({ data, selected }: Props) {
             <Text color="whiteAlpha.600" fontSize="8px" fontWeight="bold">⇧R</Text>
             <Text color="whiteAlpha.400" fontSize="8px">Delete</Text>
           </HStack>
-          <HStack spacing={1.5}>
-            <Text color="whiteAlpha.600" fontSize="8px" fontWeight="bold">T</Text>
-            <Text color="whiteAlpha.400" fontSize="8px">Tech</Text>
-          </HStack>
+          {!isMultiSelected && (
+            <HStack spacing={1.5}>
+              <Text color="whiteAlpha.600" fontSize="8px" fontWeight="bold">T</Text>
+              <Text color="whiteAlpha.400" fontSize="8px">Tech</Text>
+            </HStack>
+          )}
         </HStack>
       )}
 

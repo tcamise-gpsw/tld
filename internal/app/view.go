@@ -15,6 +15,7 @@ type ViewTreeNode struct {
 	Name           string         `json:"name"`
 	Description    *string        `json:"description"`
 	LevelLabel     *string        `json:"level_label"`
+	Tags           []string       `json:"tags"`
 	Level          int            `json:"level"`
 	Depth          int            `json:"depth"`
 	CreatedAt      string         `json:"created_at"`
@@ -24,12 +25,13 @@ type ViewTreeNode struct {
 }
 
 type ViewSummary struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	Label     *string `json:"label"`
-	IsRoot    bool    `json:"is_root"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Label     *string  `json:"label"`
+	Tags      []string `json:"tags"`
+	IsRoot    bool     `json:"is_root"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
 }
 
 type ViewConnector struct {
@@ -66,7 +68,7 @@ type ViewLayer struct {
 }
 
 func (s *Store) listViewRows(ctx context.Context) ([]viewRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, owner_element_id, name, description, level_label, level, created_at, updated_at FROM views ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, owner_element_id, name, description, level_label, tags, level, created_at, updated_at FROM views ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +76,7 @@ func (s *Store) listViewRows(ctx context.Context) ([]viewRow, error) {
 	var out []viewRow
 	for rows.Next() {
 		var row viewRow
-		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Tags, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, row)
@@ -181,15 +183,18 @@ func (s *Store) childViewMetaMap(ctx context.Context) (map[int64]childViewMetaVa
 func viewNodeFromRow(row viewRow, parentID *int64, depth int) ViewTreeNode {
 	var ownerElementID *int64
 	if row.OwnerElementID.Valid {
-		ownerElementID = new(row.OwnerElementID.Int64)
+		value := row.OwnerElementID.Int64
+		ownerElementID = &value
 	}
 	var description *string
 	if row.Description.Valid {
-		description = new(row.Description.String)
+		value := row.Description.String
+		description = &value
 	}
 	var levelLabel *string
 	if row.LevelLabel.Valid {
-		levelLabel = new(row.LevelLabel.String)
+		value := row.LevelLabel.String
+		levelLabel = &value
 	}
 	return ViewTreeNode{
 		ID:             row.ID,
@@ -197,6 +202,7 @@ func viewNodeFromRow(row viewRow, parentID *int64, depth int) ViewTreeNode {
 		Name:           row.Name,
 		Description:    description,
 		LevelLabel:     levelLabel,
+		Tags:           parseStrings(row.Tags),
 		Level:          row.Level,
 		Depth:          depth,
 		CreatedAt:      row.CreatedAt,
@@ -300,6 +306,7 @@ func (s *Store) Views(ctx context.Context) ([]ViewSummary, error) {
 			ID:        node.ID,
 			Name:      node.Name,
 			Label:     node.LevelLabel,
+			Tags:      node.Tags,
 			IsRoot:    node.ParentViewID == nil,
 			CreatedAt: node.CreatedAt,
 			UpdatedAt: node.UpdatedAt,
@@ -309,9 +316,9 @@ func (s *Store) Views(ctx context.Context) ([]ViewSummary, error) {
 }
 
 func (s *Store) ViewByID(ctx context.Context, id int64) (ViewTreeNode, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, owner_element_id, name, description, level_label, level, created_at, updated_at FROM views WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, owner_element_id, name, description, level_label, tags, level, created_at, updated_at FROM views WHERE id = ?`, id)
 	var view viewRow
-	if err := row.Scan(&view.ID, &view.OwnerElementID, &view.Name, &view.Description, &view.LevelLabel, &view.Level, &view.CreatedAt, &view.UpdatedAt); err != nil {
+	if err := row.Scan(&view.ID, &view.OwnerElementID, &view.Name, &view.Description, &view.LevelLabel, &view.Tags, &view.Level, &view.CreatedAt, &view.UpdatedAt); err != nil {
 		return ViewTreeNode{}, err
 	}
 	var parentID *int64
@@ -327,7 +334,7 @@ func (s *Store) ViewByID(ctx context.Context, id int64) (ViewTreeNode, error) {
 
 func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.level, v.created_at, v.updated_at
+		SELECT DISTINCT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at
 		FROM views v
 		JOIN placements p ON p.element_id = v.owner_element_id
 		WHERE p.view_id = ? AND v.id != ?
@@ -339,7 +346,7 @@ func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeN
 	out := []ViewTreeNode{}
 	for rows.Next() {
 		var row viewRow
-		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Tags, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
 			return nil, err
 		}
 		parentID := parentViewID
@@ -350,7 +357,7 @@ func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeN
 
 func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.level, v.created_at, v.updated_at
+		SELECT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at
 		FROM views v
 		WHERE v.owner_element_id IS NULL
 		   OR NOT EXISTS (
@@ -366,7 +373,7 @@ func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
 	out := []ViewTreeNode{}
 	for rows.Next() {
 		var row viewRow
-		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Tags, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, viewNodeFromRow(row, nil, 0))
@@ -400,13 +407,14 @@ func (s *Store) CreateView(ctx context.Context, name string, levelLabel *string,
 		ID:        view.ID,
 		Name:      view.Name,
 		Label:     view.LevelLabel,
+		Tags:      view.Tags,
 		IsRoot:    view.ParentViewID == nil,
 		CreatedAt: view.CreatedAt,
 		UpdatedAt: view.UpdatedAt,
 	}, nil
 }
 
-func (s *Store) UpdateView(ctx context.Context, id int64, name *string, levelLabel *string) (ViewSummary, error) {
+func (s *Store) UpdateView(ctx context.Context, id int64, name *string, description *string, levelLabel *string, tags []string) (ViewSummary, error) {
 	current, err := s.ViewByID(ctx, id)
 	if err != nil {
 		return ViewSummary{}, err
@@ -415,7 +423,18 @@ func (s *Store) UpdateView(ctx context.Context, id int64, name *string, levelLab
 	if name != nil && strings.TrimSpace(*name) != "" {
 		nextName = strings.TrimSpace(*name)
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE views SET name = ?, level_label = ?, updated_at = ? WHERE id = ?`, nextName, levelLabel, nowString(), id)
+	nextDescription := current.Description
+	if description != nil {
+		nextDescription = description
+	}
+	tagJSON := jsonString(current.Tags, "[]")
+	if tags != nil {
+		if err := s.ensureTagColors(ctx, tags); err != nil {
+			return ViewSummary{}, err
+		}
+		tagJSON = jsonString(tags, "[]")
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE views SET name = ?, description = ?, level_label = ?, tags = ?, updated_at = ? WHERE id = ?`, nextName, nextDescription, levelLabel, tagJSON, nowString(), id)
 	if err != nil {
 		return ViewSummary{}, err
 	}
@@ -427,6 +446,7 @@ func (s *Store) UpdateView(ctx context.Context, id int64, name *string, levelLab
 		ID:        updated.ID,
 		Name:      updated.Name,
 		Label:     updated.LevelLabel,
+		Tags:      updated.Tags,
 		IsRoot:    updated.ParentViewID == nil,
 		CreatedAt: updated.CreatedAt,
 		UpdatedAt: updated.UpdatedAt,

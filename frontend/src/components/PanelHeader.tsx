@@ -5,9 +5,10 @@ interface Props {
   title: ReactNode
   onClose?: () => void
   hasCloseButton?: boolean
+  isInline?: boolean
 }
 
-export default function PanelHeader({ title, onClose, hasCloseButton = true }: Props) {
+export default function PanelHeader({ title, onClose, hasCloseButton = true, isInline = false }: Props) {
   return (
     <>
       <HStack
@@ -16,7 +17,7 @@ export default function PanelHeader({ title, onClose, hasCloseButton = true }: P
         pb={3}
         justify="space-between"
         flexShrink={0}
-        bgGradient="linear(to-b, whiteAlpha.50, transparent)"
+        bgGradient={isInline ? 'none' : 'linear(to-b, whiteAlpha.50, transparent)'}
       >
         <Text fontSize="xs" fontWeight="700" color="white" letterSpacing="0.02em" textTransform="uppercase">
           {title}

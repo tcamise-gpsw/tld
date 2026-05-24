@@ -107,6 +107,7 @@ func connectorToDependencyProto(c *diagv1.Connector) *diagv1.DependencyConnector
 		Url:             c.Url,
 		SourceHandle:    c.SourceHandle,
 		TargetHandle:    c.TargetHandle,
+		Tags:            c.Tags,
 		CreatedAt:       c.CreatedAt,
 		UpdatedAt:       c.UpdatedAt,
 	}

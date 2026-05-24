@@ -53,17 +53,17 @@ import CodePreviewPanel from '../../components/CodePreviewPanel'
 import ConnectorPanel from '../../components/ConnectorPanel'
 import ElementLibrary from '../../components/ElementLibrary'
 import ViewExplorer from '../../components/ViewExplorer'
-import { useSetHeader } from '../../components/HeaderContext'
 import ViewPanel from '../../components/ViewPanel'
+import { useSetHeader } from '../../components/HeaderContext'
 import InlineElementAdder from '../../components/InlineElementAdder'
 import ExportModal, { type ExportOptions } from '../../components/ExportModal'
 import ImportModal from '../../components/ImportModal'
 import { KbdHint } from '../../components/PanelUI'
+import ViewHeaderButton from '../../components/ViewHeaderButton'
 import ViewEditorOnboarding from '../../components/ViewEditorOnboarding'
 import DrawingCanvas, { type DrawingCanvasHandle } from '../../components/DrawingCanvas'
 import ViewFloatingMenu from '../../components/ViewFloatingMenu'
 import ViewDrawMenu from '../../components/ViewDrawMenu'
-import ViewHeaderButton from '../../components/ViewHeaderButton'
 import ViewBezierConnector from '../../components/ViewBezierConnector'
 import ViewContextNeighborElement from '../../components/ContextNeighborElement'
 import ContextBoundaryElement from '../../components/ContextBoundaryElement'
@@ -78,6 +78,7 @@ import {
 } from './hooks/useViewContextNeighbours'
 import { canonicalNodePairKey } from './pairKey'
 import type { ParsedImport } from '../../pkg/importer/mermaid'
+import { extractMermaidCode, parseMermaidAsync, serializeViewToMermaid, type MermaidDirection } from '../../pkg/importer/mermaid'
 import { vscodeBridge } from '../../lib/vscodeBridge'
 import type { ExtensionToWebviewMessage } from '../../types/vscode-messages'
 
@@ -130,6 +131,30 @@ const VIEW_EDITOR_PAN_MARGIN_MAX = 720
 const SNAP_GRID: [number, number] = [30, 30]
 
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
+
+async function copyTextToClipboard(text: string) {
+  let clipboardError: unknown
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch (err) {
+      clipboardError = err
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  if (!copied) throw clipboardError ?? new Error('Clipboard copy failed')
+}
 
 function elementUpdatePayload(element: WorkspaceElement) {
   return {
@@ -247,6 +272,73 @@ function fadeMarker(marker: string | RFEdgeMarker | undefined, opacity: number) 
     ...marker,
     color: alphaColor(marker.color ?? 'var(--accent)', opacity),
   }
+}
+
+function mermaidConnectorHandles(direction: MermaidDirection) {
+  if (direction === 'RL') return { source_handle: 'left', target_handle: 'right' }
+  if (direction === 'TB' || direction === 'TD') return { source_handle: 'bottom', target_handle: 'top' }
+  if (direction === 'BT') return { source_handle: 'top', target_handle: 'bottom' }
+  return { source_handle: 'right', target_handle: 'left' }
+}
+
+function layoutMermaidImport(parsed: ParsedImport, center: { x: number; y: number }) {
+  const refs = parsed.elements.map((element) => element.ref).filter(Boolean)
+  const refSet = new Set(refs)
+  const outgoing = new Map<string, string[]>()
+  const indegree = new Map<string, number>()
+  const rank = new Map<string, number>()
+  refs.forEach((ref) => {
+    outgoing.set(ref, [])
+    indegree.set(ref, 0)
+    rank.set(ref, 0)
+  })
+
+  parsed.connectors.forEach((connector) => {
+    const source = connector.sourceElementRef
+    const target = connector.targetElementRef
+    if (!refSet.has(source) || !refSet.has(target)) return
+    outgoing.get(source)?.push(target)
+    indegree.set(target, (indegree.get(target) ?? 0) + 1)
+  })
+
+  const queue = refs.filter((ref) => (indegree.get(ref) ?? 0) === 0)
+  let cursor = 0
+  while (cursor < queue.length) {
+    const ref = queue[cursor++]
+    for (const target of outgoing.get(ref) ?? []) {
+      rank.set(target, Math.max(rank.get(target) ?? 0, (rank.get(ref) ?? 0) + 1))
+      const nextIndegree = (indegree.get(target) ?? 0) - 1
+      indegree.set(target, nextIndegree)
+      if (nextIndegree === 0) queue.push(target)
+    }
+  }
+
+  const groups = new Map<number, string[]>()
+  refs.forEach((ref, index) => {
+    const refRank = cursor === refs.length ? (rank.get(ref) ?? 0) : Math.floor(index / 4)
+    const group = groups.get(refRank) ?? []
+    group.push(ref)
+    groups.set(refRank, group)
+  })
+
+  const horizontal = parsed.direction === 'LR' || parsed.direction === 'RL'
+  const reverse = parsed.direction === 'RL' || parsed.direction === 'BT'
+  const rankSpacing = 280
+  const itemSpacing = 150
+  const rankCount = groups.size || 1
+  const positions = new Map<string, { x: number; y: number }>()
+
+  Array.from(groups.entries()).sort(([a], [b]) => a - b).forEach(([groupRank, group]) => {
+    const rankOffset = (groupRank - (rankCount - 1) / 2) * rankSpacing * (reverse ? -1 : 1)
+    group.forEach((ref, index) => {
+      const itemOffset = (index - (group.length - 1) / 2) * itemSpacing
+      positions.set(ref, horizontal
+        ? { x: center.x + rankOffset, y: center.y + itemOffset }
+        : { x: center.x + itemOffset, y: center.y + rankOffset })
+    })
+  })
+
+  return positions
 }
 
 function areTranslateExtentsEqual(
@@ -398,6 +490,8 @@ function ViewEditorInner({
   useEffect(() => { localStorage.setItem('diag:explorerOpen', String(isExplorerOpen)) }, [isExplorerOpen])
   const [extrasOpen, setExtrasOpen] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  const isPasteImportingRef = useRef(false)
+  const pendingPasteSelectionRef = useRef<{ viewId: number; elementIds: Set<number> } | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const setViewEditorUi = useStore((state) => state.setViewEditorUi)
   const snapToGrid = useStore((state) => state.snapToGrid)
@@ -523,6 +617,8 @@ function ViewEditorInner({
   const rfReadyRef = useRef(false)
   const fittedContextForViewRef = useRef<number | null>(null)
   const interactionSourceIdRef = useRef<number | null>(null)
+  const multiConnectionSourceIdsRef = useRef<number[] | null>(null)
+  const [deletedLibraryElementIds, setDeletedLibraryElementIds] = useState<number[]>([])
 
   const nodeTypesMemo = useMemo(() => nodeTypes, [])
   const edgeTypesMemo = useMemo(() => edgeTypes, [])
@@ -632,6 +728,11 @@ function ViewEditorInner({
   } = data
   refreshElementsRef.current = refreshElements
 
+  const handleElementPermanentlyDeletedEverywhere = useCallback((elementId: number) => {
+    handleElementPermanentlyDeleted(elementId)
+    setDeletedLibraryElementIds((prev) => prev.includes(elementId) ? prev : [...prev, elementId])
+  }, [handleElementPermanentlyDeleted])
+
   const { hasSignificantOverlaps, dismiss: dismissOverlapSuggestion } = useOverlapDetection(rfNodes, viewId)
   const selectedCanvasElementIds = useMemo(() => selectedElementIds(rfNodes), [rfNodes])
   const selectedCanvasElementIdKey = selectedCanvasElementIds.join(',')
@@ -649,6 +750,35 @@ function ViewEditorInner({
     })
     return counts
   }, [selectedCanvasElements])
+
+  useEffect(() => {
+    const pendingSelection = pendingPasteSelectionRef.current
+    if (!pendingSelection || pendingSelection.viewId !== viewId || pendingSelection.elementIds.size === 0) return
+
+    const visibleElementIds = new Set(
+      rfNodes
+        .filter((node) => node.type === 'elementNode')
+        .map((node) => parseNumericId(node.id))
+        .filter((id): id is number => id !== null),
+    )
+    for (const elementId of pendingSelection.elementIds) {
+      if (!visibleElementIds.has(elementId)) return
+    }
+
+    pendingPasteSelectionRef.current = null
+    setSelectedElement(null)
+    setSelectedEdge(null)
+    setSelectedProxyConnectorDetails(null)
+    closeElementPanelRef.current()
+    closeConnectorPanelRef.current()
+    closeProxyConnectorPanelRef.current()
+    setRfEdges((edges) => edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+    setRfNodes((nodes) => nodes.map((node) => {
+      const elementId = node.type === 'elementNode' ? parseNumericId(node.id) : null
+      const selected = elementId !== null && pendingSelection.elementIds.has(elementId)
+      return node.selected === selected ? node : { ...node, selected }
+    }))
+  }, [rfNodes, setRfEdges, setRfNodes, viewId])
 
   useEffect(() => {
     if (selectedCanvasElementIds.length <= 1) return
@@ -1243,6 +1373,7 @@ function ViewEditorInner({
     navigateRef,
     containerRef,
     interactionSourceIdRef,
+    multiConnectionSourceIdsRef,
     hoveredZoomRef, hoverPanLockedUntilRef,
     setViewElements, setConnectors,
     setRfNodes, setRfEdges,
@@ -1252,25 +1383,31 @@ function ViewEditorInner({
     stableOnConnectTo: async (targetElementId: number) => {
       // Inline this is the real implementation, also stored in stableOnConnectToRef
       const sourceId = interactionSourceIdRef.current
+      const sourceIds = Array.from(new Set(
+        multiConnectionSourceIdsRef.current?.length ? multiConnectionSourceIdsRef.current : sourceId !== null ? [sourceId] : [],
+      )).filter((id) => id !== targetElementId)
       const cid = viewIdRef.current
-      if (sourceId === null || cid === null) return
+      if (sourceIds.length === 0 || cid === null) return
       interactionSourceIdRef.current = null
+      multiConnectionSourceIdsRef.current = null
       const interactionNodes = interactionNodesRef.current.length > 0 ? interactionNodesRef.current : rfNodesRef.current
-      const sourceNode = interactionNodes.find((n) => n.id === String(sourceId))
       const targetNode = interactionNodes.find((n) => n.id === String(targetElementId))
-      let finalSourceHandle = 'right'; let finalTargetHandle = 'left'
-      if (sourceNode && targetNode) {
-        const h = findClosestHandles(sourceNode, targetNode)
-        finalSourceHandle = h.sourceHandle; finalTargetHandle = h.targetHandle
-      }
       try {
-        const newConnector = await api.workspace.connectors.create(cid, {
-          source_element_id: sourceId, target_element_id: targetElementId,
-          source_handle: finalSourceHandle, target_handle: finalTargetHandle, direction: 'forward',
-        })
-        const connector = connectorToConnector(newConnector)
-        upsertConnectorGraphSnapshot(connector)
-        upsertStoreConnector(connector)
+        for (const nextSourceId of sourceIds) {
+          const sourceNode = interactionNodes.find((n) => n.id === String(nextSourceId))
+          let finalSourceHandle = 'right'; let finalTargetHandle = 'left'
+          if (sourceNode && targetNode) {
+            const h = findClosestHandles(sourceNode, targetNode)
+            finalSourceHandle = h.sourceHandle; finalTargetHandle = h.targetHandle
+          }
+          const newConnector = await api.workspace.connectors.create(cid, {
+            source_element_id: nextSourceId, target_element_id: targetElementId,
+            source_handle: finalSourceHandle, target_handle: finalTargetHandle, direction: 'forward',
+          })
+          const connector = connectorToConnector(newConnector)
+          upsertConnectorGraphSnapshot(connector)
+          upsertStoreConnector(connector)
+        }
         handleUnsupportedMutation()
       } catch { /* intentionally empty */ }
     },
@@ -1286,7 +1423,7 @@ function ViewEditorInner({
     setSelectedProxyConnectorDetails,
     openProxyConnectorPanel: useCallback(() => openProxyConnectorPanelRef.current(), []),
     closeProxyConnectorPanel: useCallback(() => closeProxyConnectorPanelRef.current(), []),
-    handleElementDeleted, handleElementPermanentlyDeleted,
+    handleElementDeleted, handleElementPermanentlyDeleted: handleElementPermanentlyDeletedEverywhere,
     handleConnectorDeleted: useCallback((edgeId: number, ownerViewId?: number) => {
       const vid = ownerViewId ?? viewId
       if (vid != null) removeConnectorGraphSnapshot(vid, edgeId)
@@ -1790,7 +1927,6 @@ function ViewEditorInner({
     return () => { html.style.overscrollBehaviorX = prev }
   }, [])
 
-  // ── Header ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     setHeader({
       node: <ViewHeaderButton name={viewName ?? undefined} onOpen={openViewDetailsRef.current} />,
@@ -1798,7 +1934,6 @@ function ViewEditorInner({
   }, [viewName, setHeader])
 
   useEffect(() => () => setHeader(null), [setHeader])
-
   // ── Share ──────────────────────────────────────────────────────────────────
   const onShare = useCallback(() => { }, [])
 
@@ -1906,6 +2041,17 @@ function ViewEditorInner({
   }, [rfNodesRef])
 
   // ── Export / Import ────────────────────────────────────────────────────────
+  const handleCopyMermaidDirect = useCallback(async () => {
+    const code = serializeViewToMermaid(viewElements, connectors)
+    setCanvasMenu(null)
+    try {
+      await copyTextToClipboard(code)
+      toast({ status: 'success', title: 'Copied Mermaid', description: 'Mermaid source copied to clipboard.' })
+    } catch {
+      toast({ status: 'error', title: 'Copy failed', description: 'Could not write Mermaid source to the clipboard.' })
+    }
+  }, [connectors, setCanvasMenu, toast, viewElements])
+
   const handleExportView = useCallback(async (options: ExportOptions) => {
     const flowRoot = containerRef.current?.querySelector('.react-flow') as HTMLElement | null
     if (!flowRoot) { toast({ status: 'error', title: 'Export failed', description: 'Could not find the view canvas.' }); return }
@@ -1919,14 +2065,7 @@ function ViewEditorInner({
     try {
       setIsExporting(true)
       if (options.format === 'mermaid') {
-        let code = 'architecture-beta\n'
-        for (const obj of viewElements) {
-          const safeId = `obj_${obj.element_id}`
-          const shape = obj.kind === 'database' ? 'database' : obj.kind === 'person' ? 'person' : 'server'
-          code += `  service ${safeId}(${shape})[${obj.name}]\n`
-        }
-        code += '\n'
-        for (const connector of connectors) { code += `  obj_${connector.source_element_id}:R -- L:obj_${connector.target_element_id}\n` }
+        const code = serializeViewToMermaid(viewElements, connectors)
         triggerDownload(URL.createObjectURL(new Blob([code], { type: 'text/plain;charset=utf-8' })), downloadName)
       } else if (options.format === 'svg') {
         triggerDownload(await toSvg(flowRoot, { cacheBust: true, filter: filterNode }), downloadName)
@@ -1939,6 +2078,96 @@ function ViewEditorInner({
       toast({ status: 'error', title: 'Export failed', description: 'Please try again.' })
     } finally { setIsExporting(false) }
   }, [viewName, viewElements, connectors, toast])
+
+  const handlePasteMermaidImport = useCallback(async (event: ClipboardEvent) => {
+    if (!canEdit || isPasteImportingRef.current || textEditorState || addingElementAt) return
+    const target = event.target as HTMLElement | null
+    const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' ||
+      target?.tagName === 'SELECT' || target?.isContentEditable
+    if (isInput) return
+
+    const mermaidCode = extractMermaidCode(event.clipboardData?.getData('text/plain') ?? '')
+    if (!mermaidCode) return
+
+    const currentViewId = viewIdRef.current
+    if (!currentViewId) return
+
+    event.preventDefault()
+    isPasteImportingRef.current = true
+    try {
+      const parsed = await parseMermaidAsync(mermaidCode)
+      if (parsed.warnings.length > 0 || (parsed.elements.length === 0 && parsed.connectors.length === 0)) {
+        toast({ status: 'error', title: 'Mermaid import failed', description: parsed.warnings[0] ?? 'No compatible diagram content found.' })
+        return
+      }
+
+      const rect = containerRef.current?.getBoundingClientRect()
+      const center = rect
+        ? screenToFlowPositionRef.current({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+        : { x: 0, y: 0 }
+      const positions = layoutMermaidImport(parsed, center)
+      const createdByRef = new Map<string, WorkspaceElement>()
+
+      for (const element of parsed.elements) {
+        const created = await api.elements.create({
+          name: element.name,
+          kind: element.kind ?? 'system',
+          description: element.description ?? '',
+          technology: element.technology ?? '',
+          url: element.url ?? '',
+          tags: element.tags ?? [],
+        })
+        createdByRef.set(element.ref, created)
+      }
+
+      await Promise.all(parsed.elements.map((element) => {
+        const created = createdByRef.get(element.ref)
+        if (!created) return Promise.resolve()
+        const position = positions.get(element.ref) ?? center
+        return api.workspace.views.placements.add(currentViewId, created.id, position.x, position.y)
+      }))
+
+      const handles = mermaidConnectorHandles(parsed.direction)
+      await Promise.all(parsed.connectors.map((connector) => {
+        const source = createdByRef.get(connector.sourceElementRef)
+        const target = createdByRef.get(connector.targetElementRef)
+        if (!source || !target) return Promise.resolve()
+        return api.workspace.connectors.create(currentViewId, {
+          source_element_id: source.id,
+          target_element_id: target.id,
+          label: connector.label ?? '',
+          direction: connector.direction ?? 'forward',
+          style: connector.style ?? 'bezier',
+          source_handle: connector.sourceHandle ?? handles.source_handle,
+          target_handle: connector.targetHandle ?? handles.target_handle,
+        })
+      }))
+
+      clearEditHistory()
+      await refreshElements()
+      pendingPasteSelectionRef.current = {
+        viewId: currentViewId,
+        elementIds: new Set(Array.from(createdByRef.values(), (element) => element.id)),
+      }
+      toast({
+        status: 'success',
+        title: 'Mermaid imported',
+        description: `Created ${parsed.elements.length} elements and ${parsed.connectors.length} connectors.`,
+        duration: 5000,
+        isClosable: true,
+      })
+    } catch (err) {
+      await refreshElements()
+      toast({ status: 'error', title: 'Mermaid import failed', description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      isPasteImportingRef.current = false
+    }
+  }, [addingElementAt, canEdit, clearEditHistory, refreshElements, textEditorState, toast, viewIdRef])
+
+  useEffect(() => {
+    window.addEventListener('paste', handlePasteMermaidImport)
+    return () => window.removeEventListener('paste', handlePasteMermaidImport)
+  }, [handlePasteMermaidImport])
 
   const handleImportView = useCallback(async (parsed: ParsedImport) => {
     const currentViewId = viewIdRef.current
@@ -2262,6 +2491,7 @@ function ViewEditorInner({
                 if (rect) showAddingElementAt(x + rect.left, y + rect.top)
                 setCanvasMenu(null)
               }}
+              onCopyMermaid={handleCopyMermaidDirect}
             />
 
             {/* Inline element adder */}
@@ -2338,6 +2568,7 @@ function ViewEditorInner({
           onTapAdd={canEdit ? handleTapAdd : undefined}
           onFindElement={handleFindElement}
           onTouchDrop={canEdit ? handleTouchDrop : undefined}
+          deletedElementIds={deletedLibraryElementIds}
           noFocusLock={!!addingElementAt || !!textEditorState}
         />
 
@@ -2350,7 +2581,7 @@ function ViewEditorInner({
             const placement = viewElements.find((item) => item.element_id === elementId)
             if (placement) pushPlacementRemoveAction(placement)
             handleElementDeleted(elementId)
-          }} onPermanentDelete={handleElementPermanentlyDeleted}
+          }} onPermanentDelete={handleElementPermanentlyDeletedEverywhere}
           visibilityOverrideDelta={overrideDeltaFor('element', selectedElement?.id)}
           onPromoteVisibility={(id) => handleVisibilityOverride('element', id, 'promote')}
           onDemoteVisibility={(id) => handleVisibilityOverride('element', id, 'demote')}

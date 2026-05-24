@@ -374,11 +374,95 @@ export async function Users() {
 	if deps := countElementTag(t, db, "dependency:import"); deps != 0 {
 		t.Fatalf("expected dependency/import facts not to surface as tags, found on %d elements", deps)
 	}
-	if deps := elementKindCount(t, db, "dependency"); deps == 0 {
-		t.Fatal("expected dependency/import facts to materialize as shared dependency module nodes")
+	if deps := elementKindCount(t, db, "dependency"); deps != 0 {
+		t.Fatalf("expected baseline dependency imports to stay grouped, found %d exact dependency nodes", deps)
 	}
-	if !connectorExistsBetween(t, db, "main.go", "github.com/go-chi/chi/v5") {
-		t.Fatal("expected importing file to connect to imported dependency")
+	if groups := elementKindCount(t, db, "dependency-group"); groups == 0 {
+		t.Fatal("expected dependency/import facts to materialize as grouped dependency nodes")
+	}
+	if !connectorExistsBetween(t, db, "main.go", "External packages") {
+		t.Fatal("expected importing file to connect to grouped external dependencies")
+	}
+}
+
+func TestDependencyGroupsExpandCleanAndHideWithContext(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "go.mod", `module example.com/tldwatchfixture
+
+go 1.22
+`)
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency)
+}
+`)
+
+	store := NewStore(db)
+	scanResult, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := RepresentRequest{
+		Embedding:  EmbeddingConfig{Provider: "none"},
+		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, req); err != nil {
+		t.Fatal(err)
+	}
+	if elementNameExists(t, db, "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatal("exact dependency module should start hidden behind the dependency group")
+	}
+	groupID, ok, err := store.MappingResourceID(context.Background(), scanResult.RepositoryID, "dependency-group", "dependency.group:internal", "element")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected internal dependency group")
+	}
+	if !connectorExistsBetween(t, db, "main.go", "Internal packages") {
+		t.Fatal("expected file to connect to grouped internal dependencies")
+	}
+
+	show, err := store.ApplyContextAction(context.Background(), scanResult.RepositoryID, contextActionShow, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if show.ElementsAdded == 0 || !elementNameExists(t, db, "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatalf("expected show context to expand exact dependency modules, got %+v", show)
+	}
+	if !elementNameExists(t, db, "Internal packages") {
+		t.Fatal("expanded dependency group should remain visible so it can be cleaned")
+	}
+	if !connectorExistsBetween(t, db, "main.go", "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatal("expected expanded exact dependency connector")
+	}
+
+	clean, err := store.ApplyContextAction(context.Background(), scanResult.RepositoryID, contextActionClean, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.ElementsRemoved == 0 || elementNameExists(t, db, "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatalf("expected clean context to collapse exact dependency modules, got %+v", clean)
+	}
+	if !elementNameExists(t, db, "Internal packages") {
+		t.Fatal("dependency group should remain after clean")
+	}
+
+	hide, err := store.ApplyContextAction(context.Background(), scanResult.RepositoryID, contextActionHide, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hide.ElementsRemoved == 0 || elementNameExists(t, db, "Internal packages") {
+		t.Fatalf("expected hide context to suppress dependency group, got %+v", hide)
 	}
 }
 
@@ -2088,6 +2172,27 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if elementKindCount(t, db, "dependency") != 0 {
+		t.Fatal("initial dependency imports should be grouped before explicit expansion")
+	}
+	groupID, ok, err := store.MappingResourceID(context.Background(), scan.RepositoryID, "dependency-group", "dependency.group:internal", "element")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected internal dependency group to be materialized")
+	}
+	show, err := store.ApplyContextAction(context.Background(), scan.RepositoryID, contextActionShow, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if show.ElementsAdded == 0 {
+		t.Fatalf("expected dependency group expansion to materialize exact modules, got %+v", show)
+	}
+	if !elementNameExists(t, db, "example.com/tldwatchfixture/internal/pricing") {
+		t.Fatal("expected expanded dependency group to materialize exact pricing module")
+	}
+	rep = show.Representation
 	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit1", "initial imports", "", "main", rep.RepresentationHash, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -2156,6 +2261,86 @@ func main() {
 	}
 	if count := countRows(t, db, `SELECT COUNT(*) FROM watch_facts WHERE repository_id = ? AND stable_key = ?`, scan.RepositoryID, "dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"); count != 0 {
 		t.Fatalf("removed import raw fact should be gone after commit, found %d rows", count)
+	}
+}
+
+func TestGroupedDependencyImportRemovalEmitsRawDiffWithoutDeadCanvasNode(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "go.mod", `module example.com/tldwatchfixture
+
+go 1.22
+`)
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+	"example.com/tldwatchfixture/internal/pricing"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency, pricing.BasePriceCents)
+}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial grouped imports")
+
+	store := NewStore(db)
+	scan, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := RepresentRequest{
+		Embedding:  EmbeddingConfig{Provider: "none"},
+		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+	}
+	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elementKindCount(t, db, "dependency") != 0 {
+		t.Fatal("baseline grouped imports should not materialize exact dependency nodes")
+	}
+	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit1", "initial grouped imports", "", "main", rep.RepresentationHash, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency)
+}
+`)
+	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffs, err := store.BuildWatchDiffs(context.Background(), scan.RepositoryID, next.RepresentationHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removedFactOwner := "fact:dependency.inventory:dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"
+	if diff := findDiffByOwner(diffs, "fact", removedFactOwner, "fact", "deleted"); diff == nil {
+		t.Fatalf("expected grouped removed dependency import to emit a raw fact diff, got %+v", diffs)
+	}
+	if diff := findDiffByOwner(diffs, "dependency-module", "dependency.module:example.com/tldwatchfixture/internal/pricing", "element", "deleted"); diff != nil {
+		t.Fatalf("grouped removed dependency should not invent exact element deletion, got %+v", diff)
+	}
+	if diff := findDiffByOwner(diffs, "fact-import-connector", removedFactOwner+":module", "connector", "deleted"); diff != nil {
+		t.Fatalf("grouped removed dependency should not invent exact connector deletion, got %+v", diff)
 	}
 }
 
@@ -2550,7 +2735,7 @@ export function caller(): string {
 	if len(byName["shared"]) != 2 {
 		t.Fatalf("expected ambiguous shared symbols, got %+v", byName["shared"])
 	}
-	if _, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "shared", FilePath: filepath.Join(repo, "src", "b.ts"), Line: 6}, byName, symbols); ok {
+	if _, ok := resolveTargetSymbol(context.Background(), nil, nil, repo, analyzer.Ref{Name: "shared", FilePath: filepath.Join(repo, "src", "b.ts"), Line: 6}, byName, symbols); ok {
 		t.Fatal("name-only fallback should not resolve ambiguous shared symbols")
 	}
 
@@ -2588,10 +2773,10 @@ func TestResolveTargetSymbolDoesNotUseGlobalNameOnlyFallback(t *testing.T) {
 		"uniqueCoincidence": {symbols[0]},
 		"caller":            {symbols[1]},
 	}
-	if _, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "uniqueCoincidence", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); ok {
+	if _, ok := resolveTargetSymbol(context.Background(), nil, nil, repo, analyzer.Ref{Name: "uniqueCoincidence", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); ok {
 		t.Fatal("global unique name-only fallback should not create a cross-file reference")
 	}
-	if target, ok := resolveTargetSymbol(context.Background(), nil, repo, analyzer.Ref{Name: "caller", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); !ok || target.ID != 2 {
+	if target, ok := resolveTargetSymbol(context.Background(), nil, nil, repo, analyzer.Ref{Name: "caller", FilePath: filepath.Join(repo, "cmd", "main.ts"), Line: 2}, byName, symbols); !ok || target.ID != 2 {
 		t.Fatalf("same-file fallback should still resolve local references, target=%+v ok=%v", target, ok)
 	}
 }
@@ -5086,6 +5271,7 @@ func symbolsByName(ctx context.Context, store *Store, repositoryID int64, name s
 
 type fakeDefinitionResolver struct {
 	locationsByName map[string][]analyzerlsp.DefinitionLocation
+	incomingByKey   map[string][]analyzerlsp.CallLocation
 	calls           int
 	refs            []analyzer.Ref
 }
@@ -5093,7 +5279,23 @@ type fakeDefinitionResolver struct {
 func (r *fakeDefinitionResolver) ResolveDefinitions(_ context.Context, ref analyzer.Ref) ([]analyzerlsp.DefinitionLocation, error) {
 	r.calls++
 	r.refs = append(r.refs, ref)
-	return append([]analyzerlsp.DefinitionLocation(nil), r.locationsByName[ref.Name]...), nil
+	if locations, ok := r.locationsByName[ref.Name]; ok {
+		return append([]analyzerlsp.DefinitionLocation(nil), locations...), nil
+	}
+	return append([]analyzerlsp.DefinitionLocation(nil), r.locationsByName["*"]...), nil
+}
+
+func (r *fakeDefinitionResolver) IncomingCalls(_ context.Context, filePath string, line, _ int) ([]analyzerlsp.CallLocation, error) {
+	if r == nil {
+		return nil, nil
+	}
+	if calls, ok := r.incomingByKey[callerLocationKey(filePath, line, "")]; ok {
+		return append([]analyzerlsp.CallLocation(nil), calls...), nil
+	}
+	if calls, ok := r.incomingByKey[callerLocationKey(filePath, line, "*")]; ok {
+		return append([]analyzerlsp.CallLocation(nil), calls...), nil
+	}
+	return append([]analyzerlsp.CallLocation(nil), r.incomingByKey["*"]...), nil
 }
 
 func (r *fakeDefinitionResolver) Close() error {
@@ -5827,12 +6029,99 @@ func TestPlanScanAutoChoosesLimitedAboveTrackedThreshold(t *testing.T) {
 		t.Fatalf("expected limited plan, got %+v", plan)
 	}
 	got := relTestFiles(t, repo, plan.Files)
-	want := []string{"cmd/api/main.go", "deploy/k8s/service.yaml"}
+	want := []string{"cmd/api/main.go", "deploy/k8s/service.yaml", "internal/noise/helper.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("limited files = %+v, want %+v", got, want)
 	}
 	if plan.TrackedFiles != 3 {
 		t.Fatalf("TrackedFiles = %d, want 3", plan.TrackedFiles)
+	}
+}
+
+func TestPlanScanLimitedCapsRecentSeeds(t *testing.T) {
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "a.go", "package main\nfunc A() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "a")
+	writeFile(t, repo, "b.go", "package main\nfunc B() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "b")
+	writeFile(t, repo, "c.go", "package main\nfunc C() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "c")
+
+	settings := DefaultSettings()
+	settings.Scale.Strategy = ScanStrategyLimited
+	settings.Scale.MaxRecentFiles = 2
+	settings.Scale.MaxLimitedFiles = 1
+	plan, err := planScan(repo, settings, nil)
+	if err != nil {
+		t.Fatalf("planScan: %v", err)
+	}
+	got := relTestFiles(t, repo, plan.Files)
+	want := []string{"c.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("limited files = %+v, want %+v", got, want)
+	}
+}
+
+func TestScannerLimitedModeExpandsImmediateDefinitionNeighbors(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := t.TempDir()
+	writeFile(t, repo, "a.go", "package main\nfunc A() { B() }\n")
+	writeFile(t, repo, "b.go", "package main\nfunc B() {}\n")
+
+	store := NewStore(db)
+	scanner := NewScanner(store)
+	settings := DefaultSettings()
+	settings.Scale.MaxLimitedFiles = 10
+	settings.LSP.Enabled = true
+	scanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{locationsByName: map[string][]analyzerlsp.DefinitionLocation{
+			"*": {{FilePath: filepath.Join(repo, "b.go"), Line: 2}},
+		}}
+	}
+
+	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "a.go")}, nil, settings, &ignore.Rules{})
+	if err != nil {
+		t.Fatalf("expandLimitedFiles: %v", err)
+	}
+	if len(result.Files) != 2 || result.RecentFiles != 1 || result.NeighborFiles != 1 {
+		t.Fatalf("expansion = %+v, want one recent seed and one neighbor", result)
+	}
+}
+
+func TestScannerLimitedModeStopsAtSharedCallerAncestor(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := t.TempDir()
+	writeFile(t, repo, "leaf_one.go", "package main\nfunc LeafOne() {}\n")
+	writeFile(t, repo, "leaf_two.go", "package main\nfunc LeafTwo() {}\n")
+	writeFile(t, repo, "caller.go", "package main\nfunc Common() { LeafOne(); LeafTwo() }\n")
+
+	store := NewStore(db)
+	scanner := NewScanner(store)
+	settings := DefaultSettings()
+	settings.Scale.MaxLimitedFiles = 10
+	settings.Scale.MaxCallerDepth = 10
+	settings.LSP.Enabled = true
+	caller := analyzerlsp.CallLocation{FilePath: filepath.Join(repo, "caller.go"), Line: 2, Name: "Common"}
+	scanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{incomingByKey: map[string][]analyzerlsp.CallLocation{
+			"*": {caller},
+		}}
+	}
+
+	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "leaf_one.go"), filepath.Join(repo, "leaf_two.go")}, nil, settings, &ignore.Rules{})
+	if err != nil {
+		t.Fatalf("expandLimitedFiles: %v", err)
+	}
+	if !result.SharedAncestorFound || result.CallerFiles != 1 || result.CallerDepthReached != 1 {
+		t.Fatalf("expansion = %+v, want shared caller ancestor at depth 1", result)
+	}
+	if len(result.Files) != 3 {
+		t.Fatalf("files = %d, want 3", len(result.Files))
 	}
 }
 

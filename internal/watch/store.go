@@ -1346,6 +1346,12 @@ func (s *Store) BuildWatchDiffs(ctx context.Context, repositoryID int64, represe
 	}
 	for _, prev := range previous {
 		if rawFactSnapshot(prev) {
+			if rawDependencyImportSnapshot(prev) {
+				before := prev.Hash
+				diff := snapshotDiff(prev, "deleted", &before, nil, nil)
+				applyGitLineDiff(&diff, prev, nil, lineDiffs, lineHunks)
+				diffs = append(diffs, diff)
+			}
 			continue
 		}
 		before := prev.Hash
@@ -1497,6 +1503,7 @@ func stringPtr(value string) *string {
 
 func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID int64) (map[string]watchResourceSnapshot, error) {
 	out := map[string]watchResourceSnapshot{}
+	sourceCache := newMaterializedSnapshotCache()
 	fileRows, err := s.db.QueryContext(ctx, `SELECT id, path, language, worktree_hash FROM watch_files WHERE repository_id = ?`, repositoryID)
 	if err != nil {
 		return nil, err
@@ -1509,6 +1516,7 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 			return nil, err
 		}
 		out[resourceSnapshotKey("file", path, "file")] = watchResourceSnapshot{OwnerType: "file", OwnerKey: path, ResourceType: "file", ResourceID: &id, Language: language, Hash: hash, Summary: path}
+		sourceCache.set("file", path, materializedSourceSnapshot{filePath: path, rawHash: hash})
 	}
 	if err := fileRows.Close(); err != nil {
 		return nil, err
@@ -1533,11 +1541,17 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 		}
 		hash := hashString(contentHash + ":" + signatureHash)
 		end := normalizedEndLine(startLine, endLine)
+		lineCount := lineCountFromRange(startLine, endLine)
 		out[resourceSnapshotKey("symbol", key, "symbol")] = watchResourceSnapshot{OwnerType: "symbol", OwnerKey: key, ResourceType: "symbol", ResourceID: &id, Language: languageFromStableKey(stableKey), Hash: hash, Summary: name, LineCount: lineCountFromRange(startLine, endLine), FilePath: filepathToSlash(filePath), StartLine: startLine, EndLine: end}
+		sourceCache.set("symbol", key, materializedSourceSnapshot{filePath: filepathToSlash(filePath), startLine: startLine, endLine: end, lineCount: lineCount, symbolHash: fmt.Sprintf("%s:%s:%d", contentHash, signatureHash, lineCount)})
+		if end > sourceCache.fileLineCounts[filepathToSlash(filePath)] {
+			sourceCache.fileLineCounts[filepathToSlash(filePath)] = end
+		}
 	}
 	if err := symRows.Close(); err != nil {
 		return nil, err
 	}
+	sourceCache.buildFolderLineCounts()
 	factRows, err := s.db.QueryContext(ctx, `
 		SELECT enricher, stable_key, type, fact_hash, name, file_path, start_line, end_line
 		FROM watch_facts
@@ -1555,7 +1569,9 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 		}
 		ownerKey := "fact:" + enricher + ":" + stableKey
 		end := normalizedEndLine(startLine, endLine)
-		out[resourceSnapshotKey("fact", ownerKey, "fact")] = watchResourceSnapshot{OwnerType: "fact", OwnerKey: ownerKey, ResourceType: "fact", Language: "", Hash: factHash, Summary: firstNonEmpty(name, factType), LineCount: lineCountFromRange(startLine, endLine), FilePath: filepathToSlash(filePath), StartLine: startLine, EndLine: end}
+		lineCount := lineCountFromRange(startLine, endLine)
+		out[resourceSnapshotKey("fact", ownerKey, "fact")] = watchResourceSnapshot{OwnerType: "fact", OwnerKey: ownerKey, ResourceType: "fact", Language: "", Hash: factHash, Summary: firstNonEmpty(name, factType), LineCount: lineCount, FilePath: filepathToSlash(filePath), StartLine: startLine, EndLine: end}
+		sourceCache.set("fact", ownerKey, materializedSourceSnapshot{filePath: filepathToSlash(filePath), startLine: startLine, endLine: end, lineCount: lineCount})
 	}
 	if err := factRows.Close(); err != nil {
 		return nil, err
@@ -1591,18 +1607,128 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 		if tombstoned {
 			continue
 		}
-		hash, summary, language, lineCount, err := s.materializedResourceHash(ctx, repositoryID, mapping.OwnerType, mapping.OwnerKey, mapping.ResourceType, mapping.ResourceID)
+		hash, summary, language, lineCount, err := s.materializedResourceHash(ctx, repositoryID, mapping.OwnerType, mapping.OwnerKey, mapping.ResourceType, mapping.ResourceID, sourceCache)
 		if err != nil {
 			continue
 		}
 		id := mapping.ResourceID
-		filePath, startLine, endLine := materializedSourceRange(ctx, s.db, repositoryID, mapping.OwnerType, mapping.OwnerKey, "")
+		filePath, startLine, endLine := sourceCache.sourceRange(ctx, s.db, repositoryID, mapping.OwnerType, mapping.OwnerKey, "")
 		out[resourceSnapshotKey(mapping.OwnerType, mapping.OwnerKey, mapping.ResourceType)] = watchResourceSnapshot{OwnerType: mapping.OwnerType, OwnerKey: mapping.OwnerKey, ResourceType: mapping.ResourceType, ResourceID: &id, Language: language, Hash: hash, Summary: summary, LineCount: lineCount, FilePath: filePath, StartLine: startLine, EndLine: endLine}
 	}
 	return out, nil
 }
 
-func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64, ownerType, ownerKey, resourceType string, resourceID int64) (string, string, string, int, error) {
+type materializedSourceSnapshot struct {
+	filePath   string
+	startLine  int
+	endLine    int
+	lineCount  int
+	rawHash    string
+	symbolHash string
+}
+
+type materializedSnapshotCache struct {
+	owners           map[string]materializedSourceSnapshot
+	fileLineCounts   map[string]int
+	folderLineCounts map[string]int
+}
+
+func newMaterializedSnapshotCache() *materializedSnapshotCache {
+	return &materializedSnapshotCache{owners: map[string]materializedSourceSnapshot{}, fileLineCounts: map[string]int{}, folderLineCounts: map[string]int{}}
+}
+
+func (c *materializedSnapshotCache) key(ownerType, ownerKey string) string {
+	return ownerType + "\x00" + ownerKey
+}
+
+func (c *materializedSnapshotCache) set(ownerType, ownerKey string, snapshot materializedSourceSnapshot) {
+	if c == nil {
+		return
+	}
+	c.owners[c.key(ownerType, ownerKey)] = snapshot
+}
+
+func (c *materializedSnapshotCache) get(ownerType, ownerKey string) (materializedSourceSnapshot, bool) {
+	if c == nil {
+		return materializedSourceSnapshot{}, false
+	}
+	snapshot, ok := c.owners[c.key(ownerType, ownerKey)]
+	return snapshot, ok
+}
+
+func (c *materializedSnapshotCache) lineCount(ctx context.Context, db *sql.DB, repositoryID int64, ownerType, ownerKey, filePath string) int {
+	switch ownerType {
+	case "symbol", "fact":
+		if snapshot, ok := c.get(ownerType, ownerKey); ok {
+			return snapshot.lineCount
+		}
+	case "file":
+		path := filepathToSlash(strings.TrimPrefix(ownerKey, "file:"))
+		return c.fileLineCounts[path]
+	case "folder":
+		path := strings.TrimSuffix(filepathToSlash(strings.TrimPrefix(ownerKey, "folder:")), "/")
+		return c.folderLineCounts[path]
+	case "fact-import-connector":
+		if snapshot, ok := c.get("fact", importConnectorFactOwnerKey(ownerKey)); ok {
+			return snapshot.lineCount
+		}
+	}
+	return materializedLineCount(ctx, db, repositoryID, ownerType, ownerKey, filePath)
+}
+
+func (c *materializedSnapshotCache) buildFolderLineCounts() {
+	if c == nil {
+		return
+	}
+	c.folderLineCounts = map[string]int{}
+	for filePath, lineCount := range c.fileLineCounts {
+		dir := filepathToSlash(path.Dir(filePath))
+		for dir != "" && dir != "." && dir != "/" {
+			c.folderLineCounts[dir] += lineCount
+			parent := filepathToSlash(path.Dir(dir))
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+}
+
+func (c *materializedSnapshotCache) sourceRange(ctx context.Context, db *sql.DB, repositoryID int64, ownerType, ownerKey, fallbackFilePath string) (string, int, int) {
+	switch ownerType {
+	case "symbol", "fact":
+		if snapshot, ok := c.get(ownerType, ownerKey); ok {
+			return snapshot.filePath, snapshot.startLine, snapshot.endLine
+		}
+	case "file":
+		path := strings.TrimPrefix(ownerKey, "file:")
+		if strings.TrimSpace(path) == "" {
+			path = fallbackFilePath
+		}
+		return filepathToSlash(path), 0, 0
+	case "fact-import-connector":
+		if snapshot, ok := c.get("fact", importConnectorFactOwnerKey(ownerKey)); ok {
+			return snapshot.filePath, snapshot.startLine, snapshot.endLine
+		}
+	}
+	return materializedSourceRange(ctx, db, repositoryID, ownerType, ownerKey, fallbackFilePath)
+}
+
+func (c *materializedSnapshotCache) symbolHash(ctx context.Context, db *sql.DB, repositoryID int64, ownerKey string) string {
+	if snapshot, ok := c.get("symbol", ownerKey); ok {
+		return snapshot.symbolHash
+	}
+	return symbolSnapshotHash(ctx, db, repositoryID, ownerKey)
+}
+
+func (c *materializedSnapshotCache) rawHash(ownerType, ownerKey string) string {
+	if snapshot, ok := c.get(ownerType, ownerKey); ok {
+		return snapshot.rawHash
+	}
+	return ""
+}
+
+func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64, ownerType, ownerKey, resourceType string, resourceID int64, sourceCache *materializedSnapshotCache) (string, string, string, int, error) {
 	switch resourceType {
 	case "element":
 		var name, kind, description, repo, branch, filePath, language sql.NullString
@@ -1617,10 +1743,13 @@ func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64
 			}
 		}
 		raw := strings.Join([]string{name.String, kind.String, descriptionForHash, repo.String, branch.String, filePath.String, language.String}, "\n")
-		if ownerType == "symbol" {
-			raw += "\n" + symbolSnapshotHash(ctx, s.db, repositoryID, ownerKey)
+		switch ownerType {
+		case "symbol":
+			raw += "\n" + sourceCache.symbolHash(ctx, s.db, repositoryID, ownerKey)
+		case "file":
+			raw += "\n" + sourceCache.rawHash("file", strings.TrimPrefix(ownerKey, "file:"))
 		}
-		return hashString(raw), name.String, language.String, materializedLineCount(ctx, s.db, repositoryID, ownerType, ownerKey, filePath.String), nil
+		return hashString(raw), name.String, language.String, sourceCache.lineCount(ctx, s.db, repositoryID, ownerType, ownerKey, filePath.String), nil
 	case "view":
 		var name, label sql.NullString
 		err := s.db.QueryRowContext(ctx, `SELECT name, level_label FROM views WHERE id = ?`, resourceID).Scan(&name, &label)
@@ -1636,7 +1765,7 @@ func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64
 			return "", "", "", 0, err
 		}
 		raw := fmt.Sprintf("%d:%d:%d:%s:%s:%s", viewID, sourceID, targetID, label.String, relationship.String, direction.String)
-		return hashString(raw), s.connectorSummary(ctx, sourceID, targetID, direction.String), "", materializedLineCount(ctx, s.db, repositoryID, ownerType, ownerKey, ""), nil
+		return hashString(raw), s.connectorSummary(ctx, sourceID, targetID, direction.String), "", sourceCache.lineCount(ctx, s.db, repositoryID, ownerType, ownerKey, ""), nil
 	default:
 		return "", "", "", 0, fmt.Errorf("unsupported resource type %q", resourceType)
 	}
