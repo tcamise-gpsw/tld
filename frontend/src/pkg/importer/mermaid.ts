@@ -39,18 +39,26 @@ function mapEntries(value: unknown): Array<[string, Record<string, unknown>]> {
   return Array.from(value.entries()).map(([key, item]) => [String(key), asRecord(item)])
 }
 
-function addElement(result: ParsedImport, ref: string, name = ref, kind = 'system', description?: string) {
+function addElement(result: ParsedImport, ref: string, name = ref, kind = 'system', description?: string, technology?: string) {
   if (!ref || result.elements.some((element) => element.ref === ref)) return
   result.elements.push({
     ref,
     name: name || ref,
     kind,
     description,
+    technology,
     placements: [{ parentRef: 'root' }],
   } as PlanElement)
 }
 
-function addConnector(result: ParsedImport, source: string, target: string, label = '', index = result.connectors.length) {
+function addConnector(
+  result: ParsedImport,
+  source: string,
+  target: string,
+  label = '',
+  index = result.connectors.length,
+  options: Partial<PlanConnector> = {},
+) {
   if (!source || !target) return
   result.connectors.push(toPlanConnector({
     ref: `${source}:${target}:${index}`,
@@ -58,6 +66,7 @@ function addConnector(result: ParsedImport, source: string, target: string, labe
     sourceElementRef: source,
     targetElementRef: target,
     label,
+    ...options,
   }))
 }
 
@@ -67,7 +76,36 @@ function toMermaidDirection(value: unknown): MermaidDirection {
 }
 
 function isSupportedMermaidStart(code: string) {
-  return /^(?:---|flowchart|graph|sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|requirementDiagram|sankey-beta|pie|gitGraph|quadrantChart|mindmap|journey|gantt|timeline|xychart-beta|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment)\b/i.test(code.trim())
+  return /^(?:---|flowchart|graph|sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|requirementDiagram|sankey-beta|pie|gitGraph|quadrantChart|mindmap|journey|gantt|timeline|xychart-beta|architecture-beta|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment)\b/i.test(code.trim())
+}
+
+function firstMermaidBodyLineIndex(lines: string[]) {
+  let index = 0
+  while (index < lines.length) {
+    const line = lines[index].trim()
+    if (!line) {
+      index += 1
+      continue
+    }
+    if (line === '---') {
+      index += 1
+      while (index < lines.length && lines[index].trim() !== '---') index += 1
+      if (index < lines.length) index += 1
+      continue
+    }
+    if (line.startsWith('%%')) {
+      index += 1
+      continue
+    }
+    return index
+  }
+  return -1
+}
+
+function isArchitectureBetaDiagram(source: string) {
+  const lines = source.trim().split(/\r?\n/)
+  const start = firstMermaidBodyLineIndex(lines)
+  return start >= 0 && /^architecture-beta\b/i.test(lines[start].trim())
 }
 
 export function extractMermaidCode(text: string): string | null {
@@ -102,7 +140,9 @@ export function parseMermaid(code: string): ParsedImport {
   const result = createParsedImport(source)
 
   try {
-    if (isFlowchartDiagram(source)) {
+    if (isArchitectureBetaDiagram(source)) {
+      convertArchitectureBetaSource(result, source)
+    } else if (isFlowchartDiagram(source)) {
       const ast = parseFlowchart(source)
       convertFlowchartAst(result, ast)
     } else if (isC4Diagram(source)) {
@@ -122,13 +162,103 @@ export async function parseMermaidAsync(code: string): Promise<ParsedImport> {
   const result = createParsedImport(source)
 
   try {
-    const ast = await parseAsync(source)
-    convertMermaidAst(result, asRecord(ast))
+    if (isArchitectureBetaDiagram(source)) {
+      convertArchitectureBetaSource(result, source)
+    } else {
+      const ast = await parseAsync(source)
+      convertMermaidAst(result, asRecord(ast))
+    }
   } catch (err) {
     result.warnings.push(err instanceof Error ? err.message : 'Failed to parse Mermaid diagram')
   }
 
   return result
+}
+
+function architectureKind(icon: string, nodeType: 'group' | 'service' | 'junction') {
+  if (nodeType === 'group') return 'container'
+  if (nodeType === 'junction') return 'component'
+  const value = icon.toLowerCase()
+  if (value.includes('database') || value.includes('disk') || value.includes('storage')) return 'database'
+  if (value.includes('internet') || value.includes('cloud')) return 'external'
+  if (value.includes('server')) return 'service'
+  return 'system'
+}
+
+function architectureHandle(side: string) {
+  switch (side.toUpperCase()) {
+    case 'T': return 'top'
+    case 'B': return 'bottom'
+    case 'L': return 'left'
+    case 'R': return 'right'
+    default: return undefined
+  }
+}
+
+function architectureDirection(leftArrow: string, rightArrow: string) {
+  if (leftArrow && rightArrow) return 'both'
+  if (leftArrow) return 'backward'
+  if (rightArrow) return 'forward'
+  return 'none'
+}
+
+function architectureDescription(type: 'group' | 'service' | 'junction', icon = '', parent = '') {
+  const parts = [`Architecture ${type}`]
+  if (icon) parts.push(`icon: ${icon}`)
+  if (parent) parts.push(`in: ${parent}`)
+  return parts.join('\n')
+}
+
+function stripArchitectureGroupModifier(value: string) {
+  return value.replace(/\{group\}$/i, '')
+}
+
+function convertArchitectureBetaSource(result: ParsedImport, source: string) {
+  result.direction = 'LR'
+  const lines = source.trim().split(/\r?\n/)
+  const start = firstMermaidBodyLineIndex(lines)
+  if (start < 0) {
+    result.warnings.push('Unable to find architecture-beta diagram body')
+    return
+  }
+
+  const bodyLines = lines.slice(start + 1)
+  bodyLines.forEach((rawLine, index) => {
+    const line = rawLine.trim().replace(/;$/, '')
+    if (!line || line.startsWith('%%')) return
+
+    const nodeMatch = line.match(/^(group|service)\s+([A-Za-z_][\w.-]*)(?:\(([^)]*)\))?\s*\[([^\]]*)\](?:\s+in\s+([A-Za-z_][\w.-]*))?$/i)
+    if (nodeMatch) {
+      const [, nodeType, ref, icon = '', label, parent = ''] = nodeMatch
+      const type = nodeType.toLowerCase() as 'group' | 'service'
+      addElement(result, ref, label.trim() || ref, architectureKind(icon, type), architectureDescription(type, icon, parent), icon)
+      return
+    }
+
+    const junctionMatch = line.match(/^junction\s+([A-Za-z_][\w.-]*)(?:\s+in\s+([A-Za-z_][\w.-]*))?$/i)
+    if (junctionMatch) {
+      const [, ref, parent = ''] = junctionMatch
+      addElement(result, ref, ref, architectureKind('', 'junction'), architectureDescription('junction', '', parent))
+      return
+    }
+
+    const edgeMatch = line.match(/^([A-Za-z_][\w.-]*(?:\{group\})?):([TBLR])\s*(<)?--(>)?\s*([TBLR]):([A-Za-z_][\w.-]*(?:\{group\})?)(?:\s*:\s*(.+))?$/i)
+    if (edgeMatch) {
+      const [, rawSource, sourceSide, leftArrow = '', rightArrow = '', targetSide, rawTarget, label = ''] = edgeMatch
+      const sourceRef = stripArchitectureGroupModifier(rawSource)
+      const targetRef = stripArchitectureGroupModifier(rawTarget)
+      addElement(result, sourceRef, sourceRef)
+      addElement(result, targetRef, targetRef)
+      addConnector(result, sourceRef, targetRef, label.trim(), result.connectors.length, {
+        direction: architectureDirection(leftArrow, rightArrow),
+        sourceHandle: architectureHandle(sourceSide),
+        targetHandle: architectureHandle(targetSide),
+      })
+      return
+    }
+
+    result.warnings.push(`Unsupported architecture-beta line ${index + 2}: ${line}`)
+  })
 }
 
 function convertMermaidAst(result: ParsedImport, ast: Record<string, unknown>) {

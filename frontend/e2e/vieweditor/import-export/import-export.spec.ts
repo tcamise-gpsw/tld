@@ -75,6 +75,40 @@ flowchart LR
   await expect.poll(async () => nodeByName(page, 'Paste DB').evaluate((node) => node.closest('.react-flow__node')?.classList.contains('selected'))).toBe(true)
 })
 
+test('pasting architecture-beta Mermaid imports into the open view', async ({ page }) => {
+  await createAndLoadDiagramWithNodes(page, 0, 'Architecture Paste Host')
+  const viewId = currentViewId(page)
+  const source = `architecture-beta
+    service left_disk(disk)[Disk]
+    service top_disk(disk)[Disk]
+    service bottom_disk(disk)[Disk]
+    service top_gateway(internet)[Gateway]
+    service bottom_gateway(internet)[Gateway]
+    junction junctionCenter
+    junction junctionRight
+
+    left_disk:R -- L:junctionCenter
+    top_disk:B -- T:junctionCenter
+    bottom_disk:T -- B:junctionCenter
+    junctionCenter:R -- L:junctionRight
+    top_gateway:B -- T:junctionRight
+    bottom_gateway:T -- B:junctionRight`
+
+  await page.getByTestId('vieweditor-canvas').click()
+  await page.evaluate((text) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+  }, source)
+
+  await expect(page).toHaveURL(new RegExp(`/views/${viewId}$`))
+  await expect(page.getByTestId('vieweditor-node').filter({ hasText: 'Disk' })).toHaveCount(3)
+  await expect(page.getByTestId('vieweditor-node').filter({ hasText: 'Gateway' })).toHaveCount(2)
+  await expect(nodeByName(page, 'junctionCenter')).toBeVisible()
+  await expect(nodeByName(page, 'junctionRight')).toBeVisible()
+  await expect(page.getByTestId('vieweditor-selection-bulk-bar')).toContainText('7 selected')
+})
+
 test('pasting non-Mermaid text is ignored by canvas import', async ({ page }) => {
   await createAndLoadDiagramWithNodes(page, 0, 'Paste Ignore Host')
   const viewId = currentViewId(page)

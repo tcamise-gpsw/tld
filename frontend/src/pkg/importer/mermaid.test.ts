@@ -136,6 +136,16 @@ const compatibleMermaidFixtures = [
     elements: 4,
     connectors: 3,
   },
+  {
+    name: 'architecture',
+    sourceUrl: 'https://mermaid.js.org/syntax/architecture.html',
+    code: `architecture-beta
+  service database1(database)[My Database]
+  service server(server)[Server]
+  database1:R --> L:server`,
+    elements: 2,
+    connectors: 1,
+  },
 ] as const
 
 describe('Mermaid Importer Compliance', () => {
@@ -280,6 +290,7 @@ E--No-->C
 
   it('extracts Mermaid from raw and fenced markdown', () => {
     expect(extractMermaidCode('flowchart LR\n  A --> B')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('architecture-beta\n  service a(server)[A]')).toBe('architecture-beta\n  service a(server)[A]')
     expect(extractMermaidCode('Before\n\n```mermaid\nflowchart TB\n  A --> B\n```\nAfter')).toBe('flowchart TB\n  A --> B')
     expect(extractMermaidCode('Before\n\n```mmd\nflowchart LR\n  A --> B\n```')).toBe('flowchart LR\n  A --> B')
     expect(extractMermaidCode('not a diagram')).toBeNull()
@@ -307,6 +318,41 @@ E--No-->C
     expect(parsed.warnings).toHaveLength(0)
     expect(parsed.elements).toHaveLength(2)
     expect(parsed.connectors).toHaveLength(1)
+  })
+
+  it('converts architecture-beta services, junctions, and side-qualified edges', async () => {
+    const code = `architecture-beta
+    service left_disk(disk)[Disk]
+    service top_disk(disk)[Disk]
+    service bottom_disk(disk)[Disk]
+    service top_gateway(internet)[Gateway]
+    service bottom_gateway(internet)[Gateway]
+    junction junctionCenter
+    junction junctionRight
+
+    left_disk:R -- L:junctionCenter
+    top_disk:B -- T:junctionCenter
+    bottom_disk:T -- B:junctionCenter
+    junctionCenter:R -- L:junctionRight
+    top_gateway:B -- T:junctionRight
+    bottom_gateway:T -- B:junctionRight`
+
+    const result = await parseMermaidAsync(code)
+
+    expect(result.warnings).toHaveLength(0)
+    expect(result.elements).toHaveLength(7)
+    expect(result.connectors).toHaveLength(6)
+    expect(result.elements.filter((element) => element.name === 'Disk')).toHaveLength(3)
+    expect(result.elements.filter((element) => element.name === 'Gateway')).toHaveLength(2)
+    expect(result.elements.find((element) => element.ref === 'junctionCenter')?.name).toBe('junctionCenter')
+    expect(result.elements.find((element) => element.ref === 'left_disk')?.kind).toBe('database')
+    expect(result.elements.find((element) => element.ref === 'top_gateway')?.kind).toBe('external')
+
+    const firstConnector = result.connectors.find((connector) => connector.sourceElementRef === 'left_disk')
+    expect(firstConnector?.targetElementRef).toBe('junctionCenter')
+    expect(firstConnector?.direction).toBe('none')
+    expect(firstConnector?.sourceHandle).toBe('right')
+    expect(firstConnector?.targetHandle).toBe('left')
   })
 
   it.each(compatibleMermaidFixtures)('converts compatible $name fixture from $sourceUrl', async (fixture) => {
