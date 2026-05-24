@@ -380,7 +380,7 @@ export async function Users() {
 	if groups := elementKindCount(t, db, "dependency-group"); groups == 0 {
 		t.Fatal("expected dependency/import facts to materialize as grouped dependency nodes")
 	}
-	if !connectorExistsBetween(t, db, "main.go", "External package") {
+	if !connectorExistsBetween(t, db, "main.go", "External packages") {
 		t.Fatal("expected importing file to connect to grouped external dependencies")
 	}
 }
