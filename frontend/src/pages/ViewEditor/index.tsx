@@ -53,7 +53,6 @@ import CodePreviewPanel from '../../components/CodePreviewPanel'
 import ConnectorPanel from '../../components/ConnectorPanel'
 import ElementLibrary from '../../components/ElementLibrary'
 import ViewExplorer from '../../components/ViewExplorer'
-import { useSetHeader } from '../../components/HeaderContext'
 import ViewPanel from '../../components/ViewPanel'
 import InlineElementAdder from '../../components/InlineElementAdder'
 import ExportModal, { type ExportOptions } from '../../components/ExportModal'
@@ -63,7 +62,6 @@ import ViewEditorOnboarding from '../../components/ViewEditorOnboarding'
 import DrawingCanvas, { type DrawingCanvasHandle } from '../../components/DrawingCanvas'
 import ViewFloatingMenu from '../../components/ViewFloatingMenu'
 import ViewDrawMenu from '../../components/ViewDrawMenu'
-import ViewHeaderButton from '../../components/ViewHeaderButton'
 import ViewBezierConnector from '../../components/ViewBezierConnector'
 import ViewContextNeighborElement from '../../components/ContextNeighborElement'
 import ContextBoundaryElement from '../../components/ContextBoundaryElement'
@@ -397,7 +395,6 @@ function ViewEditorInner({
     undo: undoViewEdit,
     redo: redoViewEdit,
   } = useViewEditHistory()
-  const setHeader = useSetHeader()
   const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
   const [densityLevel, setDensityLevel] = useState(0)
   const [visibilityOverrides, setVisibilityOverrides] = useState<VisibilityOverride[]>([])
@@ -1912,15 +1909,6 @@ function ViewEditorInner({
     html.style.overscrollBehaviorX = 'none'
     return () => { html.style.overscrollBehaviorX = prev }
   }, [])
-
-  // ── Header ─────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    setHeader({
-      node: <ViewHeaderButton name={viewName ?? undefined} onOpen={openViewDetailsRef.current} />,
-    })
-  }, [viewName, setHeader])
-
-  useEffect(() => () => setHeader(null), [setHeader])
 
   // ── Share ──────────────────────────────────────────────────────────────────
   const onShare = useCallback(() => { }, [])

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type SetStateAction } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SafeBackground } from '../components/SafeBackground'
-import { Text as HeaderText } from '@chakra-ui/react'
 import ReactFlow, {
   BackgroundVariant,
   ReactFlowProvider,
@@ -12,7 +11,6 @@ import ReactFlow, {
 } from 'reactflow'
 import FloatingEdge from '../components/FloatingEdge'
 import 'reactflow/dist/style.css'
-import { useSetHeader } from '../components/HeaderContext'
 import {
   Box,
   Button,
@@ -497,12 +495,6 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
   const navigate = useNavigate()
   const { accent } = useAccentColor()
   const canEdit = true
-  const setHeader = useSetHeader()
-
-  useEffect(() => {
-    setHeader({ node: <HeaderText fontWeight="medium" fontSize="sm" color="gray.300">View Hierarchy</HeaderText> })
-    return () => setHeader(null)
-  }, [setHeader])
 
   const { setCenter, getViewport, zoomIn, zoomOut } = useReactFlow()
   const rfContainerRef = useRef<HTMLDivElement>(null)

@@ -32,7 +32,6 @@ import ConnectorPanel from '../components/ConnectorPanel'
 import ElementPanel from '../components/ElementPanel'
 import ViewPanel from '../components/ViewPanel'
 import InspectDrawer from '../components/InventoryInspector'
-import { useSetHeader } from '../components/HeaderContext'
 import { ViewEditorContext } from './ViewEditor/context'
 import type { Connector, LibraryElement, ViewTreeNode } from '../types'
 import {
@@ -66,7 +65,6 @@ function formatUpdated(value: string) {
 }
 
 export default function Inventory() {
-  const setHeader = useSetHeader()
   const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [elements, setElements] = useState<LibraryElement[]>([])
@@ -131,11 +129,6 @@ export default function Inventory() {
       setLoading(false)
     }
   }, [])
-
-  useEffect(() => {
-    setHeader({ node: <Text fontWeight="medium" fontSize="sm" color="gray.300">Inventory</Text> })
-    return () => setHeader(null)
-  }, [setHeader])
 
   useEffect(() => { void refresh() }, [refresh])
 
