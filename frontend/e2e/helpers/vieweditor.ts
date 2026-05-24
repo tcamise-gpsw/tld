@@ -254,7 +254,7 @@ export async function getView(page: Page, viewId: number) {
   return json.view as { id: number; name: string; levelLabel?: string; level_label?: string; parentViewId?: number | null; parent_view_id?: number | null }
 }
 
-export async function updateView(page: Page, viewId: number, data: { name?: string; levelLabel?: string }) {
+export async function updateView(page: Page, viewId: number, data: { name?: string; description?: string; levelLabel?: string; tags?: string[] }) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/UpdateView', {
     data: { viewId, ...data },
   })
@@ -307,6 +307,7 @@ export async function createConnector(page: Page, viewId: number, sourceElementI
   direction?: string
   style?: string
   url?: string
+  tags?: string[]
 } = {}) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/CreateConnector', {
     data: {
@@ -319,6 +320,7 @@ export async function createConnector(page: Page, viewId: number, sourceElementI
       description: data.description ?? '',
       relationship: data.relationship ?? '',
       url: data.url ?? '',
+      tags: data.tags ?? [],
     },
   })
   expect(response.ok()).toBeTruthy()

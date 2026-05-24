@@ -613,6 +613,7 @@ export default function Inventory() {
                     return (
                       <Flex
                         key={tag}
+                        data-testid={`inventory-tag-filter-${tag}`}
                         align="center"
                         px={2}
                         py={1}
@@ -652,6 +653,7 @@ export default function Inventory() {
             <FilterSection title="Kind" collapsed={collapsedSections.has('kind')} onToggle={() => toggleSection('kind')}>
               <VStack align="stretch" spacing={0.5}>
                 <Flex
+                  data-testid="inventory-kind-filter-any"
                   align="center"
                   px={2}
                   py={1}
@@ -671,6 +673,7 @@ export default function Inventory() {
                   return (
                     <Flex
                       key={label}
+                      data-testid={`inventory-kind-filter-${label}`}
                       align="center"
                       px={2}
                       py={1}
@@ -697,6 +700,7 @@ export default function Inventory() {
                   return (
                     <Flex
                       key={quality}
+                      data-testid={`inventory-quality-filter-${quality}`}
                       align="center"
                       px={2}
                       py={1.5}
@@ -889,6 +893,7 @@ export default function Inventory() {
                     return (
                       <Flex
                         data-testid="inventory-row"
+                        data-inventory-key={row.key}
                         key={row.key}
                         px={4}
                         py={2.5}
