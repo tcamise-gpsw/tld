@@ -592,7 +592,7 @@ function ElementLibrary({
       side="left"
       width="300px"
       hasBackdrop={false}
-      noFocusLock={noFocusLock}
+      noFocusLock={noFocusLock || !isMobile}
       zIndex={1000}
     >
       <PanelHeader title="Element Library" onClose={onClose} hasCloseButton={isMobile} />
