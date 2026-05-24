@@ -28,7 +28,7 @@ type Server struct {
 
 func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID) (*Server, error) {
 	apiStore := store.NewAPIAdapter(sqliteStore)
-	watchStore := watch.NewStore(sqliteStore.DB())
+	watchStore := watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
 	lockHooks := watchLockHooks{store: watchStore}
 	wsSvc := &api.WorkspaceService{Store: apiStore, Hooks: lockHooks}
 	orgSvc := &api.OrgService{Store: apiStore, Hooks: lockHooks}

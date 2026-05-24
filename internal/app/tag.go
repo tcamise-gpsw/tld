@@ -171,5 +171,5 @@ func (s *Store) pickUnusedColor(ctx context.Context, usedColors []string) string
 }
 
 func (s *Store) ensureTagColors(ctx context.Context, tags []string) error {
-	return tagcolors.Ensure(ctx, s.db, tags)
+	return tagcolors.EnsureBun(ctx, s.bun, tags)
 }

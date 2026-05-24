@@ -74,37 +74,55 @@ func (s *Store) ConnectorByID(ctx context.Context, id int64) (Connector, error) 
 }
 
 func (s *Store) UpdateConnector(ctx context.Context, id int64, patch Connector) (Connector, error) {
-	var tagJSON any
+	var row connectorModel
+	if err := s.bun.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx); err != nil {
+		return Connector{}, err
+	}
 	if patch.Tags != nil {
 		if err := s.ensureTagColors(ctx, patch.Tags); err != nil {
 			return Connector{}, err
 		}
-		tagJSON = jsonString(patch.Tags, "[]")
+		row.Tags = jsonString(patch.Tags, "[]")
 	}
-	var row connectorModel
-	if err := s.bun.NewRaw(`
-		UPDATE connectors SET
-			view_id = CASE WHEN ? = 0 THEN view_id ELSE ? END,
-			source_element_id = CASE WHEN ? = 0 THEN source_element_id ELSE ? END,
-			target_element_id = CASE WHEN ? = 0 THEN target_element_id ELSE ? END,
-			label = COALESCE(?, label),
-			description = COALESCE(?, description),
-			relationship = COALESCE(?, relationship),
-			direction = COALESCE(NULLIF(?, ''), direction),
-			style = COALESCE(NULLIF(?, ''), style),
-			url = COALESCE(?, url),
-			source_handle = COALESCE(?, source_handle),
-			target_handle = COALESCE(?, target_handle),
-			tags = COALESCE(?, tags),
-			updated_at = ?
-		WHERE id = ?
-		RETURNING id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, tags, created_at, updated_at`,
-		patch.ViewID, patch.ViewID,
-		patch.SourceElementID, patch.SourceElementID,
-		patch.TargetElementID, patch.TargetElementID,
-		patch.Label, patch.Description, patch.Relationship, patch.Direction, patch.Style, patch.URL, patch.SourceHandle, patch.TargetHandle, tagJSON,
-		nowString(), id).
-		Scan(ctx, &row); err != nil {
+	if patch.ViewID != 0 {
+		row.ViewID = patch.ViewID
+	}
+	if patch.SourceElementID != 0 {
+		row.SourceElementID = patch.SourceElementID
+	}
+	if patch.TargetElementID != 0 {
+		row.TargetElementID = patch.TargetElementID
+	}
+	if patch.Label != nil {
+		row.Label = patch.Label
+	}
+	if patch.Description != nil {
+		row.Description = patch.Description
+	}
+	if patch.Relationship != nil {
+		row.Relationship = patch.Relationship
+	}
+	if patch.Direction != "" {
+		row.Direction = patch.Direction
+	}
+	if patch.Style != "" {
+		row.Style = patch.Style
+	}
+	if patch.URL != nil {
+		row.URL = patch.URL
+	}
+	if patch.SourceHandle != nil {
+		row.SourceHandle = patch.SourceHandle
+	}
+	if patch.TargetHandle != nil {
+		row.TargetHandle = patch.TargetHandle
+	}
+	row.UpdatedAt = nowString()
+	if err := s.bun.NewUpdate().
+		Model(&row).
+		WherePK().
+		Returning("*").
+		Scan(ctx); err != nil {
 		return Connector{}, err
 	}
 	return connectorFromModel(row), nil

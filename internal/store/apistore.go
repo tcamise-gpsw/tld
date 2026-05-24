@@ -349,11 +349,23 @@ func (a *APIAdapter) CreateConnector(ctx context.Context, _ uuid.UUID, input api
 
 func (a *APIAdapter) createConnectorWithID(ctx context.Context, id int32, input api.ConnectorInput) (*diagv1.Connector, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := a.Store.legacy.BunDB().NewRaw(`
-		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, input.ViewID, input.SourceID, input.TargetID, input.Label, input.Description, input.Relationship,
-		input.Direction, input.Style, input.URL, input.SourceHandle, input.TargetHandle, jsonString(input.Tags, "[]"), now, now).
+	_, err := a.Store.legacy.BunDB().NewInsert().
+		Table("connectors").
+		Value("id", "?", id).
+		Value("view_id", "?", input.ViewID).
+		Value("source_element_id", "?", input.SourceID).
+		Value("target_element_id", "?", input.TargetID).
+		Value("label", "?", input.Label).
+		Value("description", "?", input.Description).
+		Value("relationship", "?", input.Relationship).
+		Value("direction", "?", input.Direction).
+		Value("style", "?", input.Style).
+		Value("url", "?", input.URL).
+		Value("source_handle", "?", input.SourceHandle).
+		Value("target_handle", "?", input.TargetHandle).
+		Value("tags", "?", jsonString(input.Tags, "[]")).
+		Value("created_at", "?", now).
+		Value("updated_at", "?", now).
 		Exec(ctx)
 	if err != nil {
 		return nil, err

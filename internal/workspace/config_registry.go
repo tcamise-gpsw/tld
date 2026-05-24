@@ -159,6 +159,16 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 	default:
 		add("apply.target", "must be auto, local, or remote")
 	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Database.Driver)) {
+	case "", "sqlite", "postgres", "postgresql":
+	default:
+		add("database.driver", "must be sqlite or postgres")
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Database.Driver), "postgres") || strings.EqualFold(strings.TrimSpace(cfg.Database.Driver), "postgresql") {
+		if strings.TrimSpace(cfg.Database.DatabaseURL) == "" {
+			add("database.url", "must be set when database.driver is postgres")
+		}
+	}
 	if cfg.Validation.Level < 1 || cfg.Validation.Level > 3 {
 		add("validation.level", "must be 1, 2, or 3")
 	}
@@ -319,6 +329,8 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "api_key", Env: []string{"TLD_API_KEY"}, Description: "API key used to authenticate with tlDiagram.", Secret: true},
 	{Key: "org_id", Env: []string{"TLD_ORG_ID"}, Description: "Default tlDiagram organization/workspace identifier."},
 	{Key: "apply.target", Env: []string{"TLD_APPLY_TARGET"}, Description: "Default apply target: auto, local, or remote."},
+	{Key: "database.driver", Env: []string{"TLD_DB_DRIVER"}, Description: "Local database driver: sqlite or postgres."},
+	{Key: "database.url", Env: []string{"TLD_DATABASE_URL"}, Description: "PostgreSQL database URL for local database mode.", Secret: true},
 	{Key: "validation.level", Description: "Architectural warning strictness: 1 minimal, 2 standard, 3 strict."},
 	{Key: "validation.allow_low_insight", Description: "Allow low-insight generated warning groups."},
 	{Key: "validation.include_rules", Description: "Additional architectural warning rule codes to include."},
@@ -455,6 +467,8 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"api_key", "TLD_API_KEY"},
 		{"org_id", "TLD_ORG_ID"},
 		{"apply.target", "TLD_APPLY_TARGET"},
+		{"database.driver", "TLD_DB_DRIVER"},
+		{"database.url", "TLD_DATABASE_URL"},
 		{"serve.host", "TLD_HOST"},
 		{"serve.port", "PORT"},
 		{"serve.data_dir", "TLD_DATA_DIR"},
@@ -561,6 +575,10 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.WorkspaceID = strings.TrimSpace(value)
 	case "apply.target":
 		cfg.Apply.Target = strings.ToLower(strings.TrimSpace(value))
+	case "database.driver":
+		cfg.Database.Driver = strings.ToLower(strings.TrimSpace(value))
+	case "database.url":
+		cfg.Database.DatabaseURL = strings.TrimSpace(value)
 	case "validation.level":
 		v, err := parseInt(value)
 		if err != nil {
@@ -811,6 +829,10 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.WorkspaceID
 	case "apply.target":
 		return cfg.Apply.Target
+	case "database.driver":
+		return cfg.Database.Driver
+	case "database.url":
+		return cfg.Database.DatabaseURL
 	case "validation.level":
 		return cfg.Validation.Level
 	case "validation.allow_low_insight":
@@ -932,6 +954,12 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	appendUnknownEntries(apply, mappingValueNode(existing, "apply"), setOf("target"))
 	addMap(mapping, "apply", apply, "CLI apply target settings.")
 
+	database := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	addScalar(database, "driver", cfg.Database.Driver, desc("database.driver"))
+	addScalar(database, "url", cfg.Database.DatabaseURL, desc("database.url"))
+	appendUnknownEntries(database, mappingValueNode(existing, "database"), setOf("driver", "url"))
+	addMap(mapping, "database", database, "Local database settings.")
+
 	validation := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	addScalar(validation, "level", cfg.Validation.Level, desc("validation.level"))
 	addScalar(validation, "allow_low_insight", cfg.Validation.AllowLowInsight, desc("validation.allow_low_insight"))
@@ -1029,7 +1057,7 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	appendUnknownEntries(updates, mappingValueNode(existing, "updates"), setOf("auto", "check_interval"))
 	addMap(mapping, "updates", updates, "CLI update check settings.")
 
-	appendUnknownEntries(mapping, existing, setOf("server_url", "api_key", "org_id", "apply", "validation", "serve", "watch", "completion", "updates"))
+	appendUnknownEntries(mapping, existing, setOf("server_url", "api_key", "org_id", "apply", "database", "validation", "serve", "watch", "completion", "updates"))
 	return root
 }
 

@@ -227,20 +227,21 @@ func unionTechnologyConnectors(a, b []TechnologyConnector) []TechnologyConnector
 }
 
 type duplicateGroup struct {
-	ViewID          int64
-	SourceElementID int64
-	TargetElementID int64
-	SurvivorID      int64
+	ViewID          int64 `bun:"view_id"`
+	SourceElementID int64 `bun:"source_element_id"`
+	TargetElementID int64 `bun:"target_element_id"`
+	SurvivorID      int64 `bun:"survivor_id"`
 }
 
 func deduplicateConnectors(ctx context.Context, tx bun.Tx, survivorID int64) error {
 	var groups []duplicateGroup
-	if err := tx.NewRaw(`
-		SELECT view_id, source_element_id, target_element_id, MIN(id) AS survivor_id
-		FROM connectors
-		WHERE source_element_id = ? OR target_element_id = ?
-		GROUP BY view_id, source_element_id, target_element_id
-		HAVING COUNT(*) > 1`, survivorID, survivorID).
+	if err := tx.NewSelect().
+		Table("connectors").
+		Column("view_id", "source_element_id", "target_element_id").
+		ColumnExpr("MIN(id) AS survivor_id").
+		Where("source_element_id = ? OR target_element_id = ?", survivorID, survivorID).
+		Group("view_id", "source_element_id", "target_element_id").
+		Having("COUNT(*) > 1").
 		Scan(ctx, &groups); err != nil {
 		return fmt.Errorf("query duplicate connectors: %w", err)
 	}

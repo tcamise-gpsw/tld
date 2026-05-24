@@ -32,6 +32,7 @@ type Options struct {
 	Ref          string
 	Type         string
 	DataDir      string
+	Database     workspace.DatabaseConfig
 	IncludeLocal bool
 	IncludeCloud bool
 }
@@ -307,16 +308,19 @@ func localState(ctx context.Context, ws *workspace.Workspace, opts Options) Sour
 		return state
 	}
 
+	cfg := &workspace.Config{Database: opts.Database}
 	dbPath := localserver.DatabasePath(opts.DataDir)
-	if _, err := os.Stat(dbPath); err != nil {
-		if os.IsNotExist(err) {
-			state.Note = "database not found"
+	if strings.TrimSpace(opts.Database.Driver) == "" || strings.EqualFold(opts.Database.Driver, "sqlite") {
+		if _, err := os.Stat(dbPath); err != nil {
+			if os.IsNotExist(err) {
+				state.Note = "database not found"
+				return state
+			}
+			state.Note = err.Error()
 			return state
 		}
-		state.Note = err.Error()
-		return state
 	}
-	sqliteStore, err := store.Open(dbPath, assets.FS)
+	sqliteStore, err := store.OpenLocal(ctx, cfg, opts.DataDir, assets.FS)
 	if err != nil {
 		state.Note = err.Error()
 		return state

@@ -4,9 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/mertcikla/tld/v2/internal/app"
 	"github.com/mertcikla/tld/v2/internal/core"
+	"github.com/mertcikla/tld/v2/internal/workspace"
+	"github.com/mertcikla/tld/v2/pkg/dbrepo"
+	"github.com/uptrace/bun"
 )
 
 type SQLiteStore struct {
@@ -23,12 +29,66 @@ func Open(dbPath string, migrations embed.FS) (*SQLiteStore, error) {
 	return &SQLiteStore{legacy: legacy}, nil
 }
 
+func OpenWithOptions(ctx context.Context, opts dbrepo.DBOptions) (*SQLiteStore, error) {
+	legacy, err := app.OpenStoreWithOptions(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &SQLiteStore{legacy: legacy}, nil
+}
+
+func OpenLocal(ctx context.Context, cfg *workspace.Config, dataDir string, migrations embed.FS) (*SQLiteStore, error) {
+	opts, err := LocalDBOptions(cfg, dataDir, migrations)
+	if err != nil {
+		return nil, err
+	}
+	return OpenWithOptions(ctx, opts)
+}
+
+func LocalDBOptions(cfg *workspace.Config, dataDir string, migrations embed.FS) (dbrepo.DBOptions, error) {
+	driver := "sqlite"
+	databaseURL := ""
+	if cfg != nil {
+		if strings.TrimSpace(cfg.Database.Driver) != "" {
+			driver = strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
+		}
+		databaseURL = strings.TrimSpace(cfg.Database.DatabaseURL)
+	}
+	switch driver {
+	case "", "sqlite":
+		return dbrepo.DBOptions{
+			Dialect:    dbrepo.DialectSQLite,
+			SQLitePath: filepath.Join(dataDir, "tld.db"),
+			Migrations: migrations,
+		}, nil
+	case "postgres", "postgresql":
+		if databaseURL == "" {
+			return dbrepo.DBOptions{}, fmt.Errorf("database.url or TLD_DATABASE_URL is required when database.driver is postgres")
+		}
+		return dbrepo.DBOptions{
+			Dialect:     dbrepo.DialectPostgres,
+			DatabaseURL: databaseURL,
+			Migrations:  migrations,
+		}, nil
+	default:
+		return dbrepo.DBOptions{}, fmt.Errorf("unsupported database.driver %q", driver)
+	}
+}
+
 func (s *SQLiteStore) Legacy() *app.Store {
 	return s.legacy
 }
 
 func (s *SQLiteStore) DB() *sql.DB {
 	return s.legacy.DB()
+}
+
+func (s *SQLiteStore) BunDB() *bun.DB {
+	return s.legacy.BunDB()
+}
+
+func (s *SQLiteStore) Dialect() dbrepo.Dialect {
+	return s.legacy.Dialect()
 }
 
 func (s *SQLiteStore) Close() error {

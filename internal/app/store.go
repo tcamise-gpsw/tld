@@ -6,21 +6,19 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/mertcikla/tld/v2/pkg/dbrepo"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	sqlitevec "github.com/viant/sqlite-vec/vec"
-	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db  *sql.DB
-	bun *bun.DB
+	db      *sql.DB
+	bun     *bun.DB
+	dialect dbrepo.Dialect
 }
 
 func (s *Store) DB() *sql.DB {
@@ -29,6 +27,10 @@ func (s *Store) DB() *sql.DB {
 
 func (s *Store) BunDB() *bun.DB {
 	return s.bun
+}
+
+func (s *Store) Dialect() dbrepo.Dialect {
+	return s.dialect
 }
 
 type TechnologyConnector struct {
@@ -101,25 +103,21 @@ type PlanConnector struct {
 }
 
 func OpenStore(dbPath string, migrations embed.FS) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	return OpenStoreWithOptions(context.Background(), dbrepo.DBOptions{
+		Dialect:    dbrepo.DialectSQLite,
+		SQLitePath: dbPath,
+		Migrations: migrations,
+	})
+}
+
+func OpenStoreWithOptions(ctx context.Context, opts dbrepo.DBOptions) (*Store, error) {
+	handle, err := dbrepo.Open(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := sqlitevec.Register(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("register sqlite-vec: %w", err)
-	}
-	if err := configureSQLiteDB(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := applyMigrations(db, migrations); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	store := &Store{db: db, bun: bun.NewDB(db, sqlitedialect.New())}
+	store := &Store{db: handle.DB, bun: handle.Bun, dialect: handle.Dialect}
 	if err := store.ensureBootstrapData(context.Background()); err != nil {
-		_ = db.Close()
+		_ = store.Close()
 		return nil, err
 	}
 	return store, nil
@@ -128,7 +126,6 @@ func OpenStore(dbPath string, migrations embed.FS) (*Store, error) {
 func configureSQLiteDB(db *sql.DB) error {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-
 	pragmas := []string{
 		`PRAGMA busy_timeout = 5000;`,
 		`PRAGMA journal_mode = WAL;`,
@@ -136,7 +133,7 @@ func configureSQLiteDB(db *sql.DB) error {
 		`PRAGMA foreign_keys = ON;`,
 	}
 	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
+		if _, err := db.ExecContext(context.Background(), pragma); err != nil {
 			return fmt.Errorf("configure sqlite %s: %w", pragma, err)
 		}
 	}
@@ -168,30 +165,6 @@ func (s *Store) ensureBootstrapData(ctx context.Context) error {
 		UpdatedAt:   now,
 	}).Exec(ctx)
 	return err
-}
-
-func applyMigrations(db *sql.DB, migrations embed.FS) error {
-	entries, err := fs.ReadDir(migrations, "migrations")
-	if err != nil {
-		return err
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		sqlBytes, err := migrations.ReadFile("migrations/" + entry.Name())
-		if err != nil {
-			return err
-		}
-		if _, err := db.Exec(string(sqlBytes)); err != nil {
-			if strings.Contains(err.Error(), "duplicate column name") {
-				continue
-			}
-			return fmt.Errorf("apply migration %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
 }
 
 func nowString() string {

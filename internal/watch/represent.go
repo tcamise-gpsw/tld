@@ -1444,7 +1444,7 @@ type materializedTechnologyLink struct {
 }
 
 func (m *materializer) ensureTags(ctx context.Context) error {
-	return tagcolors.Ensure(ctx, m.store.db, m.tagPlan.approvedTags())
+	return tagcolors.EnsureBun(ctx, m.store.bun, m.tagPlan.approvedTags())
 }
 
 func (m *materializer) workspaceRootViewID(ctx context.Context) (int64, error) {
@@ -1486,15 +1486,11 @@ func (m *materializer) upsertElement(ctx context.Context, ownerType, ownerKey st
 	now := nowString()
 	tags, _ := json.Marshal(input.Tags)
 	techLinks, _ := json.Marshal(technologyLinksForElement(input.Technology, input.Language))
-	res, err := m.store.execRaw(ctx, `
+	id, err := m.store.insertReturningID(ctx, `
 		INSERT INTO elements(name, kind, description, technology, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		input.Name, nullString(input.Kind), nullString(input.Description), nullString(input.Technology), string(techLinks), string(tags),
 		nullString(input.Repo), nullString(input.Branch), nullString(input.FilePath), nullString(input.Language), now, now)
-	if err != nil {
-		return 0, err
-	}
-	id, err := res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -1523,11 +1519,7 @@ func (m *materializer) upsertView(ctx context.Context, ownerType, ownerKey strin
 		return state.ResourceID, m.saveMappingWithCurrentHash(ctx, ownerType, ownerKey, "view", state.ResourceID)
 	}
 	now := nowString()
-	res, err := m.store.execRaw(ctx, `INSERT INTO views(owner_element_id, name, level_label, level, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)`, ownerElementID, name, label, now, now)
-	if err != nil {
-		return 0, err
-	}
-	id, err := res.LastInsertId()
+	id, err := m.store.insertReturningID(ctx, `INSERT INTO views(owner_element_id, name, level_label, level, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)`, ownerElementID, name, label, now, now)
 	if err != nil {
 		return 0, err
 	}
@@ -3042,13 +3034,9 @@ func (m *materializer) upsertConnectorDetailedWithDirection(ctx context.Context,
 		return nil
 	}
 	now := nowString()
-	res, err := m.store.execRaw(ctx, `
+	id, err := m.store.insertReturningID(ctx, `
 		INSERT INTO connectors(view_id, source_element_id, target_element_id, label, description, relationship, direction, style, source_handle, target_handle, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'bezier', ?, ?, ?, ?)`, viewID, sourceElementID, targetElementID, label, nullString(description), relationship, direction, nullString(sourceHandle), nullString(targetHandle), now, now)
-	if err != nil {
-		return err
-	}
-	id, err := res.LastInsertId()
 	if err != nil {
 		return err
 	}

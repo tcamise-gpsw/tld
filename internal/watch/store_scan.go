@@ -137,14 +137,10 @@ func (s *Store) Clusters(ctx context.Context, repositoryID int64) ([]Cluster, er
 }
 
 func (s *Store) BeginRepresentationRun(ctx context.Context, repositoryID int64, rawGraphHash, settingsHash string, embeddingModelID *int64, representationHash string) (int64, error) {
-	res, err := s.execRaw(ctx, `
+	return s.insertReturningID(ctx, `
 		INSERT INTO watch_representation_runs(repository_id, raw_graph_hash, filter_settings_hash, embedding_model_id, representation_hash, started_at, status)
 		VALUES (?, ?, ?, ?, ?, ?, 'running')`,
 		repositoryID, rawGraphHash, settingsHash, embeddingModelID, representationHash, nowString())
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 func (s *Store) FinishRepresentationRun(ctx context.Context, id int64, status string, result RepresentResult, runErr error) error {
@@ -304,13 +300,9 @@ func (s *Store) ReassociateRepository(ctx context.Context, id int64, remoteURL s
 }
 
 func (s *Store) BeginScanRun(ctx context.Context, repositoryID int64, mode string) (int64, error) {
-	res, err := s.execRaw(ctx, `
+	return s.insertReturningID(ctx, `
 		INSERT INTO watch_scan_runs(repository_id, mode, started_at, status)
 		VALUES (?, ?, ?, 'running')`, repositoryID, mode, nowString())
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 func (s *Store) FinishScanRun(ctx context.Context, id int64, status string, result ScanResult, runErr error) error {
@@ -872,12 +864,12 @@ func (s *Store) ReplaceReferencesForFiles(ctx context.Context, repositoryID int6
 	for _, ref := range refs {
 		now := nowString()
 		_, err := s.execRaw(ctx, `
-			INSERT INTO watch_references(repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, column, evidence_hash, raw_json, created_at, updated_at)
+			INSERT INTO watch_references(repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, "column", evidence_hash, raw_json, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(repository_id, source_symbol_id, target_symbol_id, kind, evidence_hash) DO UPDATE SET
 				source_file_id = excluded.source_file_id,
 				line = excluded.line,
-				column = excluded.column,
+				"column" = excluded."column",
 				raw_json = excluded.raw_json,
 				updated_at = excluded.updated_at`,
 			repositoryID, ref.SourceSymbolID, ref.TargetSymbolID, ref.SourceFileID, ref.Kind, ref.Line, ref.Column, ref.EvidenceHash, ref.RawJSON, now, now)
@@ -984,7 +976,7 @@ func (s *Store) querySymbolsWhere(ctx context.Context, repositoryID int64, where
 		JOIN watch_files f ON f.id = s.file_id
 		WHERE s.repository_id = ? AND ` + whereClause
 	fullArgs := append([]any{repositoryID}, args...)
-	rows, err := s.db.QueryContext(ctx, query, fullArgs...)
+	rows, err := s.rowsRaw(ctx, query, fullArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1102,7 +1094,7 @@ func (s *Store) QuerySymbols(ctx context.Context, repositoryID int64, q SymbolQu
 
 func (s *Store) QueryReferences(ctx context.Context, repositoryID int64, q ReferenceQuery) ([]Reference, error) {
 	query := `
-		SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, column, evidence_hash, raw_json, created_at, updated_at
+		SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, "column", evidence_hash, raw_json, created_at, updated_at
 		FROM watch_references
 		WHERE repository_id = ?`
 	args := []any{repositoryID}
@@ -1110,7 +1102,7 @@ func (s *Store) QueryReferences(ctx context.Context, repositoryID int64, q Refer
 		query += ` AND (source_symbol_id = ? OR target_symbol_id = ?)`
 		args = append(args, q.SymbolID, q.SymbolID)
 	}
-	query += ` ORDER BY source_file_id, line, column`
+	query += ` ORDER BY source_file_id, line, "column"`
 	if q.Limit == 0 {
 		q.Limit = 100
 	}
@@ -1133,7 +1125,7 @@ func (s *Store) QueryReferences(ctx context.Context, repositoryID int64, q Refer
 }
 
 func (s *Store) queryReferencesWhere(ctx context.Context, repositoryID int64, whereClause string, whereArgs ...any) ([]Reference, error) {
-	query := "SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, column, evidence_hash, raw_json, created_at, updated_at FROM watch_references WHERE repository_id = ? AND " + whereClause + " ORDER BY source_file_id, line, column"
+	query := `SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, "column", evidence_hash, raw_json, created_at, updated_at FROM watch_references WHERE repository_id = ? AND ` + whereClause + ` ORDER BY source_file_id, line, "column"`
 	args := append([]any{repositoryID}, whereArgs...)
 	rows, err := s.rowsRaw(ctx, query, args...)
 	if err != nil {
@@ -1433,14 +1425,10 @@ func (s *Store) WorkspaceResourceCounts(ctx context.Context) (views, elements, c
 }
 
 func (s *Store) CreateWorkspaceVersion(ctx context.Context, versionID, source string, parentID *int64, viewCount, elementCount, connectorCount int, description, workspaceHash *string) (int64, error) {
-	res, err := s.execRaw(ctx, `
+	return s.insertReturningID(ctx, `
 		INSERT INTO workspace_versions(version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		versionID, source, parentID, viewCount, elementCount, connectorCount, description, workspaceHash, nowString())
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 func (s *Store) WatchDiffs(ctx context.Context, versionID int64, ownerType, changeType, resourceType, language string, limit int) ([]RepresentationDiff, error) {

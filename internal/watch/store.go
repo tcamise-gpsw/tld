@@ -16,6 +16,7 @@ import (
 
 	tldgit "github.com/mertcikla/tld/v2/internal/git"
 	"github.com/mertcikla/tld/v2/internal/tagcolors"
+	"github.com/mertcikla/tld/v2/pkg/dbrepo"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/viant/sqlite-vec/vector"
@@ -26,12 +27,21 @@ const maxInClauseIDs = 500
 const embeddingSimilarityTimeout = 2 * time.Second
 
 type Store struct {
-	db  *sql.DB
-	bun *bun.DB
+	db      *sql.DB
+	bun     *bun.DB
+	dialect dbrepo.Dialect
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db, bun: bun.NewDB(db, sqlitedialect.New())}
+	return &Store{db: db, bun: bun.NewDB(db, sqlitedialect.New()), dialect: dbrepo.DialectSQLite}
+}
+
+func NewStoreFromHandle(handle *dbrepo.Handle) *Store {
+	return &Store{db: handle.DB, bun: handle.Bun, dialect: handle.Dialect}
+}
+
+func NewStoreWithBun(db *sql.DB, bunDB *bun.DB, dialect dbrepo.Dialect) *Store {
+	return &Store{db: db, bun: bunDB, dialect: dialect}
 }
 
 type bunRawRow struct {
@@ -53,6 +63,14 @@ func (s *Store) rowsRaw(ctx context.Context, query string, args ...any) (*sql.Ro
 
 func (s *Store) execRaw(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return s.bun.NewRaw(query, args...).Exec(ctx)
+}
+
+func (s *Store) insertReturningID(ctx context.Context, query string, args ...any) (int64, error) {
+	var id int64
+	if err := s.bun.NewRaw(query+" RETURNING id", args...).Scan(ctx, &id); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 type materializationState struct {
@@ -159,6 +177,9 @@ func (s *Store) Embedding(ctx context.Context, modelID int64, ownerType, ownerKe
 }
 
 func (s *Store) SaveEmbedding(ctx context.Context, modelID int64, ownerType, ownerKey, inputHash string, vectorData []byte) error {
+	if s.dialect == dbrepo.DialectPostgres {
+		return s.saveEmbeddingPostgres(ctx, modelID, ownerType, ownerKey, inputHash, vectorData)
+	}
 	if err := s.EnsureEmbeddingVectorSchema(ctx); err != nil {
 		return err
 	}
@@ -192,9 +213,22 @@ func (s *Store) SaveEmbedding(ctx context.Context, modelID int64, ownerType, own
 	return err
 }
 
+func (s *Store) saveEmbeddingPostgres(ctx context.Context, modelID int64, ownerType, ownerKey, inputHash string, vectorData []byte) error {
+	embedding := pgVectorLiteral(bytesToVector(vectorData))
+	_, err := s.execRaw(ctx, `
+		INSERT INTO watch_embeddings(model_id, owner_type, owner_key, input_hash, vector, embedding, created_at)
+		VALUES (?, ?, ?, ?, ?, ?::vector, ?)
+		ON CONFLICT(model_id, owner_type, owner_key, input_hash) DO NOTHING`,
+		modelID, ownerType, ownerKey, inputHash, vectorData, embedding, nowString())
+	return err
+}
+
 func (s *Store) SimilarEmbeddings(ctx context.Context, modelID int64, query Vector, limit int) ([]int64, error) {
 	if limit <= 0 {
 		limit = 10
+	}
+	if s.dialect == dbrepo.DialectPostgres {
+		return s.similarEmbeddingsPgVector(ctx, modelID, query, limit)
 	}
 	if err := s.EnsureEmbeddingVectorSchema(ctx); err != nil {
 		return nil, err
@@ -204,6 +238,31 @@ func (s *Store) SimilarEmbeddings(ctx context.Context, modelID int64, query Vect
 		return ids, nil
 	}
 	return s.similarEmbeddingsFallback(ctx, modelID, query, limit)
+}
+
+func (s *Store) similarEmbeddingsPgVector(ctx context.Context, modelID int64, query Vector, limit int) ([]int64, error) {
+	rows, err := s.rowsRaw(ctx, `
+		SELECT id
+		FROM watch_embeddings
+		WHERE model_id = ? AND embedding IS NOT NULL
+		ORDER BY embedding <=> ?::vector
+		LIMIT ?`, modelID, pgVectorLiteral(query), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]int64, 0, limit)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) similarEmbeddingsSQLiteVec(ctx context.Context, modelID int64, query Vector, limit int) ([]int64, error) {
@@ -274,6 +333,10 @@ func (s *Store) similarEmbeddingsFallback(ctx context.Context, modelID int64, qu
 }
 
 func (s *Store) EnsureEmbeddingVectorSchema(ctx context.Context) error {
+	if s.dialect == dbrepo.DialectPostgres {
+		_, err := s.execRaw(ctx, `CREATE EXTENSION IF NOT EXISTS vector`)
+		return err
+	}
 	if _, err := s.execRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS _vec_watch_embedding_vec (
 			dataset_id TEXT NOT NULL,
@@ -319,6 +382,14 @@ func sqliteMainDBPath(ctx context.Context, db *sql.DB) (string, error) {
 		return "", err
 	}
 	return "", nil
+}
+
+func pgVectorLiteral(v Vector) string {
+	parts := make([]string, 0, len(v))
+	for _, value := range v {
+		parts = append(parts, fmt.Sprintf("%g", value))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 func (s *Store) MappingState(ctx context.Context, repositoryID int64, ownerType, ownerKey, resourceType string) (materializationState, bool, error) {
@@ -422,31 +493,30 @@ func (s *Store) ReplaceArchitectureBindings(ctx context.Context, repositoryID in
 		return err
 	}
 	return s.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewRaw(`DELETE FROM watch_architecture_links WHERE repository_id = ?`, repositoryID).Exec(ctx); err != nil {
+		if _, err := tx.NewDelete().
+			Table("watch_architecture_links").
+			Where("repository_id = ?", repositoryID).
+			Exec(ctx); err != nil {
 			return err
 		}
 		now := nowString()
 		for _, binding := range bindings {
 			evidence, _ := json.Marshal(binding.Evidence)
-			if _, err := tx.NewRaw(`
-			INSERT INTO watch_architecture_links(
-				repository_id, component_key, target_repository_id, target_owner_type, target_owner_key,
-				target_resource_type, target_resource_id, role, confidence, evidence_json, created_at, updated_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				repositoryID,
-				binding.ComponentKey,
-				binding.TargetRepositoryID,
-				binding.TargetOwnerType,
-				binding.TargetOwnerKey,
-				binding.TargetResourceType,
-				binding.TargetResourceID,
-				binding.Role,
-				binding.Confidence,
-				string(evidence),
-				now,
-				now,
-			).Exec(ctx); err != nil {
+			if _, err := tx.NewInsert().
+				Table("watch_architecture_links").
+				Value("repository_id", "?", repositoryID).
+				Value("component_key", "?", binding.ComponentKey).
+				Value("target_repository_id", "?", binding.TargetRepositoryID).
+				Value("target_owner_type", "?", binding.TargetOwnerType).
+				Value("target_owner_key", "?", binding.TargetOwnerKey).
+				Value("target_resource_type", "?", binding.TargetResourceType).
+				Value("target_resource_id", "?", binding.TargetResourceID).
+				Value("role", "?", binding.Role).
+				Value("confidence", "?", binding.Confidence).
+				Value("evidence_json", "?", string(evidence)).
+				Value("created_at", "?", now).
+				Value("updated_at", "?", now).
+				Exec(ctx); err != nil {
 				return err
 			}
 		}
@@ -536,6 +606,9 @@ func (s *Store) ArchitectureBindingTargets(ctx context.Context) ([]ArchitectureB
 }
 
 func (s *Store) ensureArchitectureLinksTable(ctx context.Context) error {
+	if s.dialect == dbrepo.DialectPostgres {
+		return nil
+	}
 	_, err := s.execRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS watch_architecture_links (
 		  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1129,7 +1202,7 @@ func (s *Store) ReleaseApplyLock(ctx context.Context, repositoryID int64, token 
 }
 
 func (s *Store) EnsureGitTags(ctx context.Context) error {
-	return tagcolors.Ensure(ctx, s.db, managedGitTags())
+	return tagcolors.EnsureBun(ctx, s.bun, managedGitTags())
 }
 
 func (s *Store) ApplyGitTags(ctx context.Context, repositoryID int64, status GitStatus) (GitTagUpdateResult, error) {
@@ -1525,7 +1598,7 @@ func stringPtr(value string) *string {
 func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID int64) (map[string]watchResourceSnapshot, error) {
 	out := map[string]watchResourceSnapshot{}
 	sourceCache := newMaterializedSnapshotCache()
-	fileRows, err := s.db.QueryContext(ctx, `SELECT id, path, language, worktree_hash FROM watch_files WHERE repository_id = ?`, repositoryID)
+	fileRows, err := s.rowsRaw(ctx, `SELECT id, path, language, worktree_hash FROM watch_files WHERE repository_id = ?`, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -1573,7 +1646,7 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 		return nil, err
 	}
 	sourceCache.buildFolderLineCounts()
-	factRows, err := s.db.QueryContext(ctx, `
+	factRows, err := s.rowsRaw(ctx, `
 		SELECT enricher, stable_key, type, fact_hash, name, file_path, start_line, end_line
 		FROM watch_facts
 		WHERE repository_id = ?`, repositoryID)
