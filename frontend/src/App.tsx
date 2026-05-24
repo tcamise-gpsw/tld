@@ -5,6 +5,7 @@ import { api } from './api/client'
 import ViewEditor from './pages/ViewEditor'
 import ViewsPage from './pages/Views'
 import Dependencies from './pages/Dependencies'
+import Inventory from './pages/Inventory'
 import { SharedInfiniteZoom } from './pages/InfiniteZoom'
 import Settings from './pages/Settings'
 import AppearanceSettings from './pages/AppearanceSettings'
@@ -129,6 +130,7 @@ export default function App() {
             <Route index element={<HomeRedirect />} />
             <Route path="views" element={<ViewsPage />} />
             <Route path="views/:id" element={<ViewEditor />} />
+            <Route path="inventory" element={<Inventory />} />
             <Route path="dependencies" element={<Dependencies />} />
             <Route path="explore" element={<Navigate to="/views" replace />} />
             <Route path="settings" element={<Settings />}>

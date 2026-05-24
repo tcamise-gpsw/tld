@@ -12,6 +12,7 @@ export { default as ViewEditor, type ViewEditorPermissions } from './pages/ViewE
 export { default as ViewsPage } from './pages/Views'
 export { default as ViewsGrid } from './pages/ViewsGrid'
 export { default as Dependencies } from './pages/Dependencies'
+export { default as Inventory } from './pages/Inventory'
 export { default as InfiniteZoom, SharedInfiniteZoom } from './pages/InfiniteZoom'
 export { default as Settings } from './pages/Settings'
 export { default as AppearanceSettings } from './pages/AppearanceSettings'

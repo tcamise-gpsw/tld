@@ -7,10 +7,15 @@ import {
   FormLabel,
   HStack,
   Input,
+  Tag,
+  TagCloseButton,
+  TagLabel,
   Text,
   Textarea,
   useBreakpointValue,
   VStack,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react'
 import { api } from '../api/client'
 import type { ViewTreeNode } from '../types'
@@ -18,6 +23,7 @@ import SlidingPanel from './SlidingPanel'
 import PanelHeader from './PanelHeader'
 import LayoutSection from './LayoutSection'
 import ScrollIndicatorWrapper from './ScrollIndicatorWrapper'
+import TagUpsert from './TagUpsert'
 
 import { useContext } from 'react'
 import { ViewEditorContext } from '../pages/ViewEditor/context'
@@ -30,6 +36,7 @@ interface Props {
   onSave: (updated: ViewTreeNode) => void
   onUnsupportedMutation?: () => void
   hasBackdrop?: boolean
+  availableTags?: string[]
 }
 
 /**
@@ -38,7 +45,7 @@ interface Props {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: View Properties, View Settings.
  */
-function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsupportedMutation, hasBackdrop = true }: Props) {
+function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsupportedMutation, hasBackdrop = true, availableTags = [] }: Props) {
   const ctx = useContext(ViewEditorContext)
   const canEdit = canEditProp ?? ctx?.canEdit ?? true
   const isReadOnly = !canEdit
@@ -46,6 +53,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [levelLabel, setLevelLabel] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -53,6 +61,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
       setName(view.name)
       setDescription(view.description || '')
       setLevelLabel(view.level_label || '')
+      setTags(view.tags || [])
     }
   }, [view])
 
@@ -71,9 +80,11 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
     try {
       const updated = await api.workspace.views.update(view.id, {
         name: name.trim(),
+        description,
         label: levelLabel,
+        tags,
       })
-      onSave({ ...view, name: updated.name, level_label: updated.label })
+      onSave({ ...view, name: updated.name, description, level_label: updated.label, tags: updated.tags })
       onClose()
     } catch {
       // intentionally empty
@@ -121,6 +132,29 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
               placeholder="Optional description"
               rows={4}
             />
+          </FormControl>
+          <FormControl isDisabled={isReadOnly}>
+            <FormLabel>Tags</FormLabel>
+            <TagUpsert
+              currentTags={tags}
+              availableTags={availableTags}
+              onAddTag={(tag) => {
+                if (!tags.includes(tag)) setTags((prev) => [...prev, tag])
+              }}
+              isReadOnly={isReadOnly}
+            />
+            <Wrap mt={3}>
+              {tags.map((tag) => (
+                <WrapItem key={tag}>
+                  <Tag size="sm" variant="subtle" bg="whiteAlpha.100" border="1px solid" borderColor="whiteAlpha.200">
+                    <TagLabel color="white">{tag}</TagLabel>
+                    {!isReadOnly && (
+                      <TagCloseButton onClick={() => setTags((prev) => prev.filter((item) => item !== tag))} />
+                    )}
+                  </Tag>
+                </WrapItem>
+              ))}
+            </Wrap>
           </FormControl>
           <LayoutSection view={view} canEdit={canEdit} onUnsupportedMutation={onUnsupportedMutation} />
 

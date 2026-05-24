@@ -11,15 +11,21 @@ import {
   SimpleGrid,
   Input,
   Textarea,
+  Tag,
+  TagCloseButton,
+  TagLabel,
   useBreakpointValue,
   useDisclosure,
   VStack,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react'
 import { api } from '../api/client'
 import type { Connector } from '../types'
 import ConfirmDialog from './ConfirmDialog'
 import SlidingPanel from './SlidingPanel'
 import PanelHeader from './PanelHeader'
+import TagUpsert from './TagUpsert'
 
 import { useViewEditorContext } from '../pages/ViewEditor/context'
 
@@ -78,6 +84,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
   onResetVisibility?: (id: number) => Promise<void> | void
   hasBackdrop?: boolean
   noFocusLock?: boolean
+  availableTags?: string[]
 }
 
 /**
@@ -86,7 +93,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: Connector Properties, Connector Details.
  */
-function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, noFocusLock, connectorPanelAfterContentSlot }: ConnectorPanelProps) {
+function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, noFocusLock, availableTags = [], connectorPanelAfterContentSlot }: ConnectorPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isReadOnly = !canEdit
   const autoSaveEdit = autoSave && !!connector && !isReadOnly
@@ -97,6 +104,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
   const [direction, setDirection] = useState('forward')
   const [connectorType, setConnectorType] = useState('bezier')
   const [url, setUrl] = useState('')
+  const [tags, setTags] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const confirmDelete = useDisclosure()
 
@@ -122,6 +130,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
       const type = connector.style === 'default' ? 'bezier' : (connector.style ?? 'bezier')
       setConnectorType(type)
       setUrl(connector.url ?? '')
+      setTags(connector.tags ?? [])
 
       lastSavedFingerprintRef.current = JSON.stringify({
         label: connector.label ?? '',
@@ -130,10 +139,12 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
         direction: dir,
         style: type,
         url: connector.url ?? '',
+        tags: connector.tags ?? [],
       })
     } else {
       initializedConnectorIdRef.current = null
       lastSavedFingerprintRef.current = ''
+      setTags([])
     }
   }, [connector, isOpen])
 
@@ -145,9 +156,10 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
       direction,
       style: connectorType,
       url,
+      tags,
     }
     return { payload, fingerprint: JSON.stringify(payload) }
-  }, [label, description, relType, direction, connectorType, url])
+  }, [label, description, relType, direction, connectorType, url, tags])
 
   const saveIfDirty = useCallback(async () => {
     if (!autoSaveEdit || !connector) return
@@ -170,6 +182,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
         direction: payload.direction,
         style: payload.style,
         url: payload.url,
+        tags: payload.tags,
       })
       lastSavedFingerprintRef.current = fingerprint
       onSave(updated)
@@ -202,7 +215,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
       void saveIfDirtyRef.current?.()
     }, 150)
     return () => window.clearTimeout(timer)
-  }, [autoSaveEdit, connector, label, description, relType, direction, connectorType, url])
+  }, [autoSaveEdit, connector, label, description, relType, direction, connectorType, url, tags])
 
   const handleSave = useCallback(async () => {
     if (isReadOnly || !connector || viewId == null) return
@@ -216,6 +229,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
         direction: payload.direction,
         style: payload.style,
         url: payload.url,
+        tags: payload.tags,
       })
       onSave(updated)
       onClose()
@@ -400,6 +414,35 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
                 placeholder="Describe the relationship…"
                 rows={4}
               />
+            </FormControl>
+            <FormControl isDisabled={isReadOnly} id="connector-tags">
+              <FormLabel>Tags</FormLabel>
+              <TagUpsert
+                currentTags={tags}
+                availableTags={availableTags}
+                onAddTag={(tag) => {
+                  if (!tags.includes(tag)) {
+                    setTags((prev) => [...prev, tag])
+                    scheduleAutoSave()
+                  }
+                }}
+                isReadOnly={isReadOnly}
+              />
+              <Wrap mt={3}>
+                {tags.map((tag) => (
+                  <WrapItem key={tag}>
+                    <Tag data-testid="connector-panel-tag-chip" size="sm" variant="subtle" bg="whiteAlpha.100" border="1px solid" borderColor="whiteAlpha.200">
+                      <TagLabel color="white">{tag}</TagLabel>
+                      {!isReadOnly && (
+                        <TagCloseButton data-testid="connector-panel-tag-remove" onClick={() => {
+                          setTags((prev) => prev.filter((item) => item !== tag))
+                          scheduleAutoSave()
+                        }} />
+                      )}
+                    </Tag>
+                  </WrapItem>
+                ))}
+              </Wrap>
             </FormControl>
 
             {connector && (onPromoteVisibility || onDemoteVisibility || onResetVisibility) && (

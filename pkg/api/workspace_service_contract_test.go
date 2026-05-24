@@ -267,12 +267,15 @@ func TestWorkspaceService_UpdateViewPreservesExistingLabelWhenOmitted(t *testing
 		getView: func(context.Context, int32, uuid.UUID) (*diagv1.View, error) {
 			return &diagv1.View{Id: 9, Name: "Old", LevelLabel: &label}, nil
 		},
-		updateView: func(_ context.Context, id int32, _ uuid.UUID, name string, gotLabel *string) (*diagv1.View, error) {
+		updateView: func(_ context.Context, id int32, _ uuid.UUID, name string, _ *string, gotLabel *string, tags []string) (*diagv1.View, error) {
 			if id != 9 || name != "New" {
 				t.Fatalf("view update = id:%d name:%q, want 9/New", id, name)
 			}
 			if gotLabel == nil || *gotLabel != label {
 				t.Fatalf("label = %v, want preserved %q", gotLabel, label)
+			}
+			if tags != nil {
+				t.Fatalf("tags = %v, want omitted", tags)
 			}
 			return &diagv1.View{Id: id, Name: name, LevelLabel: gotLabel}, nil
 		},
@@ -547,7 +550,7 @@ type contractStore struct {
 	updateElement           func(context.Context, int32, uuid.UUID, ElementInput) (*diagv1.Element, error)
 	getView                 func(context.Context, int32, uuid.UUID) (*diagv1.View, error)
 	getProjectedViewContent func(context.Context, int32, uuid.UUID, *int32) (*diagv1.ViewContent, error)
-	updateView              func(context.Context, int32, uuid.UUID, string, *string) (*diagv1.View, error)
+	updateView              func(context.Context, int32, uuid.UUID, string, *string, *string, []string) (*diagv1.View, error)
 	addPlacement            func(context.Context, int32, int32, float64, float64) (*diagv1.PlacedElement, error)
 	removePlacement         func(context.Context, int32, int32) error
 	createConnector         func(context.Context, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
@@ -584,9 +587,9 @@ func (s *contractStore) CreateView(ctx context.Context, workspaceID uuid.UUID, o
 	}
 	return nil, nil
 }
-func (s *contractStore) UpdateView(ctx context.Context, id int32, workspaceID uuid.UUID, name string, label *string) (*diagv1.View, error) {
+func (s *contractStore) UpdateView(ctx context.Context, id int32, workspaceID uuid.UUID, name string, description *string, label *string, tags []string) (*diagv1.View, error) {
 	if s.updateView != nil {
-		return s.updateView(ctx, id, workspaceID, name, label)
+		return s.updateView(ctx, id, workspaceID, name, description, label, tags)
 	}
 	return nil, nil
 }

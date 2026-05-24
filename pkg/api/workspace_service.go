@@ -553,8 +553,16 @@ func (s *WorkspaceService) UpdateView(
 		}
 		label = existing.LevelLabel
 	}
+	description := req.Msg.Description
+	if description == nil {
+		existing, err := s.Store.GetView(ctx, viewID, workspaceID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("view not found"))
+		}
+		description = existing.Description
+	}
 
-	v, err := s.Store.UpdateView(ctx, viewID, workspaceID, name, label)
+	v, err := s.Store.UpdateView(ctx, viewID, workspaceID, name, description, label, req.Msg.Tags)
 	if err != nil {
 		return nil, storeErr("update view", err)
 	}
@@ -1049,6 +1057,7 @@ func (s *WorkspaceService) UpdateConnector(
 		Label: label, Description: description,
 		Relationship: relationship, Direction: direction, Style: style,
 		URL: url, SourceHandle: sourceHandle, TargetHandle: targetHandle,
+		Tags: m.Tags,
 	})
 	if err != nil {
 		return nil, storeErr("update connector", err)

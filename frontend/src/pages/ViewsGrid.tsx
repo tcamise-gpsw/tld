@@ -725,7 +725,7 @@ function ViewGridInner({ onShare, treeData, loading, focusedId, onFocusChange, s
     setTreeData((prev) =>
       prev.map((n) =>
         n.id === updated.id
-          ? { ...n, name: updated.name, level_label: updated.level_label }
+          ? { ...n, name: updated.name, description: updated.description, level_label: updated.level_label, tags: updated.tags }
           : n
       )
     )

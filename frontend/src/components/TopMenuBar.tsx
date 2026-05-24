@@ -51,6 +51,17 @@ const GraphNetworkIcon = ({ size = 22 }: { size?: number }) => (
   </svg>
 )
 
+const InventoryIcon = ({ size = 22 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 5.5h16" />
+    <path d="M4 12h16" />
+    <path d="M4 18.5h16" />
+    <path d="M7 3.5v4" />
+    <path d="M14 10v4" />
+    <path d="M10 16.5v4" />
+  </svg>
+)
+
 interface Props extends TopMenuBarSlots {
   children?: React.ReactNode
   hideMobileBar?: boolean
@@ -65,6 +76,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { label: "Editor", path: "/", icon: PencilIcon },
   { label: "Diagrams", path: "/views", icon: FolderTreeIcon },
+  { label: "Inventory", path: "/inventory", icon: InventoryIcon },
   { label: "Links", path: "/dependencies", icon: GraphNetworkIcon },
 ]
 
@@ -342,7 +354,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           {[
             { label: "Editor", path: "/", icon: PencilIcon },
             { label: "Diagrams", path: "/views", icon: FolderTreeIcon },
-            { label: "Links", path: "/dependencies", icon: GraphNetworkIcon },
+            { label: "Inventory", path: "/inventory", icon: InventoryIcon },
           ].map((item) => {
             const Icon = item.icon
             const active = isActive(item.path)

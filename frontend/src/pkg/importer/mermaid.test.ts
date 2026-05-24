@@ -309,7 +309,7 @@ E--No-->C
       { element_id: 3, name: 'Database', view_id: 1, id: 2, position_x: 0, position_y: 0, kind: 'database', description: null, technology: null, url: null, logo_url: null, technology_connectors: [], tags: [], has_view: false, view_label: null },
     ] satisfies PlacedElement[]
     const connectors = [
-      { id: 9, view_id: 1, source_element_id: 2, target_element_id: 3, label: 'writes to', description: null, relationship: null, direction: 'forward', style: 'bezier', url: null, source_handle: null, target_handle: null, created_at: '', updated_at: '' },
+      { id: 9, view_id: 1, source_element_id: 2, target_element_id: 3, label: 'writes to', description: null, relationship: null, direction: 'forward', style: 'bezier', url: null, source_handle: null, target_handle: null, tags: [], created_at: '', updated_at: '' },
     ] satisfies Connector[]
 
     const code = serializeViewToMermaid(elements, connectors)
