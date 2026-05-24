@@ -26,6 +26,8 @@ import {
 } from '@chakra-ui/react'
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, DeleteIcon, SearchIcon, SmallCloseIcon, TriangleDownIcon, TriangleUpIcon } from '@chakra-ui/icons'
 import { api } from '../api/client'
+import { TYPE_COLORS } from '../types'
+import { resolveIconPath } from '../utils/url'
 import ConnectorPanel from '../components/ConnectorPanel'
 import ElementPanel from '../components/ElementPanel'
 import ViewPanel from '../components/ViewPanel'
@@ -373,8 +375,8 @@ export default function Inventory() {
     <ViewEditorContext.Provider value={editorContext}>
       <Box data-testid="inventory-page" h="100%" bg="var(--bg-canvas)" display="flex" flexDir="column" overflow="hidden">
         {/* Header bar */}
-        <Flex px={4} py={2.5} gap={3} align="center" borderBottom="1px solid" borderColor="whiteAlpha.100" flexShrink={0} wrap={{ base: 'wrap', lg: 'nowrap' }}>
-          <InputGroup size="sm" maxW={{ base: 'full', lg: '480px' }} flex={{ base: '1 0 100%', lg: '1' }}>
+        <Flex px={4} py={2.5} gap={3} align="center" justify="center" borderBottom="1px solid" borderColor="whiteAlpha.100" flexShrink={0} position="relative">
+          <InputGroup size="sm" maxW="480px" w="full">
             <InputLeftElement pointerEvents="none" color="gray.500"><SearchIcon boxSize={3.5} /></InputLeftElement>
             <Input
               ref={searchInputRef}
@@ -406,7 +408,7 @@ export default function Inventory() {
               </InputRightElement>
             )}
           </InputGroup>
-          <Flex align="center" gap={2} flexShrink={0}>
+          <Flex align="center" gap={2} position="absolute" right={4} flexShrink={0}>
             <Text fontSize="xs" color="gray.500">
               {loading ? <Spinner size="xs" /> : <><Text as="span" color="gray.300" fontWeight="medium">{filteredRows.length}</Text> / {rows.length}</>}
             </Text>
@@ -834,15 +836,7 @@ export default function Inventory() {
                           />
                         </Flex>
                         <HStack flex={1} minW={0} spacing={2.5}>
-                          <Box
-                            w="3px"
-                            h="30px"
-                            borderRadius="full"
-                            bg={isHighlighted ? 'var(--accent)' : 'transparent'}
-                            _groupHover={{ bg: 'var(--accent)' }}
-                            flexShrink={0}
-                            transition="background 0.15s"
-                          />
+                          <InventoryRowIcon row={row} />
                           <Box minW={0}>
                             <HStack spacing={2} mb={0.5}>
                               <Text fontSize="sm" fontWeight="semibold" noOfLines={1} color={isHighlighted ? 'white' : 'gray.100'}>{row.name}</Text>
@@ -987,6 +981,63 @@ export default function Inventory() {
         />
       </Box>
     </ViewEditorContext.Provider>
+  )
+}
+
+function InventoryRowIcon({ row }: { row: InventoryRow }) {
+  // Elements: mirror ElementLibrary — logo img if available, else kind-letter with TYPE_COLORS
+  if (row.objectType === 'element' && row.element) {
+    const color = TYPE_COLORS[row.element.kind?.toLowerCase() ?? ''] ?? 'gray'
+    const logoUrl = resolveIconPath(row.element.logo_url)
+    if (logoUrl) {
+      return (
+        <Flex w="26px" h="26px" align="center" justify="center" flexShrink={0} bg="whiteAlpha.100" rounded="md" p="3px">
+          <Box as="img" src={logoUrl} maxW="100%" maxH="100%" objectFit="contain" />
+        </Flex>
+      )
+    }
+    return (
+      <Flex
+        w="26px"
+        h="26px"
+        align="center"
+        justify="center"
+        flexShrink={0}
+        bg={`${color}.900`}
+        color={`${color}.300`}
+        rounded="md"
+        fontSize="11px"
+        fontWeight="bold"
+        userSelect="none"
+      >
+        {(row.element.kind || '?').charAt(0).toUpperCase()}
+      </Flex>
+    )
+  }
+
+  // Views: a small 3×2 grid of squares
+  if (row.objectType === 'view') {
+    return (
+      <Flex w="26px" h="26px" align="center" justify="center" flexShrink={0} bg="purple.900" color="purple.300" rounded="md">
+        <Box as="svg" width="14px" height="14px" viewBox="0 0 14 14" fill="currentColor">
+          <rect x="1" y="1" width="5" height="4" rx="0.8" />
+          <rect x="8" y="1" width="5" height="4" rx="0.8" />
+          <rect x="1" y="7" width="5" height="4" rx="0.8" />
+          <rect x="8" y="7" width="5" height="4" rx="0.8" />
+        </Box>
+      </Flex>
+    )
+  }
+
+  // Connectors: a small arrow from left to right with a node at each end
+  return (
+    <Flex w="26px" h="26px" align="center" justify="center" flexShrink={0} bg="orange.900" color="orange.300" rounded="md">
+      <Box as="svg" width="14px" height="14px" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="2.5" cy="7" r="1.5" fill="currentColor" stroke="none" />
+        <line x1="4" y1="7" x2="9" y2="7" />
+        <polyline points="7.5,5 10,7 7.5,9" fill="none" />
+      </Box>
+    </Flex>
   )
 }
 

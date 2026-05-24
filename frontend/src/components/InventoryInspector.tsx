@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Box, Flex, HStack, VStack, Text, Badge, IconButton } from '@chakra-ui/react'
+import { Box, Flex, VStack, Text, IconButton } from '@chakra-ui/react'
 import { ChevronDownIcon, ChevronUpIcon } from '@chakra-ui/icons'
 import { hexToRgba } from '../constants/colors'
 import { useTheme } from '../context/ThemeContext'
@@ -276,7 +276,7 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
         h="40px"
         px={4}
         align="center"
-        justify="space-between"
+        justify="center"
         borderBottom={isExpanded ? '1px solid' : 'none'}
         borderColor={borderCol}
         flexShrink={0}
@@ -285,34 +285,24 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
         userSelect="none"
         bg="blackAlpha.200"
         _hover={{ bg: 'whiteAlpha.50' }}
+        position="relative"
       >
-        <HStack spacing={2}>
-          <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase" letterSpacing="0.08em">
-            Inspect
-          </Text>
-          {isSelected && (
-            <>
-              <Box w="4px" h="4px" borderRadius="full" bg="whiteAlpha.400" />
-              <Badge size="sm" color="var(--accent)" bg="rgba(var(--accent-rgb), 0.12)" border="1px solid" borderColor="rgba(var(--accent-rgb), 0.2)">
-                {selectedRow.objectType}
-              </Badge>
-              <Text fontSize="xs" color="whiteAlpha.800" fontWeight="medium" noOfLines={1} maxW="300px">
-                {selectedRow.name}
-              </Text>
-            </>
-          )}
-        </HStack>
+        <Text fontSize="xs" color="whiteAlpha.800" fontWeight="medium" noOfLines={1} maxW="calc(100% - 48px)" textAlign="center">
+          {isSelected ? selectedRow.name : ''}
+        </Text>
 
-        <IconButton
-          size="xs"
-          variant="ghost"
-          aria-label={isExpanded ? 'Collapse' : 'Expand'}
-          icon={isExpanded ? <ChevronDownIcon /> : <ChevronUpIcon />}
-          onClick={(e) => {
-            e.stopPropagation()
-            toggleExpand()
-          }}
-        />
+        <Box position="absolute" right={2}>
+          <IconButton
+            size="xs"
+            variant="ghost"
+            aria-label={isExpanded ? 'Collapse' : 'Expand'}
+            icon={isExpanded ? <ChevronDownIcon /> : <ChevronUpIcon />}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleExpand()
+            }}
+          />
+        </Box>
       </Flex>
 
       {/* Canvas Area */}
