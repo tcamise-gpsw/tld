@@ -78,9 +78,9 @@ describe('inventoryData', () => {
       { 10: { placements: 0, connectors: 0 } },
     )
 
-    expect(filterInventoryRows(rows, { type: 'elements', query: 'payments', tag: '', kind: '', quality: '' }).map((row) => row.key)).toEqual(['element:1'])
-    expect(filterInventoryRows(rows, { type: 'all', query: '', tag: 'payments', kind: '', quality: '' }).map((row) => row.key).sort()).toEqual(['element:1', 'view:10'])
-    expect(filterInventoryRows(rows, { type: 'views', query: '', tag: '', kind: 'Context', quality: 'empty view' }).map((row) => row.key)).toEqual(['view:10'])
+    expect(filterInventoryRows(rows, { type: 'elements', query: 'payments', tags: [], kind: '', qualities: [] }).map((row) => row.key)).toEqual(['element:1'])
+    expect(filterInventoryRows(rows, { type: 'all', query: '', tags: ['payments'], kind: '', qualities: [] }).map((row) => row.key).sort()).toEqual(['element:1', 'view:10'])
+    expect(filterInventoryRows(rows, { type: 'views', query: '', tags: [], kind: 'Context', qualities: ['empty view'] }).map((row) => row.key)).toEqual(['view:10'])
   })
 
   it('converts dependency connectors into editable connectors with tags', () => {

@@ -931,9 +931,13 @@ export const api = {
     },
 
     connectors: {
-      list: (diagramId: number): Promise<Connector[]> =>
+      list: (diagramId: number, params?: { limit?: number; offset?: number }): Promise<Connector[]> =>
         rpc(async () => {
-          const res = await workspaceClient.listConnectors({ viewId: diagramId })
+          const res = await workspaceClient.listConnectors({
+            viewId: diagramId,
+            limit: params?.limit ?? 0,
+            offset: params?.offset ?? 0,
+          })
           const json = j<{ connectors: Record<string, unknown>[] }>(ListConnectorsResponseSchema, res)
           return (json.connectors ?? []).map(protoConnector)
         }),
@@ -1031,7 +1035,11 @@ export const api = {
                 totalCount: res.pagination ? Number(res.pagination.totalCount) : undefined,
               }
             }),
-            workspaceClient.listConnectors({ viewId: 0 })
+            workspaceClient.listConnectors({
+              viewId: 0,
+              limit: params.limit ?? 0,
+              offset: params.offset ?? 0,
+            })
               .then((res) => {
                 const connectorJson = j<{ connectors: Record<string, unknown>[] }>(ListConnectorsResponseSchema, res)
                 return (connectorJson.connectors ?? []).map(protoDependencyConnector)

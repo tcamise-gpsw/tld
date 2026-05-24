@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Badge,
@@ -52,9 +52,29 @@ const TYPE_OPTIONS: { value: InventoryType; label: string }[] = [
 ]
 
 const QUALITY_OPTIONS = ['untagged', 'missing description', 'has child view', 'unused element', 'empty view', 'missing label']
+const PAGE_SIZE_OPTIONS = [50, 100, 250]
+const DEFAULT_PAGE_SIZE = 100
+const MAX_VISIBLE_FILTER_OPTIONS = 100
+const ACCENT_CHECKBOX_SX = {
+  '.chakra-checkbox__control[data-checked], .chakra-checkbox__control[data-indeterminate]': {
+    bg: 'var(--accent)',
+    borderColor: 'var(--accent)',
+    color: 'rgb(var(--bg-main-rgb))',
+  },
+}
 
 function parseInventoryType(value: string | null): InventoryType {
   return value === 'elements' || value === 'views' || value === 'connectors' ? value : 'all'
+}
+
+function parsePositiveInt(value: string | null, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function parsePageSize(value: string | null): number {
+  const parsed = parsePositiveInt(value, DEFAULT_PAGE_SIZE)
+  return PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : DEFAULT_PAGE_SIZE
 }
 
 function formatUpdated(value: string) {
@@ -84,10 +104,13 @@ export default function Inventory() {
 
   const selectedType = parseInventoryType(searchParams.get('type'))
   const query = searchParams.get('q') ?? ''
+  const deferredQuery = useDeferredValue(query)
   const selectedObject = searchParams.get('object')
   const tagsFilter = useMemo(() => searchParams.get('tags')?.split(',').filter(Boolean) ?? [], [searchParams])
   const kindFilter = searchParams.get('kind') ?? ''
   const qualitiesFilter = useMemo(() => searchParams.get('qualities')?.split(',').filter(Boolean) ?? [], [searchParams])
+  const requestedPage = parsePositiveInt(searchParams.get('page'), 1)
+  const pageSize = parsePageSize(searchParams.get('pageSize'))
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -148,11 +171,11 @@ export default function Inventory() {
   const rows = useMemo(() => buildInventoryRows(elements, views, connectors, countsByView), [elements, views, connectors, countsByView])
   const filters = useMemo<InventoryFilters>(() => ({
     type: selectedType,
-    query,
+    query: deferredQuery,
     tags: tagsFilter,
     kind: kindFilter,
     qualities: qualitiesFilter,
-  }), [kindFilter, qualitiesFilter, query, selectedType, tagsFilter])
+  }), [deferredQuery, kindFilter, qualitiesFilter, selectedType, tagsFilter])
   const filteredRows = useMemo(() => {
     const base = filterInventoryRows(rows, filters)
     return [...base].sort((a, b) => {
@@ -164,10 +187,29 @@ export default function Inventory() {
       return sortDir === 'asc' ? cmp : -cmp
     })
   }, [filters, rows, sortKey, sortDir])
-  const selectedRow = useMemo(() => {
-    if (!selectedObject) return filteredRows[0] ?? null
-    return rows.find((row) => row.key === selectedObject) ?? filteredRows[0] ?? null
-  }, [filteredRows, rows, selectedObject])
+  const selectedObjectRow = useMemo(() => {
+    if (!selectedObject) return null
+    return rows.find((row) => row.key === selectedObject) ?? null
+  }, [rows, selectedObject])
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
+  const selectedRowIndex = selectedObjectRow ? filteredRows.findIndex((row) => row.key === selectedObjectRow.key) : -1
+  const currentPage = selectedRowIndex >= 0
+    ? Math.floor(selectedRowIndex / pageSize) + 1
+    : Math.min(requestedPage, totalPages)
+  const pageStart = filteredRows.length === 0 ? 0 : (currentPage - 1) * pageSize
+  const pageEnd = Math.min(pageStart + pageSize, filteredRows.length)
+  const paginatedRows = useMemo(
+    () => filteredRows.slice(pageStart, pageEnd),
+    [filteredRows, pageEnd, pageStart],
+  )
+  const selectedRow = useMemo(
+    () => (selectedRowIndex >= 0 ? selectedObjectRow : null) ?? paginatedRows[0] ?? null,
+    [paginatedRows, selectedObjectRow, selectedRowIndex],
+  )
+  const selectedKeysOnPage = useMemo(
+    () => paginatedRows.filter((row) => selectedKeys.has(row.key)).length,
+    [paginatedRows, selectedKeys],
+  )
 
   const tagCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -193,6 +235,7 @@ export default function Inventory() {
     if (value) next.set(key, value)
     else next.delete(key)
     if (key !== 'object') next.delete('object')
+    if (key !== 'page') next.delete('page')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
@@ -205,6 +248,7 @@ export default function Inventory() {
     if (current.length > 0) next.set('tags', current.join(','))
     else next.delete('tags')
     next.delete('object')
+    next.delete('page')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
@@ -217,6 +261,7 @@ export default function Inventory() {
     if (current.length > 0) next.set('qualities', current.join(','))
     else next.delete('qualities')
     next.delete('object')
+    next.delete('page')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
@@ -243,11 +288,16 @@ export default function Inventory() {
   }
 
   const handleSelectAll = () => {
-    if (selectedKeys.size === filteredRows.length) {
-      setSelectedKeys(new Set())
-    } else {
-      setSelectedKeys(new Set(filteredRows.map((r) => r.key)))
-    }
+    const pageKeys = paginatedRows.map((row) => row.key)
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      const allPageRowsSelected = pageKeys.length > 0 && pageKeys.every((key) => next.has(key))
+      pageKeys.forEach((key) => {
+        if (allPageRowsSelected) next.delete(key)
+        else next.add(key)
+      })
+      return next
+    })
   }
 
   const resetFilters = () => {
@@ -257,6 +307,24 @@ export default function Inventory() {
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(key); setSortDir('asc') }
+    setParam('page', '')
+  }
+
+  const setPage = (page: number) => {
+    const next = new URLSearchParams(searchParams)
+    if (page <= 1) next.delete('page')
+    else next.set('page', String(Math.min(page, totalPages)))
+    next.delete('object')
+    setSearchParams(next, { replace: true })
+  }
+
+  const setPageSize = (size: number) => {
+    const next = new URLSearchParams(searchParams)
+    if (size === DEFAULT_PAGE_SIZE) next.delete('pageSize')
+    else next.set('pageSize', String(size))
+    next.delete('page')
+    next.delete('object')
+    setSearchParams(next, { replace: true })
   }
 
   const toggleSection = (section: string) => {
@@ -275,6 +343,36 @@ export default function Inventory() {
   const hasActiveFilters = tagsFilter.length > 0 || qualitiesFilter.length > 0 || kindFilter
 
   const selectedRows = useMemo(() => rows.filter((r) => selectedKeys.has(r.key)), [rows, selectedKeys])
+
+  useEffect(() => {
+    if (selectedKeys.size === 0) return
+    const rowKeys = new Set(rows.map((row) => row.key))
+    setSelectedKeys((prev) => {
+      const next = new Set(Array.from(prev).filter((key) => rowKeys.has(key)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [rows, selectedKeys.size])
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<InventoryType, number> = {
+      all: rows.length,
+      elements: 0,
+      views: 0,
+      connectors: 0,
+    }
+    rows.forEach((row) => {
+      if (row.objectType === 'element') counts.elements += 1
+      else if (row.objectType === 'view') counts.views += 1
+      else counts.connectors += 1
+    })
+    return counts
+  }, [rows])
+
+  const filteredAvailableTags = useMemo(() => {
+    const normalized = tagSearch.trim().toLowerCase()
+    return availableTags.filter((tag) => !normalized || tag.toLowerCase().includes(normalized))
+  }, [availableTags, tagSearch])
+  const visibleAvailableTags = filteredAvailableTags.slice(0, MAX_VISIBLE_FILTER_OPTIONS)
 
   const handleBulkAddTag = async (tag: string) => {
     setBulkLoading(true)
@@ -402,9 +500,9 @@ export default function Inventory() {
             )}
           </InputGroup>
           <Flex align="center" gap={2} position="absolute" right={4} flexShrink={0}>
-            <Text fontSize="xs" color="gray.500">
-              {loading ? <Spinner size="xs" /> : <><Text as="span" color="gray.300" fontWeight="medium">{filteredRows.length}</Text> / {rows.length}</>}
-            </Text>
+            <Box fontSize="xs" color="gray.500">
+              {loading ? <Spinner size="xs" /> : <><Box as="span" color="gray.300" fontWeight="medium">{filteredRows.length}</Box> / {rows.length}</>}
+            </Box>
             <Text fontSize="xs" color="gray.600">objects</Text>
           </Flex>
         </Flex>
@@ -443,9 +541,7 @@ export default function Inventory() {
               <VStack align="stretch" spacing={0.5}>
                 {TYPE_OPTIONS.map((option) => {
                   const isActive = selectedType === option.value
-                  const count = option.value === 'all'
-                    ? rows.length
-                    : rows.filter((r) => r.objectType === option.value.replace(/s$/, '') as never).length
+                  const count = typeCounts[option.value]
                   return (
                     <Flex
                       key={option.value}
@@ -509,8 +605,7 @@ export default function Inventory() {
                 </InputGroup>
               )}
               <VStack align="stretch" spacing={0.5}>
-                {availableTags
-                  .filter((t) => !tagSearch || t.toLowerCase().includes(tagSearch.toLowerCase()))
+                {visibleAvailableTags
                   .map((tag) => {
                     const isActive = tagsFilter.includes(tag)
                     const count = tagCounts[tag] ?? 0
@@ -544,7 +639,10 @@ export default function Inventory() {
                 {availableTags.length === 0 && (
                   <Text fontSize="xs" color="gray.600" px={2}>No tags yet</Text>
                 )}
-                {tagSearch && availableTags.filter((t) => t.toLowerCase().includes(tagSearch.toLowerCase())).length === 0 && (
+                {filteredAvailableTags.length > visibleAvailableTags.length && (
+                  <Text fontSize="xs" color="gray.600" px={2}>Showing first {visibleAvailableTags.length} matches</Text>
+                )}
+                {tagSearch && filteredAvailableTags.length === 0 && (
                   <Text fontSize="xs" color="gray.600" px={2}>No matching tags</Text>
                 )}
               </VStack>
@@ -661,94 +759,6 @@ export default function Inventory() {
           </Box>
 
           <Flex flex={1} minW={0} direction="column" overflow="hidden">
-            {/* Bulk action bar */}
-            {selectedKeys.size > 0 && (
-              <Flex
-                px={4}
-                py={2}
-                align="center"
-                gap={2}
-                bg="rgba(66, 153, 225, 0.08)"
-                borderBottom="1px solid"
-                borderColor="blue.800"
-                flexShrink={0}
-              >
-                <Checkbox
-                  isIndeterminate={selectedKeys.size > 0 && selectedKeys.size < filteredRows.length}
-                  isChecked={selectedKeys.size === filteredRows.length}
-                  onChange={handleSelectAll}
-                  colorScheme="blue"
-                  size="sm"
-                />
-                <Text fontSize="sm" fontWeight="medium" color="blue.300" mr={2}>
-                  {selectedKeys.size} selected
-                </Text>
-                <Menu>
-                  <MenuButton
-                    as={Button}
-                    size="xs"
-                    variant="outline"
-                    colorScheme="blue"
-                    rightIcon={<ChevronDownIcon />}
-                    isLoading={bulkLoading}
-                  >
-                    Add tag
-                  </MenuButton>
-                  <MenuList maxH="240px" overflowY="auto">
-                    {availableTags.map((tag) => (
-                      <MenuItem key={tag} onClick={() => void handleBulkAddTag(tag)}>{tag}</MenuItem>
-                    ))}
-                    {availableTags.length === 0 && (
-                      <MenuItem isDisabled>No tags available</MenuItem>
-                    )}
-                  </MenuList>
-                </Menu>
-                {Object.keys(tagsInSelection).length > 0 && (
-                  <Menu>
-                    <MenuButton
-                      as={Button}
-                      size="xs"
-                      variant="outline"
-                      colorScheme="orange"
-                      rightIcon={<ChevronDownIcon />}
-                      isLoading={bulkLoading}
-                    >
-                      Remove tag
-                    </MenuButton>
-                    <MenuList maxH="240px" overflowY="auto">
-                      {Object.keys(tagsInSelection).map((tag) => (
-                        <MenuItem key={tag} onClick={() => void handleBulkRemoveTag(tag)}>
-                          <Flex justify="space-between" w="full">
-                            <Text>{tag}</Text>
-                            <Badge colorScheme="gray" ml={2}>{tagsInSelection[tag]}</Badge>
-                          </Flex>
-                        </MenuItem>
-                      ))}
-                    </MenuList>
-                  </Menu>
-                )}
-                <Tooltip label="Delete selected">
-                  <IconButton
-                    aria-label="Delete selected"
-                    icon={<DeleteIcon />}
-                    size="xs"
-                    colorScheme="red"
-                    variant="ghost"
-                    isLoading={bulkLoading}
-                    onClick={() => void handleBulkDelete()}
-                  />
-                </Tooltip>
-                <IconButton
-                  aria-label="Clear selection"
-                  icon={<SmallCloseIcon />}
-                  size="xs"
-                  variant="ghost"
-                  ml="auto"
-                  onClick={() => setSelectedKeys(new Set())}
-                />
-              </Flex>
-            )}
-
             <Box flex={1} overflow="auto">
               {loading ? (
                 <Flex h="100%" align="center" justify="center" direction="column" gap={3} color="gray.600">
@@ -759,37 +769,118 @@ export default function Inventory() {
                 <Box minW="720px">
                   {/* Sortable header */}
                   <Flex
-                    h="34px"
+                    h={selectedKeys.size > 0 ? '48px' : '48px'}
                     px={4}
                     align="center"
                     borderBottom="1px solid"
-                    borderColor="whiteAlpha.100"
-                    bg="rgba(0,0,0,0.15)"
+                    borderColor={selectedKeys.size > 0 ? 'rgba(var(--accent-rgb), 0.28)' : 'whiteAlpha.100'}
+                    bg="rgb(var(--bg-main-rgb))"
                     color="gray.500"
                     fontSize="10px"
                     fontWeight="bold"
-                    textTransform="uppercase"
+                    textTransform={selectedKeys.size > 0 ? 'none' : 'uppercase'}
                     position="sticky"
                     top={0}
                     zIndex={1}
+                    boxShadow={selectedKeys.size > 0 ? 'inset 0 -1px 0 rgba(var(--accent-rgb), 0.12)' : undefined}
                   >
                     <Flex w="32px" flexShrink={0} justify="center" align="center">
                       <Checkbox
                         size="sm"
-                        isIndeterminate={selectedKeys.size > 0 && selectedKeys.size < filteredRows.length}
-                        isChecked={selectedKeys.size > 0 && selectedKeys.size === filteredRows.length}
+                        isIndeterminate={selectedKeysOnPage > 0 && selectedKeysOnPage < paginatedRows.length}
+                        isChecked={paginatedRows.length > 0 && selectedKeysOnPage === paginatedRows.length}
                         onChange={handleSelectAll}
                         colorScheme="blue"
                         opacity={selectedKeys.size > 0 ? 1 : 0.4}
                         _hover={{ opacity: 1 }}
+                        sx={ACCENT_CHECKBOX_SX}
                       />
                     </Flex>
-                    <SortableHeader label="Name" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} flex={1} />
-                    <Box w="200px"><SortableHeader label="Tags" sortKey={null} activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
-                    <Box w="160px"><SortableHeader label="Usage" sortKey="usage" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
-                    <Box w="90px"><SortableHeader label="Updated" sortKey="updatedAt" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
+                    {selectedKeys.size > 0 ? (
+                      <>
+                        <Text fontSize="sm" fontWeight="semibold" color="var(--accent)" minW="96px">
+                          {selectedKeys.size} selected
+                        </Text>
+                        <HStack spacing={1.5} flex={1} minW={0}>
+                          <Menu>
+                            <MenuButton
+                              as={Button}
+                              size="xs"
+                              variant="outline"
+                              color="var(--accent)"
+                              borderColor="rgba(var(--accent-rgb), 0.55)"
+                              bg="rgba(var(--accent-rgb), 0.06)"
+                              _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)' }}
+                              rightIcon={<ChevronDownIcon />}
+                              isLoading={bulkLoading}
+                            >
+                              Add tag
+                            </MenuButton>
+                            <MenuList maxH="240px" overflowY="auto">
+                              {availableTags.map((tag) => (
+                                <MenuItem key={tag} onClick={() => void handleBulkAddTag(tag)}>{tag}</MenuItem>
+                              ))}
+                              {availableTags.length === 0 && (
+                                <MenuItem isDisabled>No tags available</MenuItem>
+                              )}
+                            </MenuList>
+                          </Menu>
+                          {Object.keys(tagsInSelection).length > 0 && (
+                            <Menu>
+                              <MenuButton
+                                as={Button}
+                                size="xs"
+                                variant="ghost"
+                                color="gray.300"
+                                _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                                rightIcon={<ChevronDownIcon />}
+                                isLoading={bulkLoading}
+                              >
+                                Remove tag
+                              </MenuButton>
+                              <MenuList maxH="240px" overflowY="auto">
+                                {Object.keys(tagsInSelection).map((tag) => (
+                                  <MenuItem key={tag} onClick={() => void handleBulkRemoveTag(tag)}>
+                                    <Flex justify="space-between" w="full">
+                                      <Text>{tag}</Text>
+                                      <Badge colorScheme="gray" ml={2}>{tagsInSelection[tag]}</Badge>
+                                    </Flex>
+                                  </MenuItem>
+                                ))}
+                              </MenuList>
+                            </Menu>
+                          )}
+                        </HStack>
+                        <Tooltip label="Delete selected">
+                          <IconButton
+                            aria-label="Delete selected"
+                            icon={<DeleteIcon />}
+                            size="xs"
+                            colorScheme="red"
+                            variant="ghost"
+                            isLoading={bulkLoading}
+                            onClick={() => void handleBulkDelete()}
+                          />
+                        </Tooltip>
+                        <IconButton
+                          aria-label="Clear selection"
+                          icon={<SmallCloseIcon />}
+                          size="xs"
+                          variant="ghost"
+                          color="gray.400"
+                          onClick={() => setSelectedKeys(new Set())}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <SortableHeader label="Name" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} flex={1} />
+                        <Box w="200px"><SortableHeader label="Tags" sortKey={null} activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
+                        <Box w="160px"><SortableHeader label="Usage" sortKey="usage" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
+                        <Box w="90px"><SortableHeader label="Updated" sortKey="updatedAt" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
+                      </>
+                    )}
                   </Flex>
-                  {filteredRows.map((row) => {
+                  {paginatedRows.map((row) => {
                     const isSelected = selectedKeys.has(row.key)
                     const isHighlighted = selectedRow?.key === row.key && selectedKeys.size === 0
                     const visibleTags = row.tags.slice(0, 3)
@@ -803,11 +894,11 @@ export default function Inventory() {
                         align="center"
                         borderBottom="1px solid"
                         borderColor="whiteAlpha.50"
-                        bg={isSelected ? 'rgba(66, 153, 225, 0.08)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.08)' : 'transparent'}
+                        bg={isSelected ? 'rgba(var(--accent-rgb), 0.08)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.08)' : 'transparent'}
                         cursor="pointer"
                         role="group"
                         transition="background 0.1s"
-                        _hover={{ bg: isSelected ? 'rgba(66, 153, 225, 0.12)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.12)' : 'whiteAlpha.50' }}
+                        _hover={{ bg: isSelected ? 'rgba(var(--accent-rgb), 0.12)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.12)' : 'whiteAlpha.50' }}
                         onClick={() => selectRow(row)}
                       >
                         <Flex
@@ -826,6 +917,7 @@ export default function Inventory() {
                             size="sm"
                             onChange={() => toggleSelectKey(row.key)}
                             onClick={(e) => e.stopPropagation()}
+                            sx={ACCENT_CHECKBOX_SX}
                           />
                         </Flex>
                         <HStack flex={1} minW={0} spacing={2.5}>
@@ -875,6 +967,51 @@ export default function Inventory() {
                       {hasActiveFilters && (
                         <Button size="xs" variant="outline" colorScheme="gray" onClick={resetFilters}>Clear filters</Button>
                       )}
+                    </Flex>
+                  )}
+                  {filteredRows.length > 0 && (
+                    <Flex
+                      h="44px"
+                      px={4}
+                      align="center"
+                      gap={2}
+                      borderTop="1px solid"
+                      borderColor="whiteAlpha.100"
+                      bg="rgb(var(--bg-main-rgb))"
+                      color="gray.500"
+                      position="sticky"
+                      bottom={0}
+                    >
+                      <Text fontSize="xs" flex={1}>
+                        Showing <Box as="span" color="gray.300">{pageStart + 1}-{pageEnd}</Box> of {filteredRows.length}
+                      </Text>
+                      <Menu>
+                        <MenuButton
+                          as={Button}
+                          size="xs"
+                          variant="ghost"
+                          color="gray.400"
+                          rightIcon={<ChevronDownIcon />}
+                        >
+                          {pageSize} / page
+                        </MenuButton>
+                        <MenuList minW="120px">
+                          {PAGE_SIZE_OPTIONS.map((size) => (
+                            <MenuItem key={size} onClick={() => setPageSize(size)}>
+                              {size} rows
+                            </MenuItem>
+                          ))}
+                        </MenuList>
+                      </Menu>
+                      <Button size="xs" variant="ghost" color="gray.400" onClick={() => setPage(currentPage - 1)} isDisabled={currentPage <= 1}>
+                        Previous
+                      </Button>
+                      <Text fontSize="xs" color="gray.500" minW="70px" textAlign="center">
+                        {currentPage} / {totalPages}
+                      </Text>
+                      <Button size="xs" variant="ghost" color="gray.400" onClick={() => setPage(currentPage + 1)} isDisabled={currentPage >= totalPages}>
+                        Next
+                      </Button>
                     </Flex>
                   )}
                 </Box>

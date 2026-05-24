@@ -46,6 +46,38 @@ func TestWorkspaceService_ListElementsReturnsPaginationAndChecksRead(t *testing.
 	}
 }
 
+func TestWorkspaceService_ListConnectorsAppliesPaginationAndChecksRead(t *testing.T) {
+	workspaceID := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	store := &contractStore{
+		listAllConnectors: func(_ context.Context, id uuid.UUID) ([]*diagv1.Connector, error) {
+			if id != workspaceID {
+				t.Fatalf("workspace id = %s, want %s", id, workspaceID)
+			}
+			return []*diagv1.Connector{
+				{Id: 1},
+				{Id: 2},
+				{Id: 3},
+			}, nil
+		},
+	}
+	hooks := &recordingHooks{}
+	service := &WorkspaceService{Store: store, Hooks: hooks}
+
+	resp, err := service.ListConnectors(WithWorkspaceID(context.Background(), workspaceID), connect.NewRequest(&diagv1.ListConnectorsRequest{
+		Limit:  1,
+		Offset: 1,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.Msg.GetConnectors(); len(got) != 1 || got[0].GetId() != 2 {
+		t.Fatalf("connectors = %+v, want connector 2", got)
+	}
+	if strings.Join(hooks.events, ",") != "read" {
+		t.Fatalf("hook events = %v, want read", hooks.events)
+	}
+}
+
 func TestWorkspaceService_GetViewContentIsOptIn(t *testing.T) {
 	store := &contractStore{
 		getProjectedViewContent: func(context.Context, int32, uuid.UUID, *int32) (*diagv1.ViewContent, error) {
@@ -556,6 +588,7 @@ type contractStore struct {
 	createConnector         func(context.Context, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
 	getConnector            func(context.Context, int32, uuid.UUID) (*diagv1.Connector, error)
 	updateConnector         func(context.Context, int32, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
+	listAllConnectors       func(context.Context, uuid.UUID) ([]*diagv1.Connector, error)
 }
 
 var _ Store = (*contractStore)(nil)
@@ -643,7 +676,10 @@ func (s *contractStore) RemovePlacement(ctx context.Context, viewID, elementID i
 func (s *contractStore) ListConnectors(context.Context, int32, uuid.UUID) ([]*diagv1.Connector, error) {
 	return nil, nil
 }
-func (s *contractStore) ListAllConnectors(context.Context, uuid.UUID) ([]*diagv1.Connector, error) {
+func (s *contractStore) ListAllConnectors(ctx context.Context, workspaceID uuid.UUID) ([]*diagv1.Connector, error) {
+	if s.listAllConnectors != nil {
+		return s.listAllConnectors(ctx, workspaceID)
+	}
 	return nil, nil
 }
 func (s *contractStore) GetConnector(ctx context.Context, id int32, workspaceID uuid.UUID) (*diagv1.Connector, error) {
