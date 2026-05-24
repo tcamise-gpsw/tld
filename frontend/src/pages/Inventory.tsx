@@ -25,7 +25,7 @@ import { api } from '../api/client'
 import ConnectorPanel from '../components/ConnectorPanel'
 import ElementPanel from '../components/ElementPanel'
 import ViewPanel from '../components/ViewPanel'
-import RelationshipDrawer from '../components/InventoryInspector'
+import InspectDrawer from '../components/InventoryInspector'
 import { useSetHeader } from '../components/HeaderContext'
 import { ViewEditorContext } from './ViewEditor/context'
 import type { Connector, LibraryElement, ViewTreeNode } from '../types'
@@ -296,7 +296,7 @@ export default function Inventory() {
                 </Box>
               )}
             </Box>
-            <RelationshipDrawer
+            <InspectDrawer
               selectedRow={selectedRow}
               elements={elements}
               views={views}

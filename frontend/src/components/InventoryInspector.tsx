@@ -6,13 +6,13 @@ import { hexToRgba } from '../constants/colors'
 import { useTheme } from '../context/ThemeContext'
 import { ConnectorInspector } from './InventoryDrawer/ConnectorInspector'
 import { ElementInspector } from './InventoryDrawer/ElementInspector'
-import type { RelationshipDrawerProps } from './InventoryDrawer/types'
+import type { InspectDrawerProps } from './InventoryDrawer/types'
 import { getNeighbourGraph } from './InventoryDrawer/utils'
 import { ViewInspector } from './InventoryDrawer/ViewInspector'
 
-export type { RelationshipDrawerProps, NeighbourNode } from './InventoryDrawer/types'
+export type { InspectDrawerProps, NeighbourNode } from './InventoryDrawer/types'
 
-export default function RelationshipDrawer({ selectedRow, elements, views, connectors, placementByViewElement, onSelectRow }: RelationshipDrawerProps) {
+export default function InspectDrawer({ selectedRow, elements, views, connectors, placementByViewElement, onSelectRow }: InspectDrawerProps) {
   const { accent } = useTheme()
 
   const [isExpanded, setIsExpanded] = useState(() => {

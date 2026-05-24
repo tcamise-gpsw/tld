@@ -7,7 +7,7 @@ export interface NeighbourNode {
   position: 'left' | 'right' | 'top' | 'bottom'
 }
 
-export interface RelationshipDrawerProps {
+export interface InspectDrawerProps {
   selectedRow: InventoryRow | null
   elements: LibraryElement[]
   views: ViewTreeNode[]
