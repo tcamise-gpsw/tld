@@ -54,10 +54,12 @@ import ConnectorPanel from '../../components/ConnectorPanel'
 import ElementLibrary from '../../components/ElementLibrary'
 import ViewExplorer from '../../components/ViewExplorer'
 import ViewPanel from '../../components/ViewPanel'
+import { useSetHeader } from '../../components/HeaderContext'
 import InlineElementAdder from '../../components/InlineElementAdder'
 import ExportModal, { type ExportOptions } from '../../components/ExportModal'
 import ImportModal from '../../components/ImportModal'
 import { KbdHint } from '../../components/PanelUI'
+import ViewHeaderButton from '../../components/ViewHeaderButton'
 import ViewEditorOnboarding from '../../components/ViewEditorOnboarding'
 import DrawingCanvas, { type DrawingCanvasHandle } from '../../components/DrawingCanvas'
 import ViewFloatingMenu from '../../components/ViewFloatingMenu'
@@ -395,6 +397,7 @@ function ViewEditorInner({
     undo: undoViewEdit,
     redo: redoViewEdit,
   } = useViewEditHistory()
+  const setHeader = useSetHeader()
   const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
   const [densityLevel, setDensityLevel] = useState(0)
   const [visibilityOverrides, setVisibilityOverrides] = useState<VisibilityOverride[]>([])
@@ -1910,6 +1913,13 @@ function ViewEditorInner({
     return () => { html.style.overscrollBehaviorX = prev }
   }, [])
 
+  useEffect(() => {
+    setHeader({
+      node: <ViewHeaderButton name={viewName ?? undefined} onOpen={openViewDetailsRef.current} />,
+    })
+  }, [viewName, setHeader])
+
+  useEffect(() => () => setHeader(null), [setHeader])
   // ── Share ──────────────────────────────────────────────────────────────────
   const onShare = useCallback(() => { }, [])
 
