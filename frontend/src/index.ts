@@ -77,7 +77,6 @@ export { ViewEditorContext, useViewEditorContext } from './pages/ViewEditor/cont
 
 // Onboarding components
 export { default as ViewEditorOnboarding } from './components/ViewEditorOnboarding'
-export { default as DependenciesOnboarding } from './components/DependenciesOnboarding'
 export { default as ViewsGridOnboarding } from './components/ViewsGridOnboarding'
 export { default as ExploreOnboarding } from './components/ExploreOnboarding'
 export { default as ExplorePageOnboarding } from './components/ExplorePageOnboarding'

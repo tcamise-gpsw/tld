@@ -6,7 +6,6 @@ export const onboardingStorage = {
   explorePage: 'explore_page_tutorial_v1_core',
   viewGrid: 'viewgrid_tutorial_v2_core',
   shown: 'onboarding_shown',
-  dependencies: 'dependencies_tutorial_v1_core',
   sharedZoom: 'shared_zoom_onboarding_dismissed',
 }
 
@@ -17,7 +16,6 @@ export async function prepareStorage(page: Page) {
     localStorage.setItem(keys.explorePage, '1')
     localStorage.setItem(keys.viewGrid, '1')
     localStorage.setItem(keys.shown, '1')
-    localStorage.setItem(keys.dependencies, '1')
     localStorage.setItem(keys.sharedZoom, 'true')
     localStorage.setItem('diag:libraryOpen', 'true')
     localStorage.setItem('diag:explorerOpen', 'true')
