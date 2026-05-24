@@ -35,7 +35,6 @@ import {
   filterInventoryRows,
   flattenInventoryViews,
   type InventoryFilters,
-  type InventoryObjectType,
   type InventoryRow,
   type InventoryType,
 } from './inventoryData'
@@ -58,12 +57,6 @@ function formatUpdated(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '-'
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function typeColor(type: InventoryObjectType) {
-  if (type === 'element') return 'green'
-  if (type === 'view') return 'purple'
-  return 'orange'
 }
 
 export default function Inventory() {
@@ -272,11 +265,11 @@ export default function Inventory() {
                       onClick={() => selectRow(row)}
                     >
                       <HStack flex={1} minW={0} spacing={3}>
-                        <Box w="4px" h="34px" borderRadius="full" bg={`${typeColor(row.objectType)}.300`} flexShrink={0} />
+                        <Box w="4px" h="34px" borderRadius="full" bg="var(--accent)" flexShrink={0} />
                         <Box minW={0}>
                           <HStack spacing={2}>
                             <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>{row.name}</Text>
-                            <Badge size="sm" colorScheme={typeColor(row.objectType)}>{row.objectType}</Badge>
+                            <Badge size="sm" color="var(--accent)" bg="rgba(var(--accent-rgb), 0.12)" border="1px solid" borderColor="rgba(var(--accent-rgb), 0.2)">{row.objectType}</Badge>
                           </HStack>
                           <Text fontSize="xs" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
                         </Box>
@@ -308,7 +301,7 @@ export default function Inventory() {
             {selectedRow?.objectType === 'view' && (
               <ViewPanel
                 isOpen={true}
-                onClose={() => {}}
+                onClose={() => { }}
                 view={selectedRow.view ?? null}
                 canEdit
                 onSave={() => refresh()}
@@ -320,7 +313,7 @@ export default function Inventory() {
             {selectedRow?.objectType === 'element' && (
               <ElementPanel
                 isOpen={true}
-                onClose={() => {}}
+                onClose={() => { }}
                 element={selectedRow.element ?? null}
                 onSave={() => refresh()}
                 onDelete={() => { setParam('object', ''); void refresh() }}
@@ -335,7 +328,7 @@ export default function Inventory() {
             {selectedRow?.objectType === 'connector' && (
               <ConnectorPanel
                 isOpen={true}
-                onClose={() => {}}
+                onClose={() => { }}
                 connector={selectedRow.connector ?? null}
                 orgId=""
                 onSave={() => refresh()}
@@ -396,5 +389,3 @@ function FilterSection({ title, children }: { title: string; children: React.Rea
     </Box>
   )
 }
-
-

@@ -564,7 +564,7 @@ export default function RelationshipDrawer({
           {isSelected && (
             <>
               <Box w="4px" h="4px" borderRadius="full" bg="whiteAlpha.400" />
-              <Badge size="sm" variant="subtle" colorScheme={selectedRow.objectType === 'element' ? 'green' : selectedRow.objectType === 'view' ? 'purple' : 'orange'}>
+              <Badge size="sm" color="var(--accent)" bg="rgba(var(--accent-rgb), 0.12)" border="1px solid" borderColor="rgba(var(--accent-rgb), 0.2)">
                 {selectedRow.objectType}
               </Badge>
               <Text fontSize="xs" color="whiteAlpha.800" fontWeight="medium" noOfLines={1} maxW="300px">
@@ -572,75 +572,103 @@ export default function RelationshipDrawer({
               </Text>
             </>
           )}
-        </HStack>
+      </HStack>
 
-        <IconButton
-          size="xs"
-          variant="ghost"
-          aria-label={isExpanded ? 'Collapse' : 'Expand'}
-          icon={isExpanded ? <ChevronDownIcon /> : <ChevronUpIcon />}
-          onClick={(e) => {
-            e.stopPropagation()
-            toggleExpand()
-          }}
-        />
-      </Flex>
+      <IconButton
+        size="xs"
+        variant="ghost"
+        aria-label={isExpanded ? 'Collapse' : 'Expand'}
+        icon={isExpanded ? <ChevronDownIcon /> : <ChevronUpIcon />}
+        onClick={(e) => {
+          e.stopPropagation()
+          toggleExpand()
+        }}
+      />
+    </Flex>
 
-      {/* Canvas Area */}
-      {isExpanded && (
-        <Box
-          flex={1}
-          minH="120px"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          bg="var(--bg-canvas)"
-          backgroundImage="radial-gradient(circle, #2D3748 0.5px, transparent 0.5px)"
-          backgroundSize="24px 24px"
-          position="relative"
-          overflow="hidden"
-          ref={graphRef}
-          onMouseDown={onCanvasMouseDown}
-          onTouchStart={onCanvasTouchStart}
-          style={{ cursor: 'grab' }}
-          sx={{ touchAction: 'none' }}
-        >
-          {!isSelected ? (
-            <VStack spacing={2} opacity={0.5}>
-              <Text color="gray.400" fontSize="sm" fontWeight="medium">
-                Select an item in the list
-              </Text>
-              <Text color="gray.600" fontSize="xs">
-                Visual relationship graph will appear here
-              </Text>
-            </VStack>
-          ) : (
-            <div ref={panContainerRef} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.22 }}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  position: 'relative',
-                  zIndex: 1,
-                  padding: '40px',
-                }}
-              >
-                {/* ── ELEMENT RELATIONS ────────────────────────────────────── */}
-                {selectedRow.objectType === 'element' && (
-                  <Flex direction="column" align="center">
-                    {/* Top group */}
-                    {topNodes.length > 0 && (
-                      <Flex direction="column" align="center">
-                        <VStack spacing={nodeSpacing} align="center">
-                          {topRows.map((row, rowIndex) => (
-                            <HStack key={`top-row-${rowIndex}`} spacing={nodeSpacing} align="flex-end">
-                              {row.map((n) => (
+      {/* Canvas Area */ }
+  {
+    isExpanded && (
+      <Box
+        flex={1}
+        minH="120px"
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+        bg="var(--bg-canvas)"
+        backgroundImage="radial-gradient(circle, #2D3748 0.5px, transparent 0.5px)"
+        backgroundSize="24px 24px"
+        position="relative"
+        overflow="hidden"
+        ref={graphRef}
+        onMouseDown={onCanvasMouseDown}
+        onTouchStart={onCanvasTouchStart}
+        style={{ cursor: 'grab' }}
+        sx={{ touchAction: 'none' }}
+      >
+        {!isSelected ? (
+          <VStack spacing={2} opacity={0.5}>
+            <Text color="gray.400" fontSize="sm" fontWeight="medium">
+              Select an item in the list
+            </Text>
+            <Text color="gray.600" fontSize="xs">
+              Visual relationship graph will appear here
+            </Text>
+          </VStack>
+        ) : (
+          <div ref={panContainerRef} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22 }}
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+                zIndex: 1,
+                padding: '40px',
+              }}
+            >
+              {/* ── ELEMENT RELATIONS ────────────────────────────────────── */}
+              {selectedRow.objectType === 'element' && (
+                <Flex direction="column" align="center">
+                  {/* Top group */}
+                  {topNodes.length > 0 && (
+                    <Flex direction="column" align="center">
+                      <VStack spacing={nodeSpacing} align="center">
+                        {topRows.map((row, rowIndex) => (
+                          <HStack key={`top-row-${rowIndex}`} spacing={nodeSpacing} align="flex-end">
+                            {row.map((n) => (
+                              <ReusableCard
+                                key={n.element.id}
+                                name={n.element.name}
+                                type={n.element.kind || ''}
+                                technology={n.element.technology || ''}
+                                colorScheme={TYPE_COLORS[n.element.kind || ''] || 'gray'}
+                                accentHex={TYPE_HEX[n.element.kind || '']}
+                                compactLevel={maxCompactLevel}
+                                onClick={() => onSelectRow(`element:${n.element.id}`)}
+                              />
+                            ))}
+                          </HStack>
+                        ))}
+                      </VStack>
+                      <ConnectionIndicator position="top" compactLevel={maxCompactLevel} />
+                    </Flex>
+                  )}
+
+                  {/* Middle row */}
+                  <Grid templateColumns="1fr auto 1fr" gap={colSpacing} alignItems="center" w="full">
+                    {/* Left group */}
+                    <Flex justify="flex-end">
+                      {leftNodes.length > 0 && (
+                        <Flex gap={nodeSpacing} align="center">
+                          {leftColumns.map((column, columnIndex) => (
+                            <VStack key={`left-column-${columnIndex}`} spacing={nodeSpacing} align="flex-end">
+                              {column.map((n) => (
                                 <ReusableCard
                                   key={n.element.id}
                                   name={n.element.name}
@@ -648,239 +676,213 @@ export default function RelationshipDrawer({
                                   technology={n.element.technology || ''}
                                   colorScheme={TYPE_COLORS[n.element.kind || ''] || 'gray'}
                                   accentHex={TYPE_HEX[n.element.kind || '']}
-                                  compactLevel={maxCompactLevel}
+                                  compactLevel={leftCompactLevel}
                                   onClick={() => onSelectRow(`element:${n.element.id}`)}
                                 />
                               ))}
-                            </HStack>
+                            </VStack>
                           ))}
-                        </VStack>
-                        <ConnectionIndicator position="top" compactLevel={maxCompactLevel} />
-                      </Flex>
-                    )}
+                          <ConnectionIndicator position="left" compactLevel={leftCompactLevel} />
+                        </Flex>
+                      )}
+                    </Flex>
 
-                    {/* Middle row */}
-                    <Grid templateColumns="1fr auto 1fr" gap={colSpacing} alignItems="center" w="full">
-                      {/* Left group */}
-                      <Flex justify="flex-end">
-                        {leftNodes.length > 0 && (
-                          <Flex gap={nodeSpacing} align="center">
-                            {leftColumns.map((column, columnIndex) => (
-                              <VStack key={`left-column-${columnIndex}`} spacing={nodeSpacing} align="flex-end">
-                                {column.map((n) => (
-                                  <ReusableCard
-                                    key={n.element.id}
-                                    name={n.element.name}
-                                    type={n.element.kind || ''}
-                                    technology={n.element.technology || ''}
-                                    colorScheme={TYPE_COLORS[n.element.kind || ''] || 'gray'}
-                                    accentHex={TYPE_HEX[n.element.kind || '']}
-                                    compactLevel={leftCompactLevel}
-                                    onClick={() => onSelectRow(`element:${n.element.id}`)}
-                                  />
-                                ))}
-                              </VStack>
-                            ))}
-                            <ConnectionIndicator position="left" compactLevel={leftCompactLevel} />
-                          </Flex>
-                        )}
-                      </Flex>
-
-                      {/* Center selected element */}
-                      <Box position="relative" zIndex={10} isolation="isolate" data-pan-block="true">
-                        <ReusableCard
-                          isSelected
-                          name={selectedRow.element?.name || ''}
-                          type={selectedRow.element?.kind || ''}
-                          technology={selectedRow.element?.technology || ''}
-                          colorScheme={TYPE_COLORS[selectedRow.element?.kind || ''] || 'gray'}
-                          borderColor={accent}
-                          accentHex={TYPE_HEX[selectedRow.element?.kind || '']}
-                          shadow={cardShadow}
-                          compactLevel={0}
-                        />
-                      </Box>
-
-                      {/* Right group */}
-                      <Flex justify="flex-start">
-                        {rightNodes.length > 0 && (
-                          <Flex gap={nodeSpacing} align="center">
-                            <ConnectionIndicator position="right" compactLevel={rightCompactLevel} />
-                            {rightColumns.map((column, columnIndex) => (
-                              <VStack key={`right-column-${columnIndex}`} spacing={nodeSpacing} align="flex-start">
-                                {column.map((n) => (
-                                  <ReusableCard
-                                    key={n.element.id}
-                                    name={n.element.name}
-                                    type={n.element.kind || ''}
-                                    technology={n.element.technology || ''}
-                                    colorScheme={TYPE_COLORS[n.element.kind || ''] || 'gray'}
-                                    accentHex={TYPE_HEX[n.element.kind || '']}
-                                    compactLevel={rightCompactLevel}
-                                    onClick={() => onSelectRow(`element:${n.element.id}`)}
-                                  />
-                                ))}
-                              </VStack>
-                            ))}
-                          </Flex>
-                        )}
-                      </Flex>
-                    </Grid>
-
-                    {/* Bottom group */}
-                    {bottomNodes.length > 0 && (
-                      <Flex direction="column" align="center">
-                        <ConnectionIndicator position="bottom" compactLevel={maxCompactLevel} />
-                        <VStack spacing={nodeSpacing} align="center">
-                          {bottomRows.map((row, rowIndex) => (
-                            <HStack key={`bottom-row-${rowIndex}`} spacing={nodeSpacing} align="flex-start">
-                              {row.map((n) => (
-                                <ReusableCard
-                                  key={n.element.id}
-                                  name={n.element.name}
-                                  type={n.element.kind || ''}
-                                  technology={n.element.technology || ''}
-                                  colorScheme={TYPE_COLORS[n.element.kind || ''] || 'gray'}
-                                  accentHex={TYPE_HEX[n.element.kind || '']}
-                                  compactLevel={maxCompactLevel}
-                                  onClick={() => onSelectRow(`element:${n.element.id}`)}
-                                />
-                              ))}
-                            </HStack>
-                          ))}
-                        </VStack>
-                      </Flex>
-                    )}
-
-                    {neighborGraph.length === 0 && (
-                      <Text color="gray.600" fontSize="sm" fontStyle="italic" mt={2} data-pan-block="true">
-                        No direct connections found.
-                      </Text>
-                    )}
-                  </Flex>
-                )}
-
-                {/* ── VIEW HIERARCHY (PARENT & CHILDREN) ───────────────────────── */}
-                {selectedRow.objectType === 'view' && viewData && (
-                  <Flex direction="column" align="center">
-                    {/* Top: Parent View */}
-                    {viewData.parentView ? (
-                      <Flex direction="column" align="center">
-                        <ReusableCard
-                          name={viewData.parentView.name}
-                          type={viewData.parentView.level_label || 'View'}
-                          colorScheme="purple"
-                          borderColor="purple.300"
-                          compactLevel={1}
-                          onClick={() => onSelectRow(`view:${viewData.parentView!.id}`)}
-                        />
-                        <ConnectionIndicator position="vertical" compactLevel={1} />
-                      </Flex>
-                    ) : (
-                      <Text color="gray.600" fontSize="2xs" fontWeight="bold" textTransform="uppercase" mb={2}>
-                        Root View
-                      </Text>
-                    )}
-
-                    {/* Center: Selected View */}
+                    {/* Center selected element */}
                     <Box position="relative" zIndex={10} isolation="isolate" data-pan-block="true">
                       <ReusableCard
                         isSelected
-                        name={viewData.selectedView.name}
-                        type={viewData.selectedView.level_label || 'View'}
-                        colorScheme="purple"
-                        borderColor="purple.400"
+                        name={selectedRow.element?.name || ''}
+                        type={selectedRow.element?.kind || ''}
+                        technology={selectedRow.element?.technology || ''}
+                        colorScheme={TYPE_COLORS[selectedRow.element?.kind || ''] || 'gray'}
+                        borderColor={accent}
+                        accentHex={TYPE_HEX[selectedRow.element?.kind || '']}
                         shadow={cardShadow}
                         compactLevel={0}
                       />
                     </Box>
 
-                    {/* Bottom: Child Views */}
-                    {viewData.childrenViews.length > 0 ? (
-                      <Flex direction="column" align="center">
-                        <ConnectionIndicator position="vertical" compactLevel={1} />
-                        <HStack spacing={4} wrap="wrap" justify="center" maxW="80vw" data-pan-block="true">
-                          {viewData.childrenViews.map((child) => (
-                            <ReusableCard
-                              key={child.id}
-                              name={child.name}
-                              type={child.level_label || 'View'}
-                              colorScheme="purple"
-                              borderColor="purple.200"
-                              compactLevel={1}
-                              onClick={() => onSelectRow(`view:${child.id}`)}
-                            />
+                    {/* Right group */}
+                    <Flex justify="flex-start">
+                      {rightNodes.length > 0 && (
+                        <Flex gap={nodeSpacing} align="center">
+                          <ConnectionIndicator position="right" compactLevel={rightCompactLevel} />
+                          {rightColumns.map((column, columnIndex) => (
+                            <VStack key={`right-column-${columnIndex}`} spacing={nodeSpacing} align="flex-start">
+                              {column.map((n) => (
+                                <ReusableCard
+                                  key={n.element.id}
+                                  name={n.element.name}
+                                  type={n.element.kind || ''}
+                                  technology={n.element.technology || ''}
+                                  colorScheme={TYPE_COLORS[n.element.kind || ''] || 'gray'}
+                                  accentHex={TYPE_HEX[n.element.kind || '']}
+                                  compactLevel={rightCompactLevel}
+                                  onClick={() => onSelectRow(`element:${n.element.id}`)}
+                                />
+                              ))}
+                            </VStack>
                           ))}
-                        </HStack>
-                      </Flex>
-                    ) : (
-                      <Text color="gray.600" fontSize="2xs" fontWeight="bold" textTransform="uppercase" mt={4}>
-                        No child views
-                      </Text>
-                    )}
-                  </Flex>
-                )}
+                        </Flex>
+                      )}
+                    </Flex>
+                  </Grid>
 
-                {/* ── CONNECTOR VIEW (SOURCE, CONNECTOR & TARGET) ─────────────── */}
-                {selectedRow.objectType === 'connector' && connectorData && (
-                  <Flex align="center" justify="center">
-                    {/* Left: Source Element */}
-                    {connectorData.sourceEl ? (
+                  {/* Bottom group */}
+                  {bottomNodes.length > 0 && (
+                    <Flex direction="column" align="center">
+                      <ConnectionIndicator position="bottom" compactLevel={maxCompactLevel} />
+                      <VStack spacing={nodeSpacing} align="center">
+                        {bottomRows.map((row, rowIndex) => (
+                          <HStack key={`bottom-row-${rowIndex}`} spacing={nodeSpacing} align="flex-start">
+                            {row.map((n) => (
+                              <ReusableCard
+                                key={n.element.id}
+                                name={n.element.name}
+                                type={n.element.kind || ''}
+                                technology={n.element.technology || ''}
+                                colorScheme={TYPE_COLORS[n.element.kind || ''] || 'gray'}
+                                accentHex={TYPE_HEX[n.element.kind || '']}
+                                compactLevel={maxCompactLevel}
+                                onClick={() => onSelectRow(`element:${n.element.id}`)}
+                              />
+                            ))}
+                          </HStack>
+                        ))}
+                      </VStack>
+                    </Flex>
+                  )}
+
+                  {neighborGraph.length === 0 && (
+                    <Text color="gray.600" fontSize="sm" fontStyle="italic" mt={2} data-pan-block="true">
+                      No direct connections found.
+                    </Text>
+                  )}
+                </Flex>
+              )}
+
+              {/* ── VIEW HIERARCHY (PARENT & CHILDREN) ───────────────────────── */}
+              {selectedRow.objectType === 'view' && viewData && (
+                <Flex direction="column" align="center">
+                  {/* Top: Parent View */}
+                  {viewData.parentView ? (
+                    <Flex direction="column" align="center">
                       <ReusableCard
-                        name={connectorData.sourceEl.name}
-                        type={connectorData.sourceEl.kind || 'element'}
-                        technology={connectorData.sourceEl.technology || ''}
-                        colorScheme={TYPE_COLORS[connectorData.sourceEl.kind || ''] || 'gray'}
-                        accentHex={TYPE_HEX[connectorData.sourceEl.kind || '']}
+                        name={viewData.parentView.name}
+                        type={viewData.parentView.level_label || 'View'}
+                        colorScheme="purple"
+                        borderColor="purple.300"
                         compactLevel={1}
-                        onClick={() => onSelectRow(`element:${connectorData.sourceEl!.id}`)}
+                        onClick={() => onSelectRow(`view:${viewData.parentView!.id}`)}
                       />
-                    ) : (
-                      <Text color="gray.600" fontSize="xs" fontStyle="italic">
-                        Unknown Source
-                      </Text>
-                    )}
+                      <ConnectionIndicator position="vertical" compactLevel={1} />
+                    </Flex>
+                  ) : (
+                    <Text color="gray.600" fontSize="2xs" fontWeight="bold" textTransform="uppercase" mb={2}>
+                      Root View
+                    </Text>
+                  )}
 
-                    <ConnectionIndicator position="horizontal" compactLevel={1} />
+                  {/* Center: Selected View */}
+                  <Box position="relative" zIndex={10} isolation="isolate" data-pan-block="true">
+                    <ReusableCard
+                      isSelected
+                      name={viewData.selectedView.name}
+                      type={viewData.selectedView.level_label || 'View'}
+                      colorScheme="purple"
+                      borderColor="purple.400"
+                      shadow={cardShadow}
+                      compactLevel={0}
+                    />
+                  </Box>
 
-                    {/* Center: Selected Connector */}
-                    <Box position="relative" zIndex={10} isolation="isolate" mx={2} data-pan-block="true">
-                      <ReusableCard
-                        isSelected
-                        name={selectedRow.name}
-                        type={connectorData.connector.relationship || 'Connector'}
-                        colorScheme="orange"
-                        borderColor="orange.400"
-                        shadow={cardShadow}
-                        compactLevel={0}
-                      />
-                    </Box>
+                  {/* Bottom: Child Views */}
+                  {viewData.childrenViews.length > 0 ? (
+                    <Flex direction="column" align="center">
+                      <ConnectionIndicator position="vertical" compactLevel={1} />
+                      <HStack spacing={4} wrap="wrap" justify="center" maxW="80vw" data-pan-block="true">
+                        {viewData.childrenViews.map((child) => (
+                          <ReusableCard
+                            key={child.id}
+                            name={child.name}
+                            type={child.level_label || 'View'}
+                            colorScheme="purple"
+                            borderColor="purple.200"
+                            compactLevel={1}
+                            onClick={() => onSelectRow(`view:${child.id}`)}
+                          />
+                        ))}
+                      </HStack>
+                    </Flex>
+                  ) : (
+                    <Text color="gray.600" fontSize="2xs" fontWeight="bold" textTransform="uppercase" mt={4}>
+                      No child views
+                    </Text>
+                  )}
+                </Flex>
+              )}
 
-                    <ConnectionIndicator position="horizontal" compactLevel={1} />
+              {/* ── CONNECTOR VIEW (SOURCE, CONNECTOR & TARGET) ─────────────── */}
+              {selectedRow.objectType === 'connector' && connectorData && (
+                <Flex align="center" justify="center">
+                  {/* Left: Source Element */}
+                  {connectorData.sourceEl ? (
+                    <ReusableCard
+                      name={connectorData.sourceEl.name}
+                      type={connectorData.sourceEl.kind || 'element'}
+                      technology={connectorData.sourceEl.technology || ''}
+                      colorScheme={TYPE_COLORS[connectorData.sourceEl.kind || ''] || 'gray'}
+                      accentHex={TYPE_HEX[connectorData.sourceEl.kind || '']}
+                      compactLevel={1}
+                      onClick={() => onSelectRow(`element:${connectorData.sourceEl!.id}`)}
+                    />
+                  ) : (
+                    <Text color="gray.600" fontSize="xs" fontStyle="italic">
+                      Unknown Source
+                    </Text>
+                  )}
 
-                    {/* Right: Target Element */}
-                    {connectorData.targetEl ? (
-                      <ReusableCard
-                        name={connectorData.targetEl.name}
-                        type={connectorData.targetEl.kind || 'element'}
-                        technology={connectorData.targetEl.technology || ''}
-                        colorScheme={TYPE_COLORS[connectorData.targetEl.kind || ''] || 'gray'}
-                        accentHex={TYPE_HEX[connectorData.targetEl.kind || '']}
-                        compactLevel={1}
-                        onClick={() => onSelectRow(`element:${connectorData.targetEl!.id}`)}
-                      />
-                    ) : (
-                      <Text color="gray.600" fontSize="xs" fontStyle="italic">
-                        Unknown Target
-                      </Text>
-                    )}
-                  </Flex>
-                )}
-              </motion.div>
-            </div>
-          )}
-        </Box>
-      )}
-    </Box>
+                  <ConnectionIndicator position="horizontal" compactLevel={1} />
+
+                  {/* Center: Selected Connector */}
+                  <Box position="relative" zIndex={10} isolation="isolate" mx={2} data-pan-block="true">
+                    <ReusableCard
+                      isSelected
+                      name={selectedRow.name}
+                      type={connectorData.connector.relationship || 'Connector'}
+                      colorScheme="orange"
+                      borderColor="orange.400"
+                      shadow={cardShadow}
+                      compactLevel={0}
+                    />
+                  </Box>
+
+                  <ConnectionIndicator position="horizontal" compactLevel={1} />
+
+                  {/* Right: Target Element */}
+                  {connectorData.targetEl ? (
+                    <ReusableCard
+                      name={connectorData.targetEl.name}
+                      type={connectorData.targetEl.kind || 'element'}
+                      technology={connectorData.targetEl.technology || ''}
+                      colorScheme={TYPE_COLORS[connectorData.targetEl.kind || ''] || 'gray'}
+                      accentHex={TYPE_HEX[connectorData.targetEl.kind || '']}
+                      compactLevel={1}
+                      onClick={() => onSelectRow(`element:${connectorData.targetEl!.id}`)}
+                    />
+                  ) : (
+                    <Text color="gray.600" fontSize="xs" fontStyle="italic">
+                      Unknown Target
+                    </Text>
+                  )}
+                </Flex>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </Box>
+    )
+  }
+    </Box >
   )
 }
