@@ -125,7 +125,7 @@ func requestWatchStop(proc localserver.ProcessRecord) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = sqliteStore.DB().Close() }()
+	defer func() { _ = sqliteStore.Close() }()
 	return watchpkg.NewStore(sqliteStore.DB()).RequestStopActive(context.Background())
 }
 

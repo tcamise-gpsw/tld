@@ -222,7 +222,7 @@ func NewWatchCmd() *cobra.Command {
 				}
 				return fail("watch.store_open.failed", err, "elapsed", time.Since(storeStarted).Round(time.Millisecond).String())
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
+			defer func() { _ = sqliteStore.Close() }()
 			if progress != nil {
 				progress.Advance("")
 				progress.Finish()
@@ -591,7 +591,7 @@ func newScanCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
+			defer func() { _ = sqliteStore.Close() }()
 			scanner := watch.NewScanner(watch.NewStore(sqliteStore.DB()))
 			scanner.Settings = watchSettings
 			scanner.Progress = newCLIProgress(cmd.ErrOrStderr())
@@ -663,7 +663,7 @@ func newRepresentCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
+			defer func() { _ = sqliteStore.Close() }()
 			watchStore := watch.NewStore(sqliteStore.DB())
 			scanner := watch.NewScanner(watchStore)
 			scanner.Settings = watchSettings
@@ -828,7 +828,7 @@ func runWatchDiff(cmd *cobra.Command, path string, opts watchDiffOptions) error 
 	if err != nil {
 		return fail("watch.diff.store_open.failed", err)
 	}
-	defer func() { _ = sqliteStore.DB().Close() }()
+	defer func() { _ = sqliteStore.Close() }()
 	watchStore := watch.NewStore(sqliteStore.DB())
 	once, err := watch.NewRunner(watchStore).RunOnce(cmd.Context(), watch.OneShotOptions{Path: path, Rescan: opts.Rescan, Embedding: embeddingCfg, Settings: watchSettings, DataDir: dataDir, Logger: logger})
 	if err != nil {

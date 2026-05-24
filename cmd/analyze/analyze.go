@@ -127,7 +127,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 			if err != nil {
 				return fail("analyze.store_open.failed", err, "elapsed", time.Since(storeStarted).Round(time.Millisecond).String())
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
+			defer func() { _ = sqliteStore.Close() }()
 			logger.InfoContext(cmd.Context(), "analyze.store_open.completed", "elapsed", time.Since(storeStarted).Round(time.Millisecond).String())
 			watchStore := watchpkg.NewStore(sqliteStore.DB())
 			progress := newAnalyzeWatchProgress(cmd.ErrOrStderr())

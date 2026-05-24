@@ -34,6 +34,27 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db, bun: bun.NewDB(db, sqlitedialect.New())}
 }
 
+type bunRawRow struct {
+	ctx   context.Context
+	query *bun.RawQuery
+}
+
+func (r bunRawRow) Scan(dest ...any) error {
+	return r.query.Scan(r.ctx, dest...)
+}
+
+func (s *Store) rowRaw(ctx context.Context, query string, args ...any) bunRawRow {
+	return bunRawRow{ctx: ctx, query: s.bun.NewRaw(query, args...)}
+}
+
+func (s *Store) rowsRaw(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return s.bun.QueryContext(ctx, query, args...)
+}
+
+func (s *Store) execRaw(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return s.bun.NewRaw(query, args...).Exec(ctx)
+}
+
 type materializationState struct {
 	ResourceID      int64
 	LastWatchHash   *string
@@ -81,17 +102,17 @@ type watchMaterializationMapping struct {
 
 func (s *Store) Summary(ctx context.Context, repositoryID int64) (Summary, error) {
 	summary := Summary{RepositoryID: repositoryID}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_files WHERE repository_id = ?`, repositoryID).Scan(&summary.Files); err != nil {
+	if err := s.rowRaw(ctx, `SELECT COUNT(*) FROM watch_files WHERE repository_id = ?`, repositoryID).Scan(&summary.Files); err != nil {
 		return Summary{}, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_symbols WHERE repository_id = ?`, repositoryID).Scan(&summary.Symbols); err != nil {
+	if err := s.rowRaw(ctx, `SELECT COUNT(*) FROM watch_symbols WHERE repository_id = ?`, repositoryID).Scan(&summary.Symbols); err != nil {
 		return Summary{}, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_references WHERE repository_id = ?`, repositoryID).Scan(&summary.References); err != nil {
+	if err := s.rowRaw(ctx, `SELECT COUNT(*) FROM watch_references WHERE repository_id = ?`, repositoryID).Scan(&summary.References); err != nil {
 		return Summary{}, err
 	}
 	var finished sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT status, started_at, finished_at
 		FROM watch_scan_runs
 		WHERE repository_id = ?
@@ -109,7 +130,7 @@ func (s *Store) Summary(ctx context.Context, repositoryID int64) (Summary, error
 func (s *Store) EnsureEmbeddingModel(ctx context.Context, cfg EmbeddingConfig, configHash string) (int64, error) {
 	cfg = normalizeEmbeddingConfig(cfg)
 	now := nowString()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_embedding_models(provider, model, dimension, config_hash, created_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(provider, model, dimension, config_hash) DO NOTHING`,
@@ -118,7 +139,7 @@ func (s *Store) EnsureEmbeddingModel(ctx context.Context, cfg EmbeddingConfig, c
 		return 0, err
 	}
 	var id int64
-	err = s.db.QueryRowContext(ctx, `
+	err = s.rowRaw(ctx, `
 		SELECT id FROM watch_embedding_models
 		WHERE provider = ? AND model = ? AND dimension = ? AND config_hash = ?`,
 		cfg.Provider, cfg.Model, cfg.Dimension, configHash).Scan(&id)
@@ -127,7 +148,7 @@ func (s *Store) EnsureEmbeddingModel(ctx context.Context, cfg EmbeddingConfig, c
 
 func (s *Store) Embedding(ctx context.Context, modelID int64, ownerType, ownerKey, inputHash string) ([]byte, bool, error) {
 	var vector []byte
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT vector FROM watch_embeddings
 		WHERE model_id = ? AND owner_type = ? AND owner_key = ? AND input_hash = ?`,
 		modelID, ownerType, ownerKey, inputHash).Scan(&vector)
@@ -141,7 +162,7 @@ func (s *Store) SaveEmbedding(ctx context.Context, modelID int64, ownerType, own
 	if err := s.EnsureEmbeddingVectorSchema(ctx); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_embeddings(model_id, owner_type, owner_key, input_hash, vector, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(model_id, owner_type, owner_key, input_hash) DO NOTHING`,
@@ -150,7 +171,7 @@ func (s *Store) SaveEmbedding(ctx context.Context, modelID int64, ownerType, own
 		return err
 	}
 	var embeddingID int64
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.rowRaw(ctx, `
 		SELECT id FROM watch_embeddings
 		WHERE model_id = ? AND owner_type = ? AND owner_key = ? AND input_hash = ?`,
 		modelID, ownerType, ownerKey, inputHash).Scan(&embeddingID); err != nil {
@@ -160,7 +181,7 @@ func (s *Store) SaveEmbedding(ctx context.Context, modelID int64, ownerType, own
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.execRaw(ctx, `
 		INSERT INTO _vec_watch_embedding_vec(dataset_id, id, content, meta, embedding)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(dataset_id, id) DO UPDATE SET
@@ -192,7 +213,7 @@ func (s *Store) similarEmbeddingsSQLiteVec(ctx context.Context, modelID int64, q
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, embeddingSimilarityTimeout)
 	defer cancel()
-	rows, err := s.db.QueryContext(queryCtx, `
+	rows, err := s.rowsRaw(queryCtx, `
 		SELECT id
 		FROM watch_embedding_vec
 		WHERE dataset_id = ? AND id MATCH ?
@@ -220,7 +241,7 @@ func (s *Store) similarEmbeddingsSQLiteVec(ctx context.Context, modelID int64, q
 }
 
 func (s *Store) similarEmbeddingsFallback(ctx context.Context, modelID int64, query Vector, limit int) ([]int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, vector FROM watch_embeddings WHERE model_id = ?`, modelID)
+	rows, err := s.rowsRaw(ctx, `SELECT id, vector FROM watch_embeddings WHERE model_id = ?`, modelID)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +274,7 @@ func (s *Store) similarEmbeddingsFallback(ctx context.Context, modelID int64, qu
 }
 
 func (s *Store) EnsureEmbeddingVectorSchema(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.execRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS _vec_watch_embedding_vec (
 			dataset_id TEXT NOT NULL,
 			id TEXT NOT NULL,
@@ -272,7 +293,7 @@ func (s *Store) EnsureEmbeddingVectorSchema(ctx context.Context) error {
 	if dbPath != "" {
 		createVirtualTable = fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS watch_embedding_vec USING vec(id, dbpath='%s')`, strings.ReplaceAll(dbPath, "'", "''"))
 	}
-	if _, err := s.db.ExecContext(ctx, createVirtualTable); err != nil {
+	if _, err := s.execRaw(ctx, createVirtualTable); err != nil {
 		return err
 	}
 	return nil
@@ -305,7 +326,7 @@ func (s *Store) MappingState(ctx context.Context, repositoryID int64, ownerType,
 	var lastHash sql.NullString
 	var dirtyAt sql.NullString
 	var dirty int
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT resource_id, last_watch_hash, dirty, dirty_detected_at FROM watch_materialization
 		WHERE repository_id = ? AND owner_type = ? AND owner_key = ? AND resource_type = ?`,
 		repositoryID, ownerType, ownerKey, resourceType).Scan(&state.ResourceID, &lastHash, &dirty, &dirtyAt)
@@ -330,7 +351,7 @@ func (s *Store) SaveMapping(ctx context.Context, repositoryID int64, ownerType, 
 }
 
 func (s *Store) SaveMappingAt(ctx context.Context, repositoryID int64, ownerType, ownerKey, resourceType string, resourceID int64, updatedAt string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repository_id, owner_type, owner_key, resource_type) DO UPDATE SET
@@ -341,7 +362,7 @@ func (s *Store) SaveMappingAt(ctx context.Context, repositoryID int64, ownerType
 }
 
 func (s *Store) SaveMappingHashAt(ctx context.Context, repositoryID int64, ownerType, ownerKey, resourceType string, resourceID int64, resourceHash string, updatedAt string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, last_watch_hash, dirty, dirty_detected_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
 		ON CONFLICT(repository_id, owner_type, owner_key, resource_type) DO UPDATE SET
@@ -355,7 +376,7 @@ func (s *Store) SaveMappingHashAt(ctx context.Context, repositoryID int64, owner
 }
 
 func (s *Store) MarkMappingDirty(ctx context.Context, repositoryID int64, ownerType, ownerKey, resourceType string, resourceID int64) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		UPDATE watch_materialization
 		SET dirty = 1,
 		    dirty_detected_at = COALESCE(dirty_detected_at, ?),
@@ -366,7 +387,7 @@ func (s *Store) MarkMappingDirty(ctx context.Context, repositoryID int64, ownerT
 }
 
 func (s *Store) Materialization(ctx context.Context, repositoryID int64) ([]MaterializationMapping, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, repository_id, owner_type, owner_key, resource_type, resource_id, last_watch_hash, dirty, dirty_detected_at, created_at, updated_at
 		FROM watch_materialization
 		WHERE repository_id = ?
@@ -400,47 +421,44 @@ func (s *Store) ReplaceArchitectureBindings(ctx context.Context, repositoryID in
 	if err := s.ensureArchitectureLinksTable(ctx); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM watch_architecture_links WHERE repository_id = ?`, repositoryID); err != nil {
-		return err
-	}
-	now := nowString()
-	for _, binding := range bindings {
-		evidence, _ := json.Marshal(binding.Evidence)
-		if _, err := tx.ExecContext(ctx, `
+	return s.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewRaw(`DELETE FROM watch_architecture_links WHERE repository_id = ?`, repositoryID).Exec(ctx); err != nil {
+			return err
+		}
+		now := nowString()
+		for _, binding := range bindings {
+			evidence, _ := json.Marshal(binding.Evidence)
+			if _, err := tx.NewRaw(`
 			INSERT INTO watch_architecture_links(
 				repository_id, component_key, target_repository_id, target_owner_type, target_owner_key,
 				target_resource_type, target_resource_id, role, confidence, evidence_json, created_at, updated_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			repositoryID,
-			binding.ComponentKey,
-			binding.TargetRepositoryID,
-			binding.TargetOwnerType,
-			binding.TargetOwnerKey,
-			binding.TargetResourceType,
-			binding.TargetResourceID,
-			binding.Role,
-			binding.Confidence,
-			string(evidence),
-			now,
-			now,
-		); err != nil {
-			return err
+				repositoryID,
+				binding.ComponentKey,
+				binding.TargetRepositoryID,
+				binding.TargetOwnerType,
+				binding.TargetOwnerKey,
+				binding.TargetResourceType,
+				binding.TargetResourceID,
+				binding.Role,
+				binding.Confidence,
+				string(evidence),
+				now,
+				now,
+			).Exec(ctx); err != nil {
+				return err
+			}
 		}
-	}
-	return tx.Commit()
+		return nil
+	})
 }
 
 func (s *Store) ArchitectureBindings(ctx context.Context, repositoryID int64) ([]ArchitectureBinding, error) {
 	if err := s.ensureArchitectureLinksTable(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, repository_id, component_key, target_repository_id, target_owner_type, target_owner_key,
 		       target_resource_type, target_resource_id, role, confidence, evidence_json, created_at, updated_at
 		FROM watch_architecture_links
@@ -478,7 +496,7 @@ func (s *Store) ArchitectureBindings(ctx context.Context, repositoryID int64) ([
 }
 
 func (s *Store) ArchitectureBindingTargets(ctx context.Context) ([]ArchitectureBindingTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT wm.repository_id, wm.owner_type, wm.owner_key, wm.resource_type, wm.resource_id,
 		       COALESCE(v.id, 0), e.name, COALESCE(e.kind, ''), COALESCE(e.file_path, ''),
 		       COALESCE(e.language, ''), COALESCE(e.tags, '[]')
@@ -518,7 +536,7 @@ func (s *Store) ArchitectureBindingTargets(ctx context.Context) ([]ArchitectureB
 }
 
 func (s *Store) ensureArchitectureLinksTable(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS watch_architecture_links (
 		  id INTEGER PRIMARY KEY AUTOINCREMENT,
 		  repository_id INTEGER NOT NULL,
@@ -546,7 +564,7 @@ func (s *Store) ensureArchitectureLinksTable(ctx context.Context) error {
 }
 
 func (s *Store) staleMaterializationMappings(ctx context.Context, repositoryID int64, runMarker string) ([]watchMaterializationMapping, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, owner_type, owner_key, resource_type, resource_id, last_watch_hash, dirty, dirty_detected_at, updated_at
 		FROM watch_materialization
 		WHERE repository_id = ? AND updated_at != ?`, repositoryID, runMarker)
@@ -580,7 +598,7 @@ func (s *Store) staleMaterializationMappings(ctx context.Context, repositoryID i
 }
 
 func (s *Store) allMaterializationMappings(ctx context.Context, repositoryID int64) ([]watchMaterializationMapping, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, owner_type, owner_key, resource_type, resource_id, last_watch_hash, dirty, dirty_detected_at, updated_at
 		FROM watch_materialization
 		WHERE repository_id = ?`, repositoryID)
@@ -626,11 +644,11 @@ func (s *Store) deleteMaterializationMapping(ctx context.Context, mapping watchM
 		query = ""
 	}
 	if query != "" {
-		if _, err := s.db.ExecContext(ctx, query, mapping.ResourceID); err != nil {
+		if _, err := s.execRaw(ctx, query, mapping.ResourceID); err != nil {
 			return err
 		}
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM watch_materialization WHERE id = ?`, mapping.ID)
+	_, err := s.execRaw(ctx, `DELETE FROM watch_materialization WHERE id = ?`, mapping.ID)
 	return err
 }
 
@@ -726,7 +744,7 @@ func (s *Store) mappingResourceDirty(ctx context.Context, repositoryID int64, ma
 
 func (s *Store) RepositoryMaterializationCount(ctx context.Context, repositoryID int64) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_materialization WHERE repository_id = ?`, repositoryID).Scan(&count)
+	err := s.rowRaw(ctx, `SELECT COUNT(*) FROM watch_materialization WHERE repository_id = ?`, repositoryID).Scan(&count)
 	return count, err
 }
 
@@ -757,7 +775,7 @@ func (s *Store) FilterDecisions(ctx context.Context, repositoryID int64, q Filte
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, q.Limit, q.Offset)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.rowsRaw(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +798,7 @@ func (s *Store) FilterDecisions(ctx context.Context, repositoryID int64, q Filte
 func (s *Store) RepresentationSummary(ctx context.Context, repositoryID int64) (RepresentationSummary, error) {
 	summary := RepresentationSummary{RepositoryID: repositoryID}
 	var finished sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT raw_graph_hash, filter_settings_hash, representation_hash, status, started_at, finished_at,
 		       elements_created, elements_updated, connectors_created, connectors_updated, views_created
 		FROM watch_representation_runs
@@ -797,7 +815,7 @@ func (s *Store) RepresentationSummary(ctx context.Context, repositoryID int64) (
 		summary.LastFinishedAt = &finished.String
 	}
 	var filterFinished sql.NullString
-	err = s.db.QueryRowContext(ctx, `
+	err = s.rowRaw(ctx, `
 		SELECT visible_symbols, hidden_symbols, visible_references, hidden_references, finished_at
 		FROM watch_filter_runs
 		WHERE repository_id = ?
@@ -810,7 +828,7 @@ func (s *Store) RepresentationSummary(ctx context.Context, repositoryID int64) (
 }
 
 func (s *Store) RawGraphHash(ctx context.Context, repositoryID int64) (string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT stable_key, signature_hash, content_hash
 		FROM watch_symbols
 		WHERE repository_id = ?
@@ -830,7 +848,7 @@ func (s *Store) RawGraphHash(ctx context.Context, repositoryID int64) (string, e
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
-	refRows, err := s.db.QueryContext(ctx, `
+	refRows, err := s.rowsRaw(ctx, `
 		SELECT source.stable_key, target.stable_key, r.kind, r.evidence_hash
 		FROM watch_references r
 		JOIN watch_symbols source ON source.id = r.source_symbol_id
@@ -852,7 +870,7 @@ func (s *Store) RawGraphHash(ctx context.Context, repositoryID int64) (string, e
 	if err := refRows.Err(); err != nil {
 		return "", err
 	}
-	factRows, err := s.db.QueryContext(ctx, `
+	factRows, err := s.rowsRaw(ctx, `
 		SELECT enricher, stable_key, type, fact_hash
 		FROM watch_facts
 		WHERE repository_id = ?
@@ -883,7 +901,7 @@ func (s *Store) AcquireLock(ctx context.Context, repositoryID int64, pid int, to
 	if err := s.markStaleLocks(ctx, cutoff); err != nil {
 		return Lock{}, err
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_locks(id, repository_id, pid, token, started_at, heartbeat_at, status)
 		VALUES (1, ?, ?, ?, ?, ?, 'active')
 		ON CONFLICT(id) DO UPDATE SET
@@ -909,10 +927,10 @@ func (s *Store) AcquireLock(ctx context.Context, repositoryID int64, pid int, to
 }
 
 func (s *Store) markStaleLocks(ctx context.Context, cutoff string) error {
-	if _, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'stale' WHERE status IN ('active', 'paused', 'stopping') AND heartbeat_at < ?`, cutoff); err != nil {
+	if _, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'stale' WHERE status IN ('active', 'paused', 'stopping') AND heartbeat_at < ?`, cutoff); err != nil {
 		return err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, pid, token
 		FROM watch_locks
 		WHERE status IN ('active', 'paused', 'stopping')`)
@@ -943,7 +961,7 @@ func (s *Store) markStaleLocks(ctx context.Context, cutoff string) error {
 		return err
 	}
 	for _, si := range staleItems {
-		if _, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'stale' WHERE id = ? AND token = ? AND status IN ('active', 'paused', 'stopping')`, si.id, si.token); err != nil {
+		if _, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'stale' WHERE id = ? AND token = ? AND status IN ('active', 'paused', 'stopping')`, si.id, si.token); err != nil {
 			return err
 		}
 	}
@@ -951,7 +969,7 @@ func (s *Store) markStaleLocks(ctx context.Context, cutoff string) error {
 }
 
 func (s *Store) ActiveLock(ctx context.Context) (Lock, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.rowRaw(ctx, `
 		SELECT id, repository_id, pid, token, started_at, heartbeat_at, status
 		FROM watch_locks
 		WHERE status IN ('active', 'paused', 'stopping')
@@ -961,7 +979,7 @@ func (s *Store) ActiveLock(ctx context.Context) (Lock, error) {
 }
 
 func (s *Store) lockByRepositoryToken(ctx context.Context, repositoryID int64, token string) (Lock, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.rowRaw(ctx, `
 		SELECT id, repository_id, pid, token, started_at, heartbeat_at, status
 		FROM watch_locks
 		WHERE repository_id = ? AND token = ?
@@ -982,14 +1000,14 @@ func (s *Store) ActiveLiveLock(ctx context.Context, staleAfter time.Duration) (L
 	}
 	heartbeat, err := time.Parse(time.RFC3339, lock.HeartbeatAt)
 	if err != nil || time.Since(heartbeat) > staleAfter || !watchProcessIsRunning(lock.PID) || lock.Status == "stale" || lock.Status == "released" {
-		_, _ = s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'stale' WHERE id = ? AND token = ? AND status IN ('active', 'paused', 'stopping')`, lock.ID, lock.Token)
+		_, _ = s.execRaw(ctx, `UPDATE watch_locks SET status = 'stale' WHERE id = ? AND token = ? AND status IN ('active', 'paused', 'stopping')`, lock.ID, lock.Token)
 		return lock, false, nil
 	}
 	return lock, true, nil
 }
 
 func (s *Store) HeartbeatLock(ctx context.Context, repositoryID int64, token string) (Lock, error) {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.execRaw(ctx, `
 		UPDATE watch_locks
 		SET heartbeat_at = ?
 		WHERE repository_id = ? AND token = ? AND status IN ('active', 'paused')`,
@@ -1004,43 +1022,43 @@ func (s *Store) HeartbeatLock(ctx context.Context, repositoryID int64, token str
 }
 
 func (s *Store) RequestStop(ctx context.Context, repositoryID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'stopping', heartbeat_at = ? WHERE repository_id = ? AND status IN ('active', 'paused')`, nowString(), repositoryID)
+	_, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'stopping', heartbeat_at = ? WHERE repository_id = ? AND status IN ('active', 'paused')`, nowString(), repositoryID)
 	return err
 }
 
 func (s *Store) RequestStopActive(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'stopping', heartbeat_at = ? WHERE status IN ('active', 'paused')`, nowString())
+	_, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'stopping', heartbeat_at = ? WHERE status IN ('active', 'paused')`, nowString())
 	return err
 }
 
 func (s *Store) RequestPause(ctx context.Context, repositoryID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'paused', heartbeat_at = ? WHERE repository_id = ? AND status = 'active'`, nowString(), repositoryID)
+	_, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'paused', heartbeat_at = ? WHERE repository_id = ? AND status = 'active'`, nowString(), repositoryID)
 	return err
 }
 
 func (s *Store) RequestPauseActive(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'paused', heartbeat_at = ? WHERE status = 'active'`, nowString())
+	_, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'paused', heartbeat_at = ? WHERE status = 'active'`, nowString())
 	return err
 }
 
 func (s *Store) RequestResume(ctx context.Context, repositoryID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'active', heartbeat_at = ? WHERE repository_id = ? AND status = 'paused'`, nowString(), repositoryID)
+	_, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'active', heartbeat_at = ? WHERE repository_id = ? AND status = 'paused'`, nowString(), repositoryID)
 	return err
 }
 
 func (s *Store) RequestResumeActive(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'active', heartbeat_at = ? WHERE status = 'paused'`, nowString())
+	_, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'active', heartbeat_at = ? WHERE status = 'paused'`, nowString())
 	return err
 }
 
 func (s *Store) LockStatus(ctx context.Context, repositoryID int64, token string) (string, error) {
 	var status string
-	err := s.db.QueryRowContext(ctx, `SELECT status FROM watch_locks WHERE repository_id = ? AND token = ?`, repositoryID, token).Scan(&status)
+	err := s.rowRaw(ctx, `SELECT status FROM watch_locks WHERE repository_id = ? AND token = ?`, repositoryID, token).Scan(&status)
 	return status, err
 }
 
 func (s *Store) ReleaseLock(ctx context.Context, repositoryID int64, token string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_locks SET status = 'released', heartbeat_at = ? WHERE repository_id = ? AND token = ?`, nowString(), repositoryID, token)
+	_, err := s.execRaw(ctx, `UPDATE watch_locks SET status = 'released', heartbeat_at = ? WHERE repository_id = ? AND token = ?`, nowString(), repositoryID, token)
 	return err
 }
 
@@ -1050,7 +1068,7 @@ func (s *Store) AcquireApplyLock(ctx context.Context, repositoryID int64, pid in
 	}
 	now := nowString()
 	cutoff := time.Now().UTC().Add(-staleAfter).Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_apply_locks(id, repository_id, pid, token, started_at, heartbeat_at, status)
 		VALUES (1, ?, ?, ?, ?, ?, 'active')
 		ON CONFLICT(id) DO UPDATE SET
@@ -1070,7 +1088,7 @@ func (s *Store) AcquireApplyLock(ctx context.Context, repositoryID int64, pid in
 		return err
 	}
 	var got string
-	err = s.db.QueryRowContext(ctx, `SELECT token FROM watch_apply_locks WHERE id = 1 AND status = 'active'`).Scan(&got)
+	err = s.rowRaw(ctx, `SELECT token FROM watch_apply_locks WHERE id = 1 AND status = 'active'`).Scan(&got)
 	if err != nil {
 		return err
 	}
@@ -1087,7 +1105,7 @@ func (s *Store) ActiveApplyLock(ctx context.Context, staleAfter time.Duration) (
 	var id int64
 	var pid int
 	var token, heartbeatAt, status string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT id, pid, token, heartbeat_at, status
 		FROM watch_apply_locks
 		WHERE id = 1 AND status = 'active'`).Scan(&id, &pid, &token, &heartbeatAt, &status)
@@ -1099,14 +1117,14 @@ func (s *Store) ActiveApplyLock(ctx context.Context, staleAfter time.Duration) (
 	}
 	heartbeat, err := time.Parse(time.RFC3339, heartbeatAt)
 	if err != nil || time.Since(heartbeat) > staleAfter || !watchProcessIsRunning(pid) || status != "active" {
-		_, _ = s.db.ExecContext(ctx, `UPDATE watch_apply_locks SET status = 'stale' WHERE id = ? AND token = ? AND status = 'active'`, id, token)
+		_, _ = s.execRaw(ctx, `UPDATE watch_apply_locks SET status = 'stale' WHERE id = ? AND token = ? AND status = 'active'`, id, token)
 		return false, nil
 	}
 	return true, nil
 }
 
 func (s *Store) ReleaseApplyLock(ctx context.Context, repositoryID int64, token string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE watch_apply_locks SET status = 'released', heartbeat_at = ? WHERE repository_id = ? AND token = ?`, nowString(), repositoryID, token)
+	_, err := s.execRaw(ctx, `UPDATE watch_apply_locks SET status = 'released', heartbeat_at = ? WHERE repository_id = ? AND token = ?`, nowString(), repositoryID, token)
 	return err
 }
 
@@ -1128,7 +1146,7 @@ func (s *Store) ApplyGitTags(ctx context.Context, repositoryID int64, status Git
 	addTags(status.Unstaged, "git:unstaged")
 	addTags(status.Untracked, "git:untracked")
 	addTags(status.Deleted, "watch:deleted")
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT resource_id, owner_type, owner_key
 		FROM watch_materialization
 		WHERE repository_id = ? AND resource_type = 'element' AND owner_type IN ('file', 'symbol')`, repositoryID)
@@ -1262,7 +1280,7 @@ func (s *Store) ChangedRawResourcesSinceLatest(ctx context.Context, repositoryID
 }
 
 func (s *Store) FileLanguages(ctx context.Context, repositoryID int64) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT path, language FROM watch_files WHERE repository_id = ?`, repositoryID)
+	rows, err := s.rowsRaw(ctx, `SELECT path, language FROM watch_files WHERE repository_id = ?`, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -1500,7 +1518,7 @@ func stringPtr(value string) *string {
 
 func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID int64) (map[string]watchResourceSnapshot, error) {
 	out := map[string]watchResourceSnapshot{}
-	fileRows, err := s.db.QueryContext(ctx, `SELECT id, path, language, worktree_hash FROM watch_files WHERE repository_id = ?`, repositoryID)
+	fileRows, err := s.rowsRaw(ctx, `SELECT id, path, language, worktree_hash FROM watch_files WHERE repository_id = ?`, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -1516,7 +1534,7 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 	if err := fileRows.Close(); err != nil {
 		return nil, err
 	}
-	symRows, err := s.db.QueryContext(ctx, `
+	symRows, err := s.rowsRaw(ctx, `
 		SELECT s.id, COALESCE(i.identity_key, s.stable_key), s.stable_key, f.path, s.content_hash, s.signature_hash, s.qualified_name, s.start_line, s.end_line
 		FROM watch_symbols s
 		JOIN watch_files f ON f.id = s.file_id
@@ -1541,7 +1559,7 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 	if err := symRows.Close(); err != nil {
 		return nil, err
 	}
-	factRows, err := s.db.QueryContext(ctx, `
+	factRows, err := s.rowsRaw(ctx, `
 		SELECT enricher, stable_key, type, fact_hash, name, file_path, start_line, end_line
 		FROM watch_facts
 		WHERE repository_id = ?`, repositoryID)
@@ -1567,7 +1585,7 @@ func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID 
 	if err != nil {
 		return nil, err
 	}
-	mapRows, err := s.db.QueryContext(ctx, `
+	mapRows, err := s.rowsRaw(ctx, `
 		SELECT id, owner_type, owner_key, resource_type, resource_id, updated_at
 		FROM watch_materialization
 		WHERE repository_id = ?`, repositoryID)
@@ -1609,7 +1627,7 @@ func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64
 	switch resourceType {
 	case "element":
 		var name, kind, description, repo, branch, filePath, language sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT name, kind, description, repo, branch, file_path, language FROM elements WHERE id = ?`, resourceID).Scan(&name, &kind, &description, &repo, &branch, &filePath, &language)
+		err := s.rowRaw(ctx, `SELECT name, kind, description, repo, branch, file_path, language FROM elements WHERE id = ?`, resourceID).Scan(&name, &kind, &description, &repo, &branch, &filePath, &language)
 		if err != nil {
 			return "", "", "", 0, err
 		}
@@ -1626,7 +1644,7 @@ func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64
 		return hashString(raw), name.String, language.String, materializedLineCount(ctx, s.db, repositoryID, ownerType, ownerKey, filePath.String), nil
 	case "view":
 		var name, label sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT name, level_label FROM views WHERE id = ?`, resourceID).Scan(&name, &label)
+		err := s.rowRaw(ctx, `SELECT name, level_label FROM views WHERE id = ?`, resourceID).Scan(&name, &label)
 		if err != nil {
 			return "", "", "", 0, err
 		}
@@ -1634,7 +1652,7 @@ func (s *Store) materializedResourceHash(ctx context.Context, repositoryID int64
 	case "connector":
 		var viewID, sourceID, targetID int64
 		var label, relationship, direction sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT view_id, source_element_id, target_element_id, label, relationship, direction FROM connectors WHERE id = ?`, resourceID).Scan(&viewID, &sourceID, &targetID, &label, &relationship, &direction)
+		err := s.rowRaw(ctx, `SELECT view_id, source_element_id, target_element_id, label, relationship, direction FROM connectors WHERE id = ?`, resourceID).Scan(&viewID, &sourceID, &targetID, &label, &relationship, &direction)
 		if err != nil {
 			return "", "", "", 0, err
 		}
@@ -1670,7 +1688,7 @@ func (s *Store) WatchVersionResourceSnapshots(ctx context.Context, versionID int
 	if err := s.ensureWatchVersionResourceRangeColumns(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT owner_type, owner_key, resource_type, resource_id, language, resource_hash, summary, line_count, file_path, start_line, end_line
 		FROM watch_version_resources
 		WHERE version_id = ?`, versionID)
@@ -1706,7 +1724,7 @@ func (s *Store) SaveWatchVersionResources(ctx context.Context, versionID, reposi
 		return err
 	}
 	for _, item := range snapshots {
-		_, err := s.db.ExecContext(ctx, `
+		_, err := s.execRaw(ctx, `
 			INSERT OR REPLACE INTO watch_version_resources(version_id, owner_type, owner_key, resource_type, resource_id, language, resource_hash, summary, line_count, file_path, start_line, end_line)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			versionID, item.OwnerType, item.OwnerKey, item.ResourceType, item.ResourceID, nullString(item.Language), item.Hash, nullString(item.Summary), item.LineCount, nullString(item.FilePath), item.StartLine, item.EndLine)
@@ -1723,7 +1741,7 @@ func (s *Store) ensureWatchVersionResourceRangeColumns(ctx context.Context) erro
 		`ALTER TABLE watch_version_resources ADD COLUMN start_line INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE watch_version_resources ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0`,
 	} {
-		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		if _, err := s.execRaw(ctx, stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}
 	}

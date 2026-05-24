@@ -2,10 +2,11 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/uptrace/bun"
 )
 
 type MergeResolved struct {
@@ -36,110 +37,112 @@ func (s *Store) MergeElements(ctx context.Context, sourceID, survivorID int64, r
 		return MergeResult{}, fmt.Errorf("load survivor element: %w", err)
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return MergeResult{}, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Reassign connectors: source_element_id → survivor, target_element_id → survivor.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE connectors SET source_element_id = ? WHERE source_element_id = ?`,
-		survivorID, sourceID,
-	); err != nil {
-		return MergeResult{}, fmt.Errorf("reassign source connectors: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE connectors SET target_element_id = ? WHERE target_element_id = ?`,
-		survivorID, sourceID,
-	); err != nil {
-		return MergeResult{}, fmt.Errorf("reassign target connectors: %w", err)
-	}
-
-	// Deduplicate connectors that became identical after reassignment.
-	if err := deduplicateConnectors(ctx, tx, sourceID, survivorID); err != nil {
-		return MergeResult{}, fmt.Errorf("deduplicate connectors: %w", err)
-	}
-
-	// For placements: update non-conflicting, delete conflicting (survivor position wins).
-	placementRows, err := tx.QueryContext(ctx,
-		`SELECT id, view_id FROM placements WHERE element_id = ?`, sourceID)
-	if err != nil {
-		return MergeResult{}, fmt.Errorf("load source placements: %w", err)
-	}
-	defer func() { _ = placementRows.Close() }()
-	for placementRows.Next() {
-		var placementID, viewID int64
-		if err := placementRows.Scan(&placementID, &viewID); err != nil {
-			return MergeResult{}, fmt.Errorf("scan placement: %w", err)
+	if err := s.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		// Reassign connectors: source_element_id -> survivor, target_element_id -> survivor.
+		if _, err := tx.NewUpdate().
+			Model((*connectorModel)(nil)).
+			Set("source_element_id = ?", survivorID).
+			Where("source_element_id = ?", sourceID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("reassign source connectors: %w", err)
 		}
-		var exists bool
-		if err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS(SELECT 1 FROM placements WHERE view_id = ? AND element_id = ?)`,
-			viewID, survivorID,
-		).Scan(&exists); err != nil {
-			return MergeResult{}, fmt.Errorf("check placement conflict: %w", err)
+		if _, err := tx.NewUpdate().
+			Model((*connectorModel)(nil)).
+			Set("target_element_id = ?", survivorID).
+			Where("target_element_id = ?", sourceID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("reassign target connectors: %w", err)
 		}
-		if exists {
-			if _, err := tx.ExecContext(ctx,
-				`DELETE FROM placements WHERE view_id = ? AND element_id = ?`,
-				viewID, sourceID,
-			); err != nil {
-				return MergeResult{}, fmt.Errorf("delete conflicting placement: %w", err)
+
+		// Deduplicate connectors that became identical after reassignment.
+		if err := deduplicateConnectors(ctx, tx, survivorID); err != nil {
+			return fmt.Errorf("deduplicate connectors: %w", err)
+		}
+
+		// For placements: update non-conflicting, delete conflicting (survivor position wins).
+		var placements []elementPlacementModel
+		if err := tx.NewSelect().
+			Model(&placements).
+			Column("id", "view_id").
+			Where("element_id = ?", sourceID).
+			Scan(ctx); err != nil {
+			return fmt.Errorf("load source placements: %w", err)
+		}
+		for _, placement := range placements {
+			exists, err := tx.NewSelect().
+				Model((*elementPlacementModel)(nil)).
+				Where("view_id = ?", placement.ViewID).
+				Where("element_id = ?", survivorID).
+				Exists(ctx)
+			if err != nil {
+				return fmt.Errorf("check placement conflict: %w", err)
 			}
-		} else {
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE placements SET element_id = ? WHERE id = ?`,
-				survivorID, placementID,
-			); err != nil {
-				return MergeResult{}, fmt.Errorf("reassign placement: %w", err)
+			if exists {
+				if _, err := tx.NewDelete().
+					Model((*elementPlacementModel)(nil)).
+					Where("view_id = ?", placement.ViewID).
+					Where("element_id = ?", sourceID).
+					Exec(ctx); err != nil {
+					return fmt.Errorf("delete conflicting placement: %w", err)
+				}
+				continue
+			}
+			if _, err := tx.NewUpdate().
+				Model((*elementPlacementModel)(nil)).
+				Set("element_id = ?", survivorID).
+				Where("id = ?", placement.ID).
+				Exec(ctx); err != nil {
+				return fmt.Errorf("reassign placement: %w", err)
 			}
 		}
-	}
-	if err := placementRows.Err(); err != nil {
-		return MergeResult{}, fmt.Errorf("iterate placements: %w", err)
-	}
 
-	// Reassign child view ownership if source owns a view.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE views SET owner_element_id = ? WHERE owner_element_id = ?`,
-		survivorID, sourceID,
-	); err != nil {
-		return MergeResult{}, fmt.Errorf("reassign child view: %w", err)
-	}
+		// Reassign child view ownership if source owns a view.
+		if _, err := tx.NewUpdate().
+			Model((*viewModel)(nil)).
+			Set("owner_element_id = ?", survivorID).
+			Where("owner_element_id = ?", sourceID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("reassign child view: %w", err)
+		}
 
-	// Merge element properties.
-	merged := mergeElementFields(survivor, source, resolved)
+		merged := mergeElementFields(survivor, source, resolved)
+		if _, err := tx.NewUpdate().
+			Model((*elementModel)(nil)).
+			Set("name = ?", merged.Name).
+			Set("kind = ?", merged.Kind).
+			Set("description = ?", merged.Description).
+			Set("technology = ?", merged.Technology).
+			Set("url = ?", merged.URL).
+			Set("logo_url = ?", merged.LogoURL).
+			Set("technology_connectors = ?", jsonString(merged.TechnologyConnectors, "[]")).
+			Set("tags = ?", jsonString(merged.Tags, "[]")).
+			Set("repo = ?", merged.Repo).
+			Set("branch = ?", merged.Branch).
+			Set("file_path = ?", merged.FilePath).
+			Set("language = ?", merged.Language).
+			Set("updated_at = ?", nowString()).
+			Where("id = ?", survivorID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("update survivor: %w", err)
+		}
 
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE elements SET
-			name = ?, kind = ?, description = ?, technology = ?, url = ?, logo_url = ?,
-			technology_connectors = ?, tags = ?, repo = ?, branch = ?, file_path = ?, language = ?,
-			updated_at = ?
-		WHERE id = ?`,
-		merged.Name, merged.Kind, merged.Description, merged.Technology, merged.URL, merged.LogoURL,
-		jsonString(merged.TechnologyConnectors, "[]"), jsonString(merged.Tags, "[]"),
-		merged.Repo, merged.Branch, merged.FilePath, merged.Language,
-		nowString(), survivorID,
-	); err != nil {
-		return MergeResult{}, fmt.Errorf("update survivor: %w", err)
-	}
+		if _, err := tx.NewDelete().
+			Model((*visibilityOverrideModel)(nil)).
+			Where("resource_type = 'element'").
+			Where("resource_id = ?", sourceID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("cleanup source visibility overrides: %w", err)
+		}
 
-	// Clean up visibility overrides for the source element.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM view_visibility_overrides WHERE resource_type = 'element' AND resource_id = ?`,
-		sourceID,
-	); err != nil {
-		return MergeResult{}, fmt.Errorf("cleanup source visibility overrides: %w", err)
-	}
-
-	// Delete the source element.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM elements WHERE id = ?`, sourceID); err != nil {
-		return MergeResult{}, fmt.Errorf("delete source element: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return MergeResult{}, fmt.Errorf("commit merge: %w", err)
+		if _, err := tx.NewDelete().
+			Model((*elementModel)(nil)).
+			Where("id = ?", sourceID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("delete source element: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return MergeResult{}, err
 	}
 
 	// Re-read survivor to get fresh state.
@@ -230,31 +233,16 @@ type duplicateGroup struct {
 	SurvivorID      int64
 }
 
-func deduplicateConnectors(ctx context.Context, tx interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}, sourceID, survivorID int64) error {
-	dupRows, err := tx.QueryContext(ctx, `
-		SELECT view_id, source_element_id, target_element_id, MIN(id)
+func deduplicateConnectors(ctx context.Context, tx bun.Tx, survivorID int64) error {
+	var groups []duplicateGroup
+	if err := tx.NewRaw(`
+		SELECT view_id, source_element_id, target_element_id, MIN(id) AS survivor_id
 		FROM connectors
 		WHERE source_element_id = ? OR target_element_id = ?
 		GROUP BY view_id, source_element_id, target_element_id
-		HAVING COUNT(*) > 1`, survivorID, survivorID)
-	if err != nil {
+		HAVING COUNT(*) > 1`, survivorID, survivorID).
+		Scan(ctx, &groups); err != nil {
 		return fmt.Errorf("query duplicate connectors: %w", err)
-	}
-	defer func() { _ = dupRows.Close() }()
-
-	var groups []duplicateGroup
-	for dupRows.Next() {
-		var g duplicateGroup
-		if err := dupRows.Scan(&g.ViewID, &g.SourceElementID, &g.TargetElementID, &g.SurvivorID); err != nil {
-			return fmt.Errorf("scan duplicate group: %w", err)
-		}
-		groups = append(groups, g)
-	}
-	if err := dupRows.Err(); err != nil {
-		return fmt.Errorf("iterate duplicate groups: %w", err)
 	}
 
 	for _, g := range groups {
@@ -265,45 +253,35 @@ func deduplicateConnectors(ctx context.Context, tx interface {
 	return nil
 }
 
-func mergeConnectorsInGroup(ctx context.Context, tx interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}, g duplicateGroup) error {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT id, label, description, direction
-		FROM connectors
-		WHERE view_id = ? AND source_element_id = ? AND target_element_id = ?
-		ORDER BY id`, g.ViewID, g.SourceElementID, g.TargetElementID)
-	if err != nil {
+func mergeConnectorsInGroup(ctx context.Context, tx bun.Tx, g duplicateGroup) error {
+	var rows []connectorModel
+	if err := tx.NewSelect().
+		Model(&rows).
+		Column("id", "label", "description", "direction").
+		Where("view_id = ?", g.ViewID).
+		Where("source_element_id = ?", g.SourceElementID).
+		Where("target_element_id = ?", g.TargetElementID).
+		Order("id").
+		Scan(ctx); err != nil {
 		return fmt.Errorf("query group connectors: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 
 	var labels []string
 	var descriptions []string
 	var directions []string
 	var deleteIDs []int64
 
-	for rows.Next() {
-		var id int64
-		var label, description sql.NullString
-		var direction string
-		if err := rows.Scan(&id, &label, &description, &direction); err != nil {
-			return fmt.Errorf("scan connector: %w", err)
+	for _, row := range rows {
+		if row.ID != g.SurvivorID {
+			deleteIDs = append(deleteIDs, row.ID)
 		}
-		if id != g.SurvivorID {
-			deleteIDs = append(deleteIDs, id)
+		if row.Label != nil && strings.TrimSpace(*row.Label) != "" {
+			labels = append(labels, strings.TrimSpace(*row.Label))
 		}
-		if label.Valid && strings.TrimSpace(label.String) != "" {
-			labels = append(labels, strings.TrimSpace(label.String))
+		if row.Description != nil && strings.TrimSpace(*row.Description) != "" {
+			descriptions = append(descriptions, strings.TrimSpace(*row.Description))
 		}
-		if description.Valid && strings.TrimSpace(description.String) != "" {
-			descriptions = append(descriptions, strings.TrimSpace(description.String))
-		}
-		directions = append(directions, direction)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate group connectors: %w", err)
+		directions = append(directions, row.Direction)
 	}
 
 	// Merge labels: unique labels joined with " / ".
@@ -352,20 +330,24 @@ func mergeConnectorsInGroup(ctx context.Context, tx interface {
 	}
 
 	// Update the survivor connector.
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE connectors SET label = ?, description = ?, direction = ?, updated_at = ?
-		WHERE id = ?`,
-		mergedLabel, mergedDesc, mergedDir, nowString(), g.SurvivorID,
-	); err != nil {
+	if _, err := tx.NewUpdate().
+		Model((*connectorModel)(nil)).
+		Set("label = ?", mergedLabel).
+		Set("description = ?", mergedDesc).
+		Set("direction = ?", mergedDir).
+		Set("updated_at = ?", nowString()).
+		Where("id = ?", g.SurvivorID).
+		Exec(ctx); err != nil {
 		return fmt.Errorf("update survivor connector %d: %w", g.SurvivorID, err)
 	}
 
 	// Delete all other connectors in the group.
-	for _, deleteID := range deleteIDs {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM connectors WHERE id = ?`, deleteID,
-		); err != nil {
-			return fmt.Errorf("delete duplicate connector %d: %w", deleteID, err)
+	if len(deleteIDs) > 0 {
+		if _, err := tx.NewDelete().
+			Model((*connectorModel)(nil)).
+			Where("id IN (?)", bun.List(deleteIDs)).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("delete duplicate connectors: %w", err)
 		}
 	}
 

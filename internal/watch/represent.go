@@ -1446,7 +1446,7 @@ func (m *materializer) ensureTags(ctx context.Context) error {
 
 func (m *materializer) workspaceRootViewID(ctx context.Context) (int64, error) {
 	var id int64
-	err := m.store.db.QueryRowContext(ctx, `SELECT id FROM views WHERE owner_element_id IS NULL ORDER BY id LIMIT 1`).Scan(&id)
+	err := m.store.rowRaw(ctx, `SELECT id FROM views WHERE owner_element_id IS NULL ORDER BY id LIMIT 1`).Scan(&id)
 	return id, err
 }
 
@@ -1465,7 +1465,7 @@ func (m *materializer) upsertElement(ctx context.Context, ownerType, ownerKey st
 		}
 		tags, _ := json.Marshal(input.Tags)
 		techLinks, _ := json.Marshal(technologyLinksForElement(input.Technology, input.Language))
-		_, err = m.store.db.ExecContext(ctx, `
+		_, err = m.store.execRaw(ctx, `
 			UPDATE elements
 			SET name = ?, kind = ?, description = ?, technology = ?, technology_connectors = ?, tags = ?, repo = ?, branch = ?, file_path = ?, language = ?, updated_at = ?
 			WHERE id = ?`,
@@ -1483,7 +1483,7 @@ func (m *materializer) upsertElement(ctx context.Context, ownerType, ownerKey st
 	now := nowString()
 	tags, _ := json.Marshal(input.Tags)
 	techLinks, _ := json.Marshal(technologyLinksForElement(input.Technology, input.Language))
-	res, err := m.store.db.ExecContext(ctx, `
+	res, err := m.store.execRaw(ctx, `
 		INSERT INTO elements(name, kind, description, technology, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		input.Name, nullString(input.Kind), nullString(input.Description), nullString(input.Technology), string(techLinks), string(tags),
@@ -1514,13 +1514,13 @@ func (m *materializer) upsertView(ctx context.Context, ownerType, ownerKey strin
 			m.stats.ViewsPreserved++
 			return state.ResourceID, m.saveMapping(ctx, ownerType, ownerKey, "view", state.ResourceID)
 		}
-		if _, err := m.store.db.ExecContext(ctx, `UPDATE views SET owner_element_id = ?, name = ?, level_label = ?, updated_at = ? WHERE id = ?`, ownerElementID, name, label, nowString(), state.ResourceID); err != nil {
+		if _, err := m.store.execRaw(ctx, `UPDATE views SET owner_element_id = ?, name = ?, level_label = ?, updated_at = ? WHERE id = ?`, ownerElementID, name, label, nowString(), state.ResourceID); err != nil {
 			return 0, err
 		}
 		return state.ResourceID, m.saveMappingWithCurrentHash(ctx, ownerType, ownerKey, "view", state.ResourceID)
 	}
 	now := nowString()
-	res, err := m.store.db.ExecContext(ctx, `INSERT INTO views(owner_element_id, name, level_label, level, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)`, ownerElementID, name, label, now, now)
+	res, err := m.store.execRaw(ctx, `INSERT INTO views(owner_element_id, name, level_label, level, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)`, ownerElementID, name, label, now, now)
 	if err != nil {
 		return 0, err
 	}
@@ -1537,14 +1537,14 @@ func (m *materializer) upsertView(ctx context.Context, ownerType, ownerKey strin
 
 func (m *materializer) upsertPlacement(ctx context.Context, viewID, elementID int64, x, y float64) error {
 	var existingID int64
-	err := m.store.db.QueryRowContext(ctx, `SELECT id FROM placements WHERE view_id = ? AND element_id = ?`, viewID, elementID).Scan(&existingID)
+	err := m.store.rowRaw(ctx, `SELECT id FROM placements WHERE view_id = ? AND element_id = ?`, viewID, elementID).Scan(&existingID)
 	if err == nil {
 		return nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	err = m.store.db.QueryRowContext(ctx, `
+	err = m.store.rowRaw(ctx, `
 		SELECT p.id
 		FROM placements p
 		JOIN watch_materialization wm
@@ -1553,7 +1553,7 @@ func (m *materializer) upsertPlacement(ctx context.Context, viewID, elementID in
 		ORDER BY p.id
 		LIMIT 1`, m.repo.ID, elementID).Scan(&existingID)
 	if err == nil {
-		_, err = m.store.db.ExecContext(ctx, `UPDATE placements SET view_id = ?, position_x = ?, position_y = ?, updated_at = ? WHERE id = ?`, viewID, x, y, nowString(), existingID)
+		_, err = m.store.execRaw(ctx, `UPDATE placements SET view_id = ?, position_x = ?, position_y = ?, updated_at = ? WHERE id = ?`, viewID, x, y, nowString(), existingID)
 		if err == nil {
 			m.markNewPlacement(viewID, elementID)
 		}
@@ -1563,7 +1563,7 @@ func (m *materializer) upsertPlacement(ctx context.Context, viewID, elementID in
 		return err
 	}
 	now := nowString()
-	_, err = m.store.db.ExecContext(ctx, `
+	_, err = m.store.execRaw(ctx, `
 		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		viewID, elementID, x, y, now, now)
@@ -1613,7 +1613,7 @@ func (m *materializer) layoutPlacements(ctx context.Context) error {
 }
 
 func (m *materializer) generatedPlacementsByView(ctx context.Context) (map[int64]map[int64]struct{}, error) {
-	rows, err := m.store.db.QueryContext(ctx, `
+	rows, err := m.store.rowsRaw(ctx, `
 		SELECT p.view_id, p.element_id
 		FROM placements p
 		JOIN watch_materialization wm
@@ -1649,7 +1649,7 @@ func (m *materializer) layoutView(ctx context.Context, viewID int64, targets map
 	next := layout.LayoutPlacements(placements, targets, connectors, force)
 	for _, elementID := range layout.SortedInt64Set(targets) {
 		pos := next[elementID]
-		if _, err := m.store.db.ExecContext(ctx, `UPDATE placements SET position_x = ?, position_y = ?, updated_at = ? WHERE view_id = ? AND element_id = ?`, pos.X, pos.Y, nowString(), viewID, elementID); err != nil {
+		if _, err := m.store.execRaw(ctx, `UPDATE placements SET position_x = ?, position_y = ?, updated_at = ? WHERE view_id = ? AND element_id = ?`, pos.X, pos.Y, nowString(), viewID, elementID); err != nil {
 			return err
 		}
 	}
@@ -1657,7 +1657,7 @@ func (m *materializer) layoutView(ctx context.Context, viewID int64, targets map
 }
 
 func (m *materializer) viewPlacementNodes(ctx context.Context, viewID int64) ([]watchPlacementNode, error) {
-	rows, err := m.store.db.QueryContext(ctx, `SELECT element_id, position_x, position_y FROM placements WHERE view_id = ? ORDER BY id`, viewID)
+	rows, err := m.store.rowsRaw(ctx, `SELECT element_id, position_x, position_y FROM placements WHERE view_id = ? ORDER BY id`, viewID)
 	if err != nil {
 		return nil, err
 	}
@@ -1674,7 +1674,7 @@ func (m *materializer) viewPlacementNodes(ctx context.Context, viewID int64) ([]
 }
 
 func (m *materializer) viewLayoutConnectors(ctx context.Context, viewID int64) ([]watchLayoutConnector, error) {
-	rows, err := m.store.db.QueryContext(ctx, `SELECT source_element_id, target_element_id FROM connectors WHERE view_id = ? ORDER BY id`, viewID)
+	rows, err := m.store.rowsRaw(ctx, `SELECT source_element_id, target_element_id FROM connectors WHERE view_id = ? ORDER BY id`, viewID)
 	if err != nil {
 		return nil, err
 	}
@@ -2059,7 +2059,7 @@ func (m *materializer) mergeElementTechnology(ctx context.Context, elementID int
 		return nil
 	}
 	var current, language sql.NullString
-	if err := m.store.db.QueryRowContext(ctx, `SELECT technology, language FROM elements WHERE id = ?`, elementID).Scan(&current, &language); err != nil {
+	if err := m.store.rowRaw(ctx, `SELECT technology, language FROM elements WHERE id = ?`, elementID).Scan(&current, &language); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -2067,7 +2067,7 @@ func (m *materializer) mergeElementTechnology(ctx context.Context, elementID int
 	}
 	technology := mergeTechnologyLabel(current.String, label)
 	techLinks, _ := json.Marshal(technologyLinksForElement(technology, language.String))
-	_, err := m.store.db.ExecContext(ctx, `
+	_, err := m.store.execRaw(ctx, `
 		UPDATE elements
 		SET technology = ?, technology_connectors = ?, updated_at = ?
 		WHERE id = ?`, nullString(technology), string(techLinks), nowString(), elementID)
@@ -2308,7 +2308,7 @@ func (m *materializer) ensureRuntimeConnectorEndpoint(ctx context.Context, fact 
 	if !ok || !elementExists(ctx, m.store.db, state.ResourceID) {
 		return 0, nil
 	}
-	if _, err := m.store.db.ExecContext(ctx, `
+	if _, err := m.store.execRaw(ctx, `
 		INSERT INTO placements(view_id, element_id, x, y, created_at, updated_at)
 		SELECT ?, ?, 0, 0, ?, ?
 		WHERE NOT EXISTS (SELECT 1 FROM placements WHERE view_id = ? AND element_id = ?)`,
@@ -2850,7 +2850,7 @@ func (m *materializer) upsertConnectorDetailedWithDirection(ctx context.Context,
 			m.stats.ConnectorsPreserved++
 			return m.saveMapping(ctx, ownerType, ownerKey, "connector", state.ResourceID)
 		}
-		_, err = m.store.db.ExecContext(ctx, `
+		_, err = m.store.execRaw(ctx, `
 			UPDATE connectors
 			SET view_id = ?, source_element_id = ?, target_element_id = ?, label = ?, description = ?, relationship = ?, direction = ?, style = 'bezier', source_handle = ?, target_handle = ?, updated_at = ?
 			WHERE id = ?`, viewID, sourceElementID, targetElementID, label, nullString(description), relationship, direction, nullString(sourceHandle), nullString(targetHandle), nowString(), state.ResourceID)
@@ -2864,7 +2864,7 @@ func (m *materializer) upsertConnectorDetailedWithDirection(ctx context.Context,
 		return nil
 	}
 	now := nowString()
-	res, err := m.store.db.ExecContext(ctx, `
+	res, err := m.store.execRaw(ctx, `
 		INSERT INTO connectors(view_id, source_element_id, target_element_id, label, description, relationship, direction, style, source_handle, target_handle, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'bezier', ?, ?, ?, ?)`, viewID, sourceElementID, targetElementID, label, nullString(description), relationship, direction, nullString(sourceHandle), nullString(targetHandle), now, now)
 	if err != nil {
@@ -2939,7 +2939,7 @@ func connectorExists(ctx context.Context, db *sql.DB, id int64) bool {
 
 func rowExists(ctx context.Context, db *sql.DB, query string, id int64) bool {
 	var one int
-	err := db.QueryRowContext(ctx, query, id).Scan(&one)
+	err := NewStore(db).rowRaw(ctx, query, id).Scan(&one)
 	return err == nil
 }
 

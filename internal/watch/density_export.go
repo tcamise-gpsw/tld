@@ -11,7 +11,7 @@ func ComputeViewDensityLevels(ctx context.Context, store *Store) (map[int64]int,
 		return map[int64]int{}, nil
 	}
 
-	viewIDs, err := densityViewIDs(ctx, store.db)
+	viewIDs, err := densityViewIDs(ctx, store)
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func ComputeViewDensityLevels(ctx context.Context, store *Store) (map[int64]int,
 		return map[int64]int{}, nil
 	}
 
-	scores, err := densityViewScores(ctx, store.db)
+	scores, err := densityViewScores(ctx, store)
 	if err != nil {
 		return nil, err
 	}
@@ -34,8 +34,8 @@ func ComputeViewDensityLevels(ctx context.Context, store *Store) (map[int64]int,
 	return bucketDensityScores(viewIDs, scores), nil
 }
 
-func densityViewIDs(ctx context.Context, db *sql.DB) ([]int64, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id FROM views ORDER BY id`)
+func densityViewIDs(ctx context.Context, store *Store) ([]int64, error) {
+	rows, err := store.rowsRaw(ctx, `SELECT id FROM views ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -51,8 +51,8 @@ func densityViewIDs(ctx context.Context, db *sql.DB) ([]int64, error) {
 	return ids, rows.Err()
 }
 
-func densityViewScores(ctx context.Context, db *sql.DB) (map[int64]float64, error) {
-	rows, err := db.QueryContext(ctx, `
+func densityViewScores(ctx context.Context, store *Store) (map[int64]float64, error) {
+	rows, err := store.rowsRaw(ctx, `
 		SELECT p.view_id, p.element_id, MAX(wfd.score), MIN(wfd.tier), MAX(wal.confidence)
 		FROM placements p
 		LEFT JOIN watch_materialization wm

@@ -149,23 +149,22 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) ensureBootstrapData(ctx context.Context) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM views`).Scan(&count); err != nil {
+	count, err := s.bun.NewSelect().Model((*viewModel)(nil)).Count(ctx)
+	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	now := nowString()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO views(owner_element_id, name, description, level_label, level, created_at, updated_at)
-		VALUES (NULL, ?, ?, ?, 1, ?, ?)`,
-		"Workspace",
-		"Local offline workspace",
-		"Root",
-		now,
-		now,
-	)
+	_, err = s.bun.NewInsert().Model(&viewModel{
+		Name:        "Workspace",
+		Description: strPtr("Local offline workspace"),
+		LevelLabel:  strPtr("Root"),
+		Level:       1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}).Exec(ctx)
 	return err
 }
 
@@ -209,6 +208,10 @@ func normalizeStyle(value *string) string {
 		return "bezier"
 	}
 	return *value
+}
+
+func strPtr(value string) *string {
+	return &value
 }
 
 func jsonString(value any, fallback string) string {
@@ -387,17 +390,13 @@ func (s *Store) Dependencies(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at FROM connectors ORDER BY id`)
-	if err != nil {
+	var rows []connectorModel
+	if err := s.bun.NewSelect().Model(&rows).Order("id").Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	connectors := []DependencyConnector{}
-	for rows.Next() {
-		var c Connector
-		if err := rows.Scan(&c.ID, &c.ViewID, &c.SourceElementID, &c.TargetElementID, &c.Label, &c.Description, &c.Relationship, &c.Direction, &c.Style, &c.URL, &c.SourceHandle, &c.TargetHandle, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
-		}
+	connectors := make([]DependencyConnector, 0, len(rows))
+	for _, row := range rows {
+		c := connectorFromModel(row)
 		connectors = append(connectors, DependencyConnector{
 			ID:               fmt.Sprint(c.ID),
 			ViewID:           fmt.Sprint(c.ViewID),

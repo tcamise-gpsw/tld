@@ -31,6 +31,13 @@ func (s *SQLiteStore) DB() *sql.DB {
 	return s.legacy.DB()
 }
 
+func (s *SQLiteStore) Close() error {
+	if s == nil || s.legacy == nil {
+		return nil
+	}
+	return s.legacy.Close()
+}
+
 func (s *SQLiteStore) ViewTree(ctx context.Context) ([]core.ViewTreeNode, error) {
 	out, err := s.legacy.ViewTree(ctx)
 	if err != nil {

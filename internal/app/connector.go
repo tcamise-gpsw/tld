@@ -70,7 +70,8 @@ func (s *Store) ConnectorByID(ctx context.Context, id int64) (Connector, error) 
 }
 
 func (s *Store) UpdateConnector(ctx context.Context, id int64, patch Connector) (Connector, error) {
-	row := s.db.QueryRowContext(ctx, `
+	var row connectorModel
+	if err := s.bun.NewRaw(`
 		UPDATE connectors SET
 			view_id = CASE WHEN ? = 0 THEN view_id ELSE ? END,
 			source_element_id = CASE WHEN ? = 0 THEN source_element_id ELSE ? END,
@@ -90,12 +91,11 @@ func (s *Store) UpdateConnector(ctx context.Context, id int64, patch Connector) 
 		patch.SourceElementID, patch.SourceElementID,
 		patch.TargetElementID, patch.TargetElementID,
 		patch.Label, patch.Description, patch.Relationship, patch.Direction, patch.Style, patch.URL, patch.SourceHandle, patch.TargetHandle,
-		nowString(), id)
-	var item Connector
-	if err := row.Scan(&item.ID, &item.ViewID, &item.SourceElementID, &item.TargetElementID, &item.Label, &item.Description, &item.Relationship, &item.Direction, &item.Style, &item.URL, &item.SourceHandle, &item.TargetHandle, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		nowString(), id).
+		Scan(ctx, &row); err != nil {
 		return Connector{}, err
 	}
-	return item, nil
+	return connectorFromModel(row), nil
 }
 
 func (s *Store) DeleteConnector(ctx context.Context, id int64) error {
