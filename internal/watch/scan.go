@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -1045,9 +1046,7 @@ func (s *Scanner) deleteLimitedRemovedFiles(ctx context.Context, repoRoot string
 	if err != nil {
 		logError(ctx, s.Logger, "watch.scan.delete_committed_removed.failed", err, "repository_id", repositoryID)
 	} else {
-		for path, change := range committed {
-			changes[path] = change
-		}
+		maps.Copy(changes, committed)
 	}
 	var deleted []string
 	for rel, change := range changes {

@@ -235,12 +235,12 @@ func readStaticAsset(static fs.FS, candidate, acceptEncoding string) ([]byte, st
 }
 
 func acceptsEncoding(header, encoding string) bool {
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		token, params, _ := strings.Cut(strings.TrimSpace(part), ";")
 		if !strings.EqualFold(token, encoding) {
 			continue
 		}
-		for _, param := range strings.Split(params, ";") {
+		for param := range strings.SplitSeq(params, ";") {
 			key, value, ok := strings.Cut(strings.TrimSpace(param), "=")
 			if ok && strings.EqualFold(key, "q") {
 				quality, err := strconv.ParseFloat(strings.TrimSpace(value), 64)

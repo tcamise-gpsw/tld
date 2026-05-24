@@ -1004,10 +1004,7 @@ func (s *Store) QuerySymbolsByFiles(ctx context.Context, repositoryID int64, fil
 	}
 	var allSymbols []Symbol
 	for i := 0; i < len(filePaths); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(filePaths) {
-			end = len(filePaths)
-		}
+		end := min(i+maxInClauseIDs, len(filePaths))
 		batch := filePaths[i:end]
 		placeholders, inArgs := buildParameterListStrings(batch)
 		syms, err := s.querySymbolsWhere(ctx, repositoryID, "f.path IN ("+placeholders+")", inArgs...)
@@ -1026,10 +1023,7 @@ func (s *Store) QuerySymbolsByIDs(ctx context.Context, repositoryID int64, ids [
 	}
 	var allSymbols []Symbol
 	for i := 0; i < len(ids); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(ids) {
-			end = len(ids)
-		}
+		end := min(i+maxInClauseIDs, len(ids))
 		batch := ids[i:end]
 		placeholders, inArgs := buildParameterList(batch)
 		syms, err := s.querySymbolsWhere(ctx, repositoryID, "s.id IN ("+placeholders+")", inArgs...)
@@ -1188,10 +1182,7 @@ func (s *Store) QueryReferencesBySourceIDs(ctx context.Context, repositoryID int
 	}
 	var allRefs []Reference
 	for i := 0; i < len(sourceIDs); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(sourceIDs) {
-			end = len(sourceIDs)
-		}
+		end := min(i+maxInClauseIDs, len(sourceIDs))
 		batch := sourceIDs[i:end]
 		placeholders, inArgs := buildParameterList(batch)
 		refs, err := s.queryReferencesWhere(ctx, repositoryID, "source_symbol_id IN ("+placeholders+")", inArgs...)
@@ -1210,10 +1201,7 @@ func (s *Store) QueryReferencesByTargetIDs(ctx context.Context, repositoryID int
 	}
 	var allRefs []Reference
 	for i := 0; i < len(targetIDs); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(targetIDs) {
-			end = len(targetIDs)
-		}
+		end := min(i+maxInClauseIDs, len(targetIDs))
 		batch := targetIDs[i:end]
 		placeholders, inArgs := buildParameterList(batch)
 		refs, err := s.queryReferencesWhere(ctx, repositoryID, "target_symbol_id IN ("+placeholders+")", inArgs...)

@@ -46,7 +46,7 @@ type Report struct {
 	Element   *ElementReport   `json:"element,omitempty"`
 	Connector *ConnectorReport `json:"connector,omitempty"`
 	Sources   []SourceState    `json:"sources"`
-	Related   RelatedResources `json:"related,omitempty"`
+	Related   RelatedResources `json:"related"`
 	Warnings  []string         `json:"warnings,omitempty"`
 }
 

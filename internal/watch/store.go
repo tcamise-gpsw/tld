@@ -1538,7 +1538,7 @@ func (s *Store) syntheticDeletedImportDiffs(ctx context.Context, repositoryID in
 				connectorHash := hashString(connectorOwner + ":deleted")
 				connectorType := "connector"
 				connectorSummary := path.Base(file) + "->" + module
-				out = append(out, RepresentationDiff{OwnerType: "fact-import-connector", OwnerKey: connectorOwner, ChangeType: "deleted", BeforeHash: &connectorHash, ResourceType: &connectorType, Language: stringPtr(""), Summary: &connectorSummary, RemovedLines: 1})
+				out = append(out, RepresentationDiff{OwnerType: "fact-import-connector", OwnerKey: connectorOwner, ChangeType: "deleted", BeforeHash: &connectorHash, ResourceType: &connectorType, Language: new(""), Summary: &connectorSummary, RemovedLines: 1})
 				existingOwners[connectorKey] = struct{}{}
 			}
 		}
@@ -1589,10 +1589,6 @@ func resourceTypeValue(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func stringPtr(value string) *string {
-	return &value
 }
 
 func (s *Store) CurrentWatchResourceSnapshots(ctx context.Context, repositoryID int64) (map[string]watchResourceSnapshot, error) {

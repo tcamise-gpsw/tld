@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -158,8 +158,8 @@ func (s *Store) ensureBootstrapData(ctx context.Context) error {
 	now := nowString()
 	_, err = s.bun.NewInsert().Model(&viewModel{
 		Name:        "Workspace",
-		Description: strPtr("Local offline workspace"),
-		LevelLabel:  strPtr("Root"),
+		Description: new("Local offline workspace"),
+		LevelLabel:  new("Root"),
 		Level:       1,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -183,10 +183,6 @@ func normalizeStyle(value *string) string {
 		return "bezier"
 	}
 	return *value
-}
-
-func strPtr(value string) *string {
-	return &value
 }
 
 func jsonString(value any, fallback string) string {
@@ -313,9 +309,7 @@ func exploreNavigations(views []ViewTreeNode, placementsByView map[int64][]Place
 		}
 	}
 	for elementID := range placementViewsByElement {
-		sort.Slice(placementViewsByElement[elementID], func(i, j int) bool {
-			return placementViewsByElement[elementID][i] < placementViewsByElement[elementID][j]
-		})
+		slices.Sort(placementViewsByElement[elementID])
 	}
 
 	navs := make([]ViewConnector, 0)
@@ -344,10 +338,8 @@ func exploreNavigations(views []ViewTreeNode, placementsByView map[int64][]Place
 }
 
 func appendUniqueInt64(items []int64, item int64) []int64 {
-	for _, existing := range items {
-		if existing == item {
-			return items
-		}
+	if slices.Contains(items, item) {
+		return items
 	}
 	return append(items, item)
 }

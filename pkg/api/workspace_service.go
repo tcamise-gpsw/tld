@@ -48,10 +48,7 @@ func paginateSlice[T any](items []T, limit, offset int32) []T {
 	if len(items) == 0 {
 		return items
 	}
-	start := int(offset)
-	if start < 0 {
-		start = 0
-	}
+	start := max(int(offset), 0)
 	if start >= len(items) {
 		return items[:0]
 	}
