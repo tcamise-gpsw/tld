@@ -1269,6 +1269,9 @@ export function useCanvasInteractions({
         pendingConnectionSourceHandleRef.current = clickConnectModeRef.current?.sourceHandle
           ? getLogicalHandleId(clickConnectModeRef.current.sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? DEFAULT_SOURCE_HANDLE_SIDE
           : pendingConnectionSourceHandleRef.current
+        setClickConnectMode(null)
+        setClickConnectCursorPos(null)
+        setConnectGhostPos(null)
         showAddingElementAt(e.clientX, e.clientY, true, 'connect', e.shiftKey)
       }
       return
@@ -1301,7 +1304,6 @@ export function useCanvasInteractions({
     isMovingRef.current = true
     setCanvasMenu(null)
     setConnectorLongPressMenu(null)
-    setAddingElementAt(null)
     onMoveStateChange?.(true)
   }, [onMoveStateChange])
 
@@ -1544,6 +1546,7 @@ export function useCanvasInteractions({
           sourceNodeId: node.id,
           sourceHandle: ensureVisualHandleId(sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? sourceHandle,
         }
+        suppressNextPaneClickRef.current = false
         multiConnectionSourceIdsRef.current = sourceElementIds.length > 1 ? sourceElementIds : null
         clickConnectModeRef.current = nextClickConnectMode
         interactionSourceIdRef.current = primarySourceId
