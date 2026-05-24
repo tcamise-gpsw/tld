@@ -343,21 +343,6 @@ export default function Inventory() {
       <Box data-testid="inventory-page" h="100%" bg="var(--bg-canvas)" display="flex" flexDir="column" overflow="hidden">
         {/* Header bar */}
         <Flex px={4} py={3} gap={3} align="center" borderBottom="1px solid" borderColor="whiteAlpha.100" flexShrink={0} wrap={{ base: 'wrap', lg: 'nowrap' }}>
-          <HStack spacing={1} p={1} bg="blackAlpha.300" border="1px solid" borderColor="whiteAlpha.100" borderRadius="lg" flexShrink={0}>
-            {TYPE_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                data-testid={`inventory-tab-${option.value}`}
-                size="sm"
-                h="30px"
-                variant={selectedType === option.value ? 'solid' : 'ghost'}
-                colorScheme={selectedType === option.value ? 'blue' : undefined}
-                onClick={() => setParam('type', option.value === 'all' ? '' : option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </HStack>
           <InputGroup size="sm" maxW={{ base: 'full', lg: '420px' }} flex={{ base: '1 0 100%', lg: '1' }}>
             <InputLeftElement pointerEvents="none" color="gray.500"><SearchIcon /></InputLeftElement>
             <Input
@@ -400,6 +385,24 @@ export default function Inventory() {
         <Flex flex={1} minH={0} overflow="hidden">
           {/* Left filter panel */}
           <Box w={{ base: '0', lg: '240px' }} display={{ base: 'none', lg: 'block' }} borderRight="1px solid" borderColor="whiteAlpha.100" overflowY="auto" flexShrink={0}>
+            <Box p={3} borderBottom="1px solid" borderColor="whiteAlpha.100">
+              <Wrap spacing={1}>
+                {TYPE_OPTIONS.map((option) => (
+                  <WrapItem key={option.value}>
+                    <Button
+                      data-testid={`inventory-tab-${option.value}`}
+                      size="xs"
+                      variant={selectedType === option.value ? 'solid' : 'ghost'}
+                      colorScheme={selectedType === option.value ? 'blue' : undefined}
+                      onClick={() => setParam('type', option.value === 'all' ? '' : option.value)}
+                    >
+                      {option.label}
+                    </Button>
+                  </WrapItem>
+                ))}
+              </Wrap>
+            </Box>
+
             <FilterSection title="Tags" collapsed={collapsedSections.has('tags')} onToggle={() => toggleSection('tags')}>
               <Wrap spacing={1}>
                 {availableTags.map((tag) => {
