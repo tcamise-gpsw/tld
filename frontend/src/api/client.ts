@@ -974,7 +974,7 @@ export const api = {
         }),
 
       update: (
-        _diagramId: number,
+        diagramId: number,
         connectorId: number,
         data: {
           source_element_id?: number
@@ -987,10 +987,12 @@ export const api = {
           url?: string
           source_handle?: string | null
           target_handle?: string | null
+          tags?: string[]
         },
       ): Promise<Connector> =>
         rpc(async () => {
           const res = await workspaceClient.updateConnector({
+            viewId: diagramId,
             connectorId,
             sourceElementId: data.source_element_id ?? undefined,
             targetElementId: data.target_element_id ?? undefined,
@@ -1002,6 +1004,7 @@ export const api = {
             url: data.url ?? undefined,
             sourceHandle: data.source_handle ?? undefined,
             targetHandle: data.target_handle ?? undefined,
+            tags: data.tags,
           })
           const json = j<{ connector: Record<string, unknown> }>(UpdateConnectorResponseSchema, res)
           return protoConnector(json.connector ?? {})
