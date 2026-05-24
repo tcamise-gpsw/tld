@@ -406,18 +406,50 @@ func confirmLSPProceed(cmd *cobra.Command, status watchpkg.LSPStatus) error {
 	}
 	term.Warn(cmd.OutOrStdout(), "Some requested language servers are unavailable or unhealthy. Reference resolution quality will be lower.")
 	term.Hint(cmd.OutOrStdout(), "tld will fall back to conservative name matching, which may drop ambiguous connectors.")
+	hasUnavailable := false
+	hasFailed := false
 	for _, server := range watchpkg.LSPDegradedServers(status) {
-		detail := server.Command
-		if detail == "" {
-			detail = server.Language
+		language := server.Language
+		if len(language) > 0 {
+			language = strings.ToUpper(language[0:1]) + language[1:]
 		}
-		if server.LastError != "" {
-			detail += ": " + server.LastError
+
+		statusDesc := ""
+		switch server.State {
+		case "unavailable":
+			statusDesc = "not found in PATH"
+			hasUnavailable = true
+		case "failed":
+			hasFailed = true
+			if server.RestartCount > 0 {
+				statusDesc = "crashed"
+			} else {
+				statusDesc = "initialization failed"
+			}
+		case "memory_limited":
+			statusDesc = "memory limit exceeded"
+			hasFailed = true
+		default:
+			statusDesc = server.State
+		}
+
+		detail := fmt.Sprintf("%s (%s): %s", language, server.Command, statusDesc)
+		if server.Command == "" {
+			detail = fmt.Sprintf("%s: %s", language, statusDesc)
 		}
 		term.Hint(cmd.OutOrStdout(), detail)
+		if server.LastError != "" {
+			term.Hint(cmd.OutOrStdout(), "    Error: "+server.LastError)
+		}
 	}
-	term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server, ensure it is on PATH, or disable LSP with `tld config set watch.lsp.enabled false`.")
-	term.Hint(cmd.OutOrStdout(), "Examples: gopls, pyright-langserver, rust-analyzer, jdtls, typescript-language-server, clangd.")
+
+	if hasUnavailable {
+		term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server(s) or ensure they are on your PATH.")
+	}
+	if hasFailed {
+		term.Hint(cmd.OutOrStdout(), "Remediation: check your project configuration or try increasing memory limits.")
+	}
+	term.Hint(cmd.OutOrStdout(), "Alternatively, disable LSP with `tld config set watch.lsp.enabled false`.")
 	if !isInteractiveInput(cmd.InOrStdin()) {
 		term.Hint(cmd.OutOrStdout(), "Non-interactive input detected; continuing without confirmation.")
 		return nil

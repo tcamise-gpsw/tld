@@ -78,8 +78,9 @@ func TestConfirmLSPProceedWarnsAndContinuesForNonInteractiveInput(t *testing.T) 
 	got := out.String()
 	for _, want := range []string{
 		"Reference resolution quality will be lower",
-		"gopls: no installed LSP server found",
-		"Remediation: install the missing language server",
+		"Go (gopls): not found in PATH",
+		"Error: no installed LSP server found",
+		"Remediation: install the missing language server(s) or ensure they are on your PATH",
 		"Non-interactive input detected; continuing without confirmation",
 	} {
 		if !strings.Contains(got, want) {
