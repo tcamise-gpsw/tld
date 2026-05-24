@@ -1867,7 +1867,7 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 			}
 		}
 	}
-	if err := m.materializeDependencyImports(ctx, dependencyImportFactsByFile, structuralView, fileElements, symbols, occupied); err != nil {
+	if err := m.materializeDependencyImports(ctx, dependencyImportFactsByFile, structuralView, fileElements, occupied, filtered, changedFactLines); err != nil {
 		return err
 	}
 	if err := m.applyTechnologyMetadataFacts(ctx, metadataFactsByFile, fileElements, symbolElements, symbolIDByStable); err != nil {
@@ -1885,10 +1885,13 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 	return nil
 }
 
-func (m *materializer) materializeDependencyImports(ctx context.Context, factsByFile map[string][]Fact, structuralView int64, fileElements map[string]int64, symbols map[int64]Symbol, occupied map[int64]map[string]struct{}) error {
+func (m *materializer) materializeDependencyImports(ctx context.Context, factsByFile map[string][]Fact, structuralView int64, fileElements map[string]int64, occupied map[int64]map[string]struct{}, filtered filterResult, changedLines map[string]map[int]struct{}) error {
 	if len(factsByFile) == 0 || structuralView == 0 {
 		return nil
 	}
+	repoModule := goModulePath(m.repo.RepoRoot)
+	groupElements := map[string]int64{}
+	groupIndex := 0
 	moduleElements := map[string]int64{}
 	moduleIndex := 0
 	for _, file := range sortedKeysFromFactGroups(factsByFile) {
@@ -1900,43 +1903,104 @@ func (m *materializer) materializeDependencyImports(ctx context.Context, factsBy
 			}
 			return leftName < rightName
 		})
+		connectedGroups := map[string]struct{}{}
 		for _, fact := range facts {
 			module := dependencyImportName(fact)
 			if strings.TrimSpace(module) == "" {
 				continue
 			}
-			elem := moduleElements[module]
-			if elem == 0 {
-				ownerKey := dependencyModuleOwnerKey(module)
-				var err error
-				elem, err = m.upsertElement(ctx, "dependency-module", ownerKey, elementInput{
-					Name:        module,
-					Kind:        "dependency",
-					Description: "Imported dependency module",
-					Technology:  dependencyImportTechnology(fact),
-					Repo:        repoIdentity(m.repo),
-					Branch:      nullStringValue(m.repo.Branch),
-					Language:    m.languageForFile(fact.FilePath),
-					Tags:        m.tagPlan.tagsFor("dependency-module", ownerKey),
-				})
-				if err != nil {
-					return err
-				}
-				point := nextOpenGridPoint(structuralView, occupied, 700+moduleIndex)
-				moduleIndex++
-				if err := m.upsertPlacement(ctx, structuralView, elem, point.X, point.Y); err != nil {
-					return err
-				}
-				markOccupied(occupied, structuralView, point)
-				moduleElements[module] = elem
-			}
 			fileElementID := fileElements[file]
 			if fileElementID == 0 {
 				continue
 			}
-			if err := m.upsertConnectorDetailed(ctx, "fact-import-connector", factOwnerKey(fact)+":module", structuralView, fileElementID, elem, "imports", firstNonEmpty(fact.Relationship, "imports"), factNodeDescription(fact)); err != nil {
+			group := classifyDependencyImport(fact, repoModule)
+			groupOwnerKey := dependencyGroupOwnerKey(group.Key)
+			moduleOwnerKey := dependencyModuleOwnerKey(module)
+			groupHidden := m.contextPolicyHidden("dependency-group", groupOwnerKey)
+			groupExpanded := filtered.ContextExpansions.ownerTier("dependency-group", groupOwnerKey) > 0
+			exact := factAffectedByDiff(fact, filtered.ChangedFiles, changedLines) ||
+				groupExpanded ||
+				m.contextPolicyShown("dependency-module", moduleOwnerKey)
+			if groupHidden && !m.contextPolicyShown("dependency-module", moduleOwnerKey) {
+				continue
+			}
+			if !groupHidden {
+				elem := groupElements[group.Key]
+				if elem == 0 {
+					groupFacts := dependencyGroupFacts(factsByFile, repoModule, group.Key)
+					var err error
+					elem, err = m.upsertElement(ctx, "dependency-group", groupOwnerKey, elementInput{
+						Name:        group.Name,
+						Kind:        "dependency-group",
+						Description: dependencyGroupDescription(group, len(groupFacts)),
+						Technology:  group.Technology,
+						Repo:        repoIdentity(m.repo),
+						Branch:      nullStringValue(m.repo.Branch),
+						Language:    m.languageForFile(fact.FilePath),
+						Tags:        dependencyGroupTags(group),
+					})
+					if err != nil {
+						return err
+					}
+					point := nextOpenGridPoint(structuralView, occupied, 650+groupIndex)
+					groupIndex++
+					if err := m.upsertPlacement(ctx, structuralView, elem, point.X, point.Y); err != nil {
+						return err
+					}
+					markOccupied(occupied, structuralView, point)
+					groupElements[group.Key] = elem
+				}
+			}
+			if exact && !m.contextPolicyHidden("dependency-module", moduleOwnerKey) {
+				elem := moduleElements[module]
+				if elem == 0 {
+					var err error
+					elem, err = m.upsertElement(ctx, "dependency-module", moduleOwnerKey, elementInput{
+						Name:        module,
+						Kind:        "dependency",
+						Description: "Imported dependency module",
+						Technology:  dependencyImportTechnology(fact),
+						Repo:        repoIdentity(m.repo),
+						Branch:      nullStringValue(m.repo.Branch),
+						Language:    m.languageForFile(fact.FilePath),
+						Tags:        m.tagPlan.tagsFor("dependency-module", moduleOwnerKey),
+					})
+					if err != nil {
+						return err
+					}
+					point := nextOpenGridPoint(structuralView, occupied, 700+moduleIndex)
+					moduleIndex++
+					if err := m.upsertPlacement(ctx, structuralView, elem, point.X, point.Y); err != nil {
+						return err
+					}
+					markOccupied(occupied, structuralView, point)
+					moduleElements[module] = elem
+				}
+				if err := m.upsertConnectorDetailed(ctx, "fact-import-connector", factOwnerKey(fact)+":module", structuralView, fileElementID, elem, "imports", firstNonEmpty(fact.Relationship, "imports"), factNodeDescription(fact)); err != nil {
+					return err
+				}
+				continue
+			}
+			if groupHidden {
+				continue
+			}
+			if _, ok := connectedGroups[group.Key]; ok {
+				continue
+			}
+			elem := groupElements[group.Key]
+			fileGroupFacts := dependencyGroupFactsForFile(facts, repoModule, group.Key, groupExpanded, filtered.ChangedFiles, changedLines, m)
+			if len(fileGroupFacts) == 0 {
+				continue
+			}
+			label := fmt.Sprintf("%d imports", len(fileGroupFacts))
+			if len(fileGroupFacts) == 1 {
+				label = "1 import"
+			}
+			connectorOwnerKey := dependencyGroupConnectorOwnerKey(file, group.Key)
+			if err := m.upsertConnectorDetailed(ctx, "dependency-group-connector", connectorOwnerKey, structuralView, fileElementID, elem, label, "imports", dependencyGroupConnectorDescription(fileGroupFacts)); err != nil {
 				return err
 			}
+			connectedGroups[group.Key] = struct{}{}
 		}
 	}
 	return nil
@@ -1944,6 +2008,112 @@ func (m *materializer) materializeDependencyImports(ctx context.Context, factsBy
 
 func dependencyModuleOwnerKey(module string) string {
 	return "dependency.module:" + strings.TrimSpace(module)
+}
+
+type dependencyImportGroup struct {
+	Key        string
+	Name       string
+	Technology string
+	Tag        string
+}
+
+func classifyDependencyImport(fact Fact, repoModule string) dependencyImportGroup {
+	module := dependencyImportName(fact)
+	if strings.HasPrefix(module, "./") || strings.HasPrefix(module, "../") {
+		return dependencyImportGroup{Key: "relative", Name: "Relative imports", Technology: "Dependency", Tag: "dependency:relative"}
+	}
+	repoModule = strings.TrimSpace(repoModule)
+	if repoModule != "" && (module == repoModule || strings.HasPrefix(module, repoModule+"/")) {
+		return dependencyImportGroup{Key: "internal", Name: "Internal packages", Technology: "Dependency", Tag: "dependency:internal"}
+	}
+	firstSegment := module
+	if before, _, ok := strings.Cut(module, "/"); ok {
+		firstSegment = before
+	}
+	if m := strings.TrimSpace(module); m != "" && !strings.Contains(firstSegment, ".") && !strings.HasPrefix(module, "@") && strings.HasSuffix(filepathToSlash(fact.FilePath), ".go") {
+		return dependencyImportGroup{Key: "go-stdlib", Name: "Go standard library", Technology: "Go", Tag: "dependency:go-stdlib"}
+	}
+	return dependencyImportGroup{Key: "external", Name: "External packages", Technology: "Dependency", Tag: "dependency:external"}
+}
+
+func dependencyGroupOwnerKey(key string) string {
+	return "dependency.group:" + strings.TrimSpace(key)
+}
+
+func dependencyGroupConnectorOwnerKey(file, groupKey string) string {
+	return "dependency.group.connector:" + filepathToSlash(file) + ":" + strings.TrimSpace(groupKey)
+}
+
+func dependencyGroupTags(group dependencyImportGroup) []string {
+	return []string{"role:dependency", "dependency:group", group.Tag}
+}
+
+func dependencyGroupDescription(group dependencyImportGroup, count int) string {
+	label := "imports"
+	if count == 1 {
+		label = "import"
+	}
+	return fmt.Sprintf("%d %s in %s", count, label, group.Name)
+}
+
+func dependencyGroupConnectorDescription(facts []Fact) string {
+	modules := map[string]struct{}{}
+	for _, fact := range facts {
+		module := strings.TrimSpace(dependencyImportName(fact))
+		if module == "" {
+			continue
+		}
+		modules[module] = struct{}{}
+	}
+	names := sortedKeys(modules)
+	if len(names) > 6 {
+		names = append(names[:6], fmt.Sprintf("+%d more", len(modules)-6))
+	}
+	return strings.Join(names, ", ")
+}
+
+func dependencyGroupFacts(factsByFile map[string][]Fact, repoModule, groupKey string) []Fact {
+	out := []Fact{}
+	for _, facts := range factsByFile {
+		for _, fact := range facts {
+			if classifyDependencyImport(fact, repoModule).Key == groupKey {
+				out = append(out, fact)
+			}
+		}
+	}
+	return out
+}
+
+func dependencyGroupFactsForFile(facts []Fact, repoModule, groupKey string, groupExpanded bool, changedFiles map[string]struct{}, changedLines map[string]map[int]struct{}, m *materializer) []Fact {
+	out := []Fact{}
+	for _, fact := range facts {
+		if classifyDependencyImport(fact, repoModule).Key != groupKey {
+			continue
+		}
+		moduleOwnerKey := dependencyModuleOwnerKey(dependencyImportName(fact))
+		exact := factAffectedByDiff(fact, changedFiles, changedLines) ||
+			groupExpanded ||
+			m.contextPolicyShown("dependency-module", moduleOwnerKey)
+		if exact && !m.contextPolicyHidden("dependency-module", moduleOwnerKey) {
+			continue
+		}
+		out = append(out, fact)
+	}
+	return out
+}
+
+func goModulePath(repoRoot string) string {
+	source, err := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(source), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module "))
+		}
+	}
+	return ""
 }
 
 func (m *materializer) materializeRuntimeComponents(ctx context.Context, facts []Fact, structuralView int64, fileViews map[string]int64, symbols map[int64]Symbol, occupied map[int64]map[string]struct{}) (map[string]int64, error) {
@@ -2780,6 +2950,11 @@ func (m *materializer) materializeConnectors(ctx context.Context, refs []Referen
 func (m *materializer) contextPolicyHidden(ownerType, ownerKey string) bool {
 	_, hidden := m.contextPolicies.Hide[ownerMapKey(ownerType, ownerKey)]
 	return hidden
+}
+
+func (m *materializer) contextPolicyShown(ownerType, ownerKey string) bool {
+	_, shown := m.contextPolicies.Show[ownerMapKey(ownerType, ownerKey)]
+	return shown
 }
 
 func filePairReferenceCount(group []filePairReference) int {

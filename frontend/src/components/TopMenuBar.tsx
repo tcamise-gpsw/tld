@@ -40,14 +40,12 @@ const PencilIcon = ({ size = 24 }: { size?: number }) => (
   </svg>
 )
 
-const GraphNetworkIcon = ({ size = 22 }: { size?: number }) => (
+
+const InventoryIcon = ({ size = 22 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="4" r="2.5" fill="currentColor" stroke="none" />
-    <circle cx="4" cy="19" r="2.5" fill="currentColor" stroke="none" />
-    <circle cx="20" cy="19" r="2.5" fill="currentColor" stroke="none" />
-    <line x1="12" y1="6.5" x2="5.2" y2="17" />
-    <line x1="12" y1="6.5" x2="18.8" y2="17" />
-    <line x1="6.5" y1="19" x2="17.5" y2="19" />
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+    <line x1="12" y1="22.08" x2="12" y2="12" />
   </svg>
 )
 
@@ -65,7 +63,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { label: "Editor", path: "/", icon: PencilIcon },
   { label: "Diagrams", path: "/views", icon: FolderTreeIcon },
-  { label: "Links", path: "/dependencies", icon: GraphNetworkIcon },
+  { label: "Inventory", path: "/inventory", icon: InventoryIcon },
 ]
 
 export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileMenuSlot, userControlsSlot }: Props) {
@@ -342,7 +340,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           {[
             { label: "Editor", path: "/", icon: PencilIcon },
             { label: "Diagrams", path: "/views", icon: FolderTreeIcon },
-            { label: "Links", path: "/dependencies", icon: GraphNetworkIcon },
+            { label: "Inventory", path: "/inventory", icon: InventoryIcon },
           ].map((item) => {
             const Icon = item.icon
             const active = isActive(item.path)

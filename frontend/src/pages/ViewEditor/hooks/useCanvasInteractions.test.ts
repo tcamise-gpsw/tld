@@ -15,6 +15,7 @@ const connector = (id: number): Connector => ({
   url: null,
   source_handle: 'right',
   target_handle: 'left',
+  tags: [],
   created_at: '2024-01-01',
   updated_at: '2024-01-01',
 })

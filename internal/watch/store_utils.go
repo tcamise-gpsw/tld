@@ -888,6 +888,10 @@ func rawFactSnapshot(snapshot watchResourceSnapshot) bool {
 	return snapshot.OwnerType == "fact" && snapshot.ResourceType == "fact"
 }
 
+func rawDependencyImportSnapshot(snapshot watchResourceSnapshot) bool {
+	return rawFactSnapshot(snapshot) && strings.Contains(snapshot.OwnerKey, ":dependency.import:")
+}
+
 func previousRawSnapshotForMaterialized(previous, current map[string]watchResourceSnapshot, snapshot watchResourceSnapshot) (watchResourceSnapshot, string, bool, bool) {
 	if snapshot.ResourceType != "element" {
 		return watchResourceSnapshot{}, "", false, false

@@ -374,11 +374,95 @@ export async function Users() {
 	if deps := countElementTag(t, db, "dependency:import"); deps != 0 {
 		t.Fatalf("expected dependency/import facts not to surface as tags, found on %d elements", deps)
 	}
-	if deps := elementKindCount(t, db, "dependency"); deps == 0 {
-		t.Fatal("expected dependency/import facts to materialize as shared dependency module nodes")
+	if deps := elementKindCount(t, db, "dependency"); deps != 0 {
+		t.Fatalf("expected baseline dependency imports to stay grouped, found %d exact dependency nodes", deps)
 	}
-	if !connectorExistsBetween(t, db, "main.go", "github.com/go-chi/chi/v5") {
-		t.Fatal("expected importing file to connect to imported dependency")
+	if groups := elementKindCount(t, db, "dependency-group"); groups == 0 {
+		t.Fatal("expected dependency/import facts to materialize as grouped dependency nodes")
+	}
+	if !connectorExistsBetween(t, db, "main.go", "External packages") {
+		t.Fatal("expected importing file to connect to grouped external dependencies")
+	}
+}
+
+func TestDependencyGroupsExpandCleanAndHideWithContext(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "go.mod", `module example.com/tldwatchfixture
+
+go 1.22
+`)
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency)
+}
+`)
+
+	store := NewStore(db)
+	scanResult, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := RepresentRequest{
+		Embedding:  EmbeddingConfig{Provider: "none"},
+		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, req); err != nil {
+		t.Fatal(err)
+	}
+	if elementNameExists(t, db, "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatal("exact dependency module should start hidden behind the dependency group")
+	}
+	groupID, ok, err := store.MappingResourceID(context.Background(), scanResult.RepositoryID, "dependency-group", "dependency.group:internal", "element")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected internal dependency group")
+	}
+	if !connectorExistsBetween(t, db, "main.go", "Internal packages") {
+		t.Fatal("expected file to connect to grouped internal dependencies")
+	}
+
+	show, err := store.ApplyContextAction(context.Background(), scanResult.RepositoryID, contextActionShow, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if show.ElementsAdded == 0 || !elementNameExists(t, db, "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatalf("expected show context to expand exact dependency modules, got %+v", show)
+	}
+	if !elementNameExists(t, db, "Internal packages") {
+		t.Fatal("expanded dependency group should remain visible so it can be cleaned")
+	}
+	if !connectorExistsBetween(t, db, "main.go", "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatal("expected expanded exact dependency connector")
+	}
+
+	clean, err := store.ApplyContextAction(context.Background(), scanResult.RepositoryID, contextActionClean, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.ElementsRemoved == 0 || elementNameExists(t, db, "example.com/tldwatchfixture/internal/catalog") {
+		t.Fatalf("expected clean context to collapse exact dependency modules, got %+v", clean)
+	}
+	if !elementNameExists(t, db, "Internal packages") {
+		t.Fatal("dependency group should remain after clean")
+	}
+
+	hide, err := store.ApplyContextAction(context.Background(), scanResult.RepositoryID, contextActionHide, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hide.ElementsRemoved == 0 || elementNameExists(t, db, "Internal packages") {
+		t.Fatalf("expected hide context to suppress dependency group, got %+v", hide)
 	}
 }
 
@@ -2088,6 +2172,27 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if elementKindCount(t, db, "dependency") != 0 {
+		t.Fatal("initial dependency imports should be grouped before explicit expansion")
+	}
+	groupID, ok, err := store.MappingResourceID(context.Background(), scan.RepositoryID, "dependency-group", "dependency.group:internal", "element")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected internal dependency group to be materialized")
+	}
+	show, err := store.ApplyContextAction(context.Background(), scan.RepositoryID, contextActionShow, ContextResourceRequest{ResourceType: "element", ResourceID: groupID}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if show.ElementsAdded == 0 {
+		t.Fatalf("expected dependency group expansion to materialize exact modules, got %+v", show)
+	}
+	if !elementNameExists(t, db, "example.com/tldwatchfixture/internal/pricing") {
+		t.Fatal("expected expanded dependency group to materialize exact pricing module")
+	}
+	rep = show.Representation
 	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit1", "initial imports", "", "main", rep.RepresentationHash, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -2156,6 +2261,86 @@ func main() {
 	}
 	if count := countRows(t, db, `SELECT COUNT(*) FROM watch_facts WHERE repository_id = ? AND stable_key = ?`, scan.RepositoryID, "dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"); count != 0 {
 		t.Fatalf("removed import raw fact should be gone after commit, found %d rows", count)
+	}
+}
+
+func TestGroupedDependencyImportRemovalEmitsRawDiffWithoutDeadCanvasNode(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "go.mod", `module example.com/tldwatchfixture
+
+go 1.22
+`)
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+	"example.com/tldwatchfixture/internal/pricing"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency, pricing.BasePriceCents)
+}
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial grouped imports")
+
+	store := NewStore(db)
+	scan, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := RepresentRequest{
+		Embedding:  EmbeddingConfig{Provider: "none"},
+		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+	}
+	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elementKindCount(t, db, "dependency") != 0 {
+		t.Fatal("baseline grouped imports should not materialize exact dependency nodes")
+	}
+	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit1", "initial grouped imports", "", "main", rep.RepresentationHash, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, repo, "cmd/service/main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/tldwatchfixture/internal/catalog"
+)
+
+func main() {
+	fmt.Println(catalog.DefaultCurrency)
+}
+`)
+	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffs, err := store.BuildWatchDiffs(context.Background(), scan.RepositoryID, next.RepresentationHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removedFactOwner := "fact:dependency.inventory:dependency.import:cmd/service/main.go:example.com/tldwatchfixture/internal/pricing:7"
+	if diff := findDiffByOwner(diffs, "fact", removedFactOwner, "fact", "deleted"); diff == nil {
+		t.Fatalf("expected grouped removed dependency import to emit a raw fact diff, got %+v", diffs)
+	}
+	if diff := findDiffByOwner(diffs, "dependency-module", "dependency.module:example.com/tldwatchfixture/internal/pricing", "element", "deleted"); diff != nil {
+		t.Fatalf("grouped removed dependency should not invent exact element deletion, got %+v", diff)
+	}
+	if diff := findDiffByOwner(diffs, "fact-import-connector", removedFactOwner+":module", "connector", "deleted"); diff != nil {
+		t.Fatalf("grouped removed dependency should not invent exact connector deletion, got %+v", diff)
 	}
 }
 

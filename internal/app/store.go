@@ -39,20 +39,21 @@ type TechnologyConnector struct {
 }
 
 type Connector struct {
-	ID              int64   `json:"id"`
-	ViewID          int64   `json:"view_id"`
-	SourceElementID int64   `json:"source_element_id"`
-	TargetElementID int64   `json:"target_element_id"`
-	Label           *string `json:"label"`
-	Description     *string `json:"description"`
-	Relationship    *string `json:"relationship"`
-	Direction       string  `json:"direction"`
-	Style           string  `json:"style"`
-	URL             *string `json:"url"`
-	SourceHandle    *string `json:"source_handle"`
-	TargetHandle    *string `json:"target_handle"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	ID              int64    `json:"id"`
+	ViewID          int64    `json:"view_id"`
+	SourceElementID int64    `json:"source_element_id"`
+	TargetElementID int64    `json:"target_element_id"`
+	Label           *string  `json:"label"`
+	Description     *string  `json:"description"`
+	Relationship    *string  `json:"relationship"`
+	Direction       string   `json:"direction"`
+	Style           string   `json:"style"`
+	URL             *string  `json:"url"`
+	SourceHandle    *string  `json:"source_handle"`
+	TargetHandle    *string  `json:"target_handle"`
+	Tags            []string `json:"tags"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
 }
 
 type ExploreViewData struct {
@@ -67,20 +68,21 @@ type ExploreData struct {
 }
 
 type DependencyConnector struct {
-	ID               string  `json:"id"`
-	ViewID           string  `json:"view_id"`
-	SourceElementID  string  `json:"source_element_id"`
-	TargetElementID  string  `json:"target_element_id"`
-	Label            *string `json:"label,omitempty"`
-	Description      *string `json:"description,omitempty"`
-	RelationshipType *string `json:"relationship_type,omitempty"`
-	Direction        string  `json:"direction"`
-	ConnectorType    string  `json:"connector_type"`
-	URL              *string `json:"url,omitempty"`
-	SourceHandle     *string `json:"source_handle,omitempty"`
-	TargetHandle     *string `json:"target_handle,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
+	ID               string   `json:"id"`
+	ViewID           string   `json:"view_id"`
+	SourceElementID  string   `json:"source_element_id"`
+	TargetElementID  string   `json:"target_element_id"`
+	Label            *string  `json:"label,omitempty"`
+	Description      *string  `json:"description,omitempty"`
+	RelationshipType *string  `json:"relationship_type,omitempty"`
+	Direction        string   `json:"direction"`
+	ConnectorType    string   `json:"connector_type"`
+	URL              *string  `json:"url,omitempty"`
+	SourceHandle     *string  `json:"source_handle,omitempty"`
+	TargetHandle     *string  `json:"target_handle,omitempty"`
+	Tags             []string `json:"tags"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
 }
 
 type PlanConnector struct {
@@ -256,6 +258,7 @@ type viewRow struct {
 	Name           string
 	Description    sql.NullString
 	LevelLabel     sql.NullString
+	Tags           string
 	Level          int
 	CreatedAt      string
 	UpdatedAt      string
@@ -410,6 +413,7 @@ func (s *Store) Dependencies(ctx context.Context) (map[string]any, error) {
 			URL:              c.URL,
 			SourceHandle:     c.SourceHandle,
 			TargetHandle:     c.TargetHandle,
+			Tags:             c.Tags,
 			CreatedAt:        c.CreatedAt,
 			UpdatedAt:        c.UpdatedAt,
 		})

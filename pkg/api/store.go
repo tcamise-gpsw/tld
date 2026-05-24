@@ -65,6 +65,7 @@ type ConnectorInput struct {
 	URL          *string
 	SourceHandle *string
 	TargetHandle *string
+	Tags         []string
 }
 
 // Store is the persistence interface for the shared workspace API.
@@ -76,7 +77,7 @@ type Store interface {
 	GetView(ctx context.Context, id int32, workspaceID uuid.UUID) (*diagv1.View, error)
 	GetProjectedViewContent(ctx context.Context, viewID int32, workspaceID uuid.UUID, densityOverride *int32) (*diagv1.ViewContent, error)
 	CreateView(ctx context.Context, workspaceID uuid.UUID, ownerElementID *int32, name string, label *string, isRoot bool) (*diagv1.View, error)
-	UpdateView(ctx context.Context, id int32, workspaceID uuid.UUID, name string, label *string) (*diagv1.View, error)
+	UpdateView(ctx context.Context, id int32, workspaceID uuid.UUID, name string, description *string, label *string, tags []string) (*diagv1.View, error)
 	DeleteView(ctx context.Context, id int32, workspaceID uuid.UUID) error
 
 	// Elements

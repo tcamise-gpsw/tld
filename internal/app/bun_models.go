@@ -53,6 +53,7 @@ type connectorModel struct {
 	URL             *string `bun:"url"`
 	SourceHandle    *string `bun:"source_handle"`
 	TargetHandle    *string `bun:"target_handle"`
+	Tags            string  `bun:"tags"`
 	CreatedAt       string  `bun:"created_at"`
 	UpdatedAt       string  `bun:"updated_at"`
 }
@@ -85,6 +86,7 @@ type viewModel struct {
 	Name           string  `bun:"name"`
 	Description    *string `bun:"description"`
 	LevelLabel     *string `bun:"level_label"`
+	Tags           string  `bun:"tags"`
 	Level          int     `bun:"level"`
 	DensityLevel   int     `bun:"density_level"`
 	CreatedAt      string  `bun:"created_at"`
@@ -160,6 +162,7 @@ func viewRowFromModel(row viewModel) viewRow {
 		Name:           row.Name,
 		Description:    nullStringFromPtr(row.Description),
 		LevelLabel:     nullStringFromPtr(row.LevelLabel),
+		Tags:           row.Tags,
 		Level:          row.Level,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
@@ -187,6 +190,7 @@ func connectorFromModel(row connectorModel) Connector {
 		URL:             row.URL,
 		SourceHandle:    row.SourceHandle,
 		TargetHandle:    row.TargetHandle,
+		Tags:            parseStrings(row.Tags),
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
 	}

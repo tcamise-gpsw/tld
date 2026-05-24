@@ -15,6 +15,7 @@ type ViewTreeNode struct {
 	Name           string         `json:"name"`
 	Description    *string        `json:"description"`
 	LevelLabel     *string        `json:"level_label"`
+	Tags           []string       `json:"tags"`
 	Level          int            `json:"level"`
 	Depth          int            `json:"depth"`
 	CreatedAt      string         `json:"created_at"`
@@ -24,12 +25,13 @@ type ViewTreeNode struct {
 }
 
 type ViewSummary struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	Label     *string `json:"label"`
-	IsRoot    bool    `json:"is_root"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Label     *string  `json:"label"`
+	Tags      []string `json:"tags"`
+	IsRoot    bool     `json:"is_root"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
 }
 
 type ViewConnector struct {
@@ -191,15 +193,18 @@ func (s *Store) childViewMetaMap(ctx context.Context) (map[int64]childViewMetaVa
 func viewNodeFromRow(row viewRow, parentID *int64, depth int) ViewTreeNode {
 	var ownerElementID *int64
 	if row.OwnerElementID.Valid {
-		ownerElementID = new(row.OwnerElementID.Int64)
+		value := row.OwnerElementID.Int64
+		ownerElementID = &value
 	}
 	var description *string
 	if row.Description.Valid {
-		description = new(row.Description.String)
+		value := row.Description.String
+		description = &value
 	}
 	var levelLabel *string
 	if row.LevelLabel.Valid {
-		levelLabel = new(row.LevelLabel.String)
+		value := row.LevelLabel.String
+		levelLabel = &value
 	}
 	return ViewTreeNode{
 		ID:             row.ID,
@@ -207,6 +212,7 @@ func viewNodeFromRow(row viewRow, parentID *int64, depth int) ViewTreeNode {
 		Name:           row.Name,
 		Description:    description,
 		LevelLabel:     levelLabel,
+		Tags:           parseStrings(row.Tags),
 		Level:          row.Level,
 		Depth:          depth,
 		CreatedAt:      row.CreatedAt,
@@ -310,6 +316,7 @@ func (s *Store) Views(ctx context.Context) ([]ViewSummary, error) {
 			ID:        node.ID,
 			Name:      node.Name,
 			Label:     node.LevelLabel,
+			Tags:      node.Tags,
 			IsRoot:    node.ParentViewID == nil,
 			CreatedAt: node.CreatedAt,
 			UpdatedAt: node.UpdatedAt,
@@ -340,7 +347,7 @@ func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeN
 	if err := s.bun.NewSelect().
 		TableExpr("views AS v").
 		Distinct().
-		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.level, v.created_at, v.updated_at").
+		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at").
 		Join("JOIN placements AS p ON p.element_id = v.owner_element_id").
 		Where("p.view_id = ?", parentViewID).
 		Where("v.id != ?", parentViewID).
@@ -361,7 +368,7 @@ func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
 	var rows []viewModel
 	if err := s.bun.NewSelect().
 		TableExpr("views AS v").
-		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.level, v.created_at, v.updated_at").
+		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at").
 		Where("v.owner_element_id IS NULL OR NOT EXISTS (SELECT 1 FROM placements p WHERE p.element_id = v.owner_element_id AND p.view_id != v.id)").
 		Order("v.id").
 		Scan(ctx, &rows); err != nil {
@@ -399,13 +406,14 @@ func (s *Store) CreateView(ctx context.Context, name string, levelLabel *string,
 		ID:        view.ID,
 		Name:      view.Name,
 		Label:     view.LevelLabel,
+		Tags:      view.Tags,
 		IsRoot:    view.ParentViewID == nil,
 		CreatedAt: view.CreatedAt,
 		UpdatedAt: view.UpdatedAt,
 	}, nil
 }
 
-func (s *Store) UpdateView(ctx context.Context, id int64, name *string, levelLabel *string) (ViewSummary, error) {
+func (s *Store) UpdateView(ctx context.Context, id int64, name *string, description *string, levelLabel *string, tags []string) (ViewSummary, error) {
 	current, err := s.ViewByID(ctx, id)
 	if err != nil {
 		return ViewSummary{}, err
@@ -414,10 +422,23 @@ func (s *Store) UpdateView(ctx context.Context, id int64, name *string, levelLab
 	if name != nil && strings.TrimSpace(*name) != "" {
 		nextName = strings.TrimSpace(*name)
 	}
+	nextDescription := current.Description
+	if description != nil {
+		nextDescription = description
+	}
+	var tagJSON any
+	if tags != nil {
+		if err := s.ensureTagColors(ctx, tags); err != nil {
+			return ViewSummary{}, err
+		}
+		tagJSON = jsonString(tags, "[]")
+	}
 	res, err := s.bun.NewUpdate().
 		Model((*viewModel)(nil)).
 		Set("name = ?", nextName).
+		Set("description = ?", nextDescription).
 		Set("level_label = ?", levelLabel).
+		Set("tags = COALESCE(?, tags)", tagJSON).
 		Set("updated_at = ?", nowString()).
 		Where("id = ?", id).
 		Exec(ctx)
@@ -435,6 +456,7 @@ func (s *Store) UpdateView(ctx context.Context, id int64, name *string, levelLab
 		ID:        updated.ID,
 		Name:      updated.Name,
 		Label:     updated.LevelLabel,
+		Tags:      updated.Tags,
 		IsRoot:    updated.ParentViewID == nil,
 		CreatedAt: updated.CreatedAt,
 		UpdatedAt: updated.UpdatedAt,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Box, Badge, HStack, Input, Text, VStack } from '@chakra-ui/react'
 import type { LibraryElement } from '../types'
 import { TYPE_COLORS } from '../types'
@@ -38,10 +38,23 @@ export default function InlineElementAdder({
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 30)
-    return () => clearTimeout(t)
+  const focusInput = useCallback(() => {
+    inputRef.current?.focus({ preventScroll: true })
   }, [])
+
+  useLayoutEffect(() => {
+    focusInput()
+  }, [focusInput])
+
+  useEffect(() => {
+    focusInput()
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(focusInput) : null
+    const timers = [0, 50, 100, 200, 350].map((delay) => setTimeout(focusInput, delay))
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf)
+      timers.forEach(clearTimeout)
+    }
+  }, [focusInput])
 
   const filtered = (() => {
     if (!query.trim()) return []
@@ -128,6 +141,7 @@ export default function InlineElementAdder({
           color="white"
           isDisabled={busy}
           autoComplete="off"
+          autoFocus
         />
         {title && (
           <Box position="absolute" left="8px" top="-18px" zIndex={2002}>

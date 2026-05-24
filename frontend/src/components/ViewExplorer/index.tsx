@@ -251,7 +251,7 @@ function ViewExplorer({
       width="300px"
       zIndex={1000}
       hasBackdrop={isMobile}
-      noFocusLock={noFocusLock}
+      noFocusLock={noFocusLock || !isMobile}
     >
       <VStack ref={containerRef} align="stretch" spacing={0} h="full" overflow="hidden">
         {/* Panel header */}

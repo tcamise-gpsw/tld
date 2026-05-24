@@ -59,7 +59,6 @@ export default extendTheme({
         backdropFilter: 'blur(16px)',
         border: '1px solid',
         borderColor: 'glass.border',
-        boxShadow: 'panel',
       },
     },
   },

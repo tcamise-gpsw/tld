@@ -70,8 +70,8 @@ func (s *SQLiteStore) CreateView(ctx context.Context, name string, levelLabel *s
 	return core.ViewSummary(out), nil
 }
 
-func (s *SQLiteStore) UpdateView(ctx context.Context, id int64, name *string, levelLabel *string) (core.ViewSummary, error) {
-	out, err := s.legacy.UpdateView(ctx, id, name, levelLabel)
+func (s *SQLiteStore) UpdateView(ctx context.Context, id int64, name *string, description *string, levelLabel *string, tags []string) (core.ViewSummary, error) {
+	out, err := s.legacy.UpdateView(ctx, id, name, description, levelLabel, tags)
 	if err != nil {
 		return core.ViewSummary{}, err
 	}

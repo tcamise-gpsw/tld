@@ -1367,6 +1367,12 @@ func (s *Store) BuildWatchDiffs(ctx context.Context, repositoryID int64, represe
 	}
 	for _, prev := range previous {
 		if rawFactSnapshot(prev) {
+			if rawDependencyImportSnapshot(prev) {
+				before := prev.Hash
+				diff := snapshotDiff(prev, "deleted", &before, nil, nil)
+				applyGitLineDiff(&diff, prev, nil, lineDiffs, lineHunks)
+				diffs = append(diffs, diff)
+			}
 			continue
 		}
 		before := prev.Hash

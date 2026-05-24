@@ -35,6 +35,9 @@ func (s *Store) AllConnectors(ctx context.Context) ([]Connector, error) {
 }
 
 func (s *Store) CreateConnector(ctx context.Context, input Connector) (Connector, error) {
+	if err := s.ensureTagColors(ctx, input.Tags); err != nil {
+		return Connector{}, err
+	}
 	now := nowString()
 	row := &connectorModel{
 		ViewID:          input.ViewID,
@@ -43,11 +46,12 @@ func (s *Store) CreateConnector(ctx context.Context, input Connector) (Connector
 		Label:           input.Label,
 		Description:     input.Description,
 		Relationship:    input.Relationship,
-		Direction:       normalizeDirection(new(input.Direction)),
+		Direction:       normalizeDirection(&input.Direction),
 		Style:           input.Style,
 		URL:             input.URL,
 		SourceHandle:    input.SourceHandle,
 		TargetHandle:    input.TargetHandle,
+		Tags:            jsonString(input.Tags, "[]"),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -70,6 +74,13 @@ func (s *Store) ConnectorByID(ctx context.Context, id int64) (Connector, error) 
 }
 
 func (s *Store) UpdateConnector(ctx context.Context, id int64, patch Connector) (Connector, error) {
+	var tagJSON any
+	if patch.Tags != nil {
+		if err := s.ensureTagColors(ctx, patch.Tags); err != nil {
+			return Connector{}, err
+		}
+		tagJSON = jsonString(patch.Tags, "[]")
+	}
 	var row connectorModel
 	if err := s.bun.NewRaw(`
 		UPDATE connectors SET
@@ -84,13 +95,14 @@ func (s *Store) UpdateConnector(ctx context.Context, id int64, patch Connector) 
 			url = COALESCE(?, url),
 			source_handle = COALESCE(?, source_handle),
 			target_handle = COALESCE(?, target_handle),
+			tags = COALESCE(?, tags),
 			updated_at = ?
 		WHERE id = ?
-		RETURNING id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, created_at, updated_at`,
+		RETURNING id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, tags, created_at, updated_at`,
 		patch.ViewID, patch.ViewID,
 		patch.SourceElementID, patch.SourceElementID,
 		patch.TargetElementID, patch.TargetElementID,
-		patch.Label, patch.Description, patch.Relationship, patch.Direction, patch.Style, patch.URL, patch.SourceHandle, patch.TargetHandle,
+		patch.Label, patch.Description, patch.Relationship, patch.Direction, patch.Style, patch.URL, patch.SourceHandle, patch.TargetHandle, tagJSON,
 		nowString(), id).
 		Scan(ctx, &row); err != nil {
 		return Connector{}, err

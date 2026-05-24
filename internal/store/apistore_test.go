@@ -301,6 +301,7 @@ func TestConnectorAdapterPreservesHandlesDefaultsAndViewFiltering(t *testing.T) 
 		Style:        "bezier",
 		SourceHandle: &sourceHandle,
 		TargetHandle: &targetHandle,
+		Tags:         []string{"runtime"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -310,6 +311,9 @@ func TestConnectorAdapterPreservesHandlesDefaultsAndViewFiltering(t *testing.T) 
 	}
 	if connector.GetSourceHandle() != "right" || connector.GetTargetHandle() != "left" {
 		t.Fatalf("connector handles = %q/%q, want right/left", connector.GetSourceHandle(), connector.GetTargetHandle())
+	}
+	if got := connector.GetTags(); len(got) != 1 || got[0] != "runtime" {
+		t.Fatalf("connector tags = %v, want runtime", got)
 	}
 
 	all, err := NewAPIAdapter(sqliteStore).ListAllConnectors(context.Background(), uuid.Nil)
@@ -322,6 +326,52 @@ func TestConnectorAdapterPreservesHandlesDefaultsAndViewFiltering(t *testing.T) 
 	}
 	if len(all) != 1 || len(inView) != 1 || all[0].GetId() != inView[0].GetId() {
 		t.Fatalf("connector list mismatch: all=%+v inView=%+v", all, inView)
+	}
+	updated, err := NewAPIAdapter(sqliteStore).UpdateConnector(context.Background(), connector.GetId(), uuid.Nil, api.ConnectorInput{
+		ViewID:   20,
+		SourceID: 10,
+		TargetID: 11,
+		Style:    "bezier",
+		Tags:     []string{"data"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.GetTags(); len(got) != 1 || got[0] != "data" {
+		t.Fatalf("updated connector tags = %v, want data", got)
+	}
+}
+
+func TestViewAdapterPreservesAndUpdatesTags(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	db := sqliteStore.DB()
+	if _, err := db.Exec(`
+		INSERT INTO elements(id, name, tags, technology_connectors, created_at, updated_at)
+		VALUES (10, 'API', '[]', '[]', 'now', 'now');
+		INSERT INTO views(id, owner_element_id, name, description, level_label, tags, level, created_at, updated_at)
+		VALUES (20, 10, 'API view', 'Desc', 'Service', '["runtime"]', 2, 'now', 'now');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewAPIAdapter(sqliteStore)
+	view, err := adapter.GetView(context.Background(), 20, uuid.Nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := view.GetTags(); len(got) != 1 || got[0] != "runtime" {
+		t.Fatalf("view tags = %v, want runtime", got)
+	}
+	description := "Updated"
+	label := "Container"
+	updated, err := adapter.UpdateView(context.Background(), 20, uuid.Nil, "API internals", &description, &label, []string{"platform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.GetDescription() != "Updated" || updated.GetLevelLabel() != "Container" {
+		t.Fatalf("updated view = desc:%q label:%q", updated.GetDescription(), updated.GetLevelLabel())
+	}
+	if got := updated.GetTags(); len(got) != 1 || got[0] != "platform" {
+		t.Fatalf("updated view tags = %v, want platform", got)
 	}
 }
 

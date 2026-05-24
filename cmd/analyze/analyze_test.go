@@ -79,7 +79,7 @@ func TestAnalyzeCmd_QualifiesCollidingGeneratedSymbolNames(t *testing.T) {
 	}
 }
 
-func TestAnalyzeCmd_MaterializesSharedDependencyModules(t *testing.T) {
+func TestAnalyzeCmd_GroupsDependencyImportsByDefault(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
@@ -95,14 +95,17 @@ func TestAnalyzeCmd_MaterializesSharedDependencyModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if countElementName(ws, "fmt") != 1 {
-		t.Fatalf("expected one shared fmt dependency module, got %+v", ws.Elements)
+	if countElementName(ws, "fmt") != 0 {
+		t.Fatalf("expected exact fmt dependency module to stay hidden by default, got %+v", ws.Elements)
 	}
-	if countKind(ws, "dependency") != 1 {
-		t.Fatalf("expected dependency imports to share one dependency element, got %+v", ws.Elements)
+	if countElementName(ws, "Go standard library") != 1 {
+		t.Fatalf("expected one grouped Go stdlib dependency element, got %+v", ws.Elements)
 	}
-	if countConnectorsToName(ws, "fmt", "imports") != 2 {
-		t.Fatalf("expected both files to connect to shared fmt module, got %+v", ws.Connectors)
+	if countKind(ws, "dependency-group") != 1 {
+		t.Fatalf("expected dependency imports to materialize as one dependency group, got %+v", ws.Elements)
+	}
+	if countConnectorsToName(ws, "Go standard library", "1 import") != 2 {
+		t.Fatalf("expected both files to connect to grouped fmt imports, got %+v", ws.Connectors)
 	}
 }
 
