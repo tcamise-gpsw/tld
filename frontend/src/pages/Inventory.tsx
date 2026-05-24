@@ -67,6 +67,7 @@ export default function Inventory() {
   const [views, setViews] = useState<ViewTreeNode[]>([])
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [countsByView, setCountsByView] = useState<Record<number, { placements: number; connectors: number }>>({})
+  const [placementByViewElement, setPlacementByViewElement] = useState<Record<string, { x: number; y: number }>>({})
   const [availableTags, setAvailableTags] = useState<string[]>([])
   const [editing, setEditing] = useState<InventoryRow | null>(null)
 
@@ -93,6 +94,15 @@ export default function Inventory() {
           { placements: content.placements.length, connectors: content.connectors.length },
         ]),
       )
+      const nextPlacementLookup: Record<string, { x: number; y: number }> = {}
+      Object.entries(gridData.content).forEach(([viewId, content]) => {
+        content.placements.forEach((placement) => {
+          nextPlacementLookup[`${viewId}:${placement.element_id}`] = {
+            x: placement.position_x,
+            y: placement.position_y,
+          }
+        })
+      })
       const nextConnectors = dependencies.connectors.map(dependencyConnectorToConnector)
       const tagSet = new Set<string>(Object.keys(tagColors))
       allElements.forEach((element) => element.tags.forEach((tag) => tagSet.add(tag)))
@@ -102,6 +112,7 @@ export default function Inventory() {
       setViews(flatViews)
       setConnectors(nextConnectors)
       setCountsByView(nextCounts)
+      setPlacementByViewElement(nextPlacementLookup)
       setAvailableTags(Array.from(tagSet).sort((a, b) => a.localeCompare(b)))
     } finally {
       setLoading(false)
@@ -290,6 +301,7 @@ export default function Inventory() {
               elements={elements}
               views={views}
               connectors={connectors}
+              placementByViewElement={placementByViewElement}
               onSelectRow={(key) => {
                 const found = rows.find((r) => r.key === key)
                 if (found) selectRow(found)

@@ -12,7 +12,7 @@ import { ViewRelationshipView } from './relationship-drawer/ViewRelationshipView
 
 export type { RelationshipDrawerProps, NeighbourNode } from './relationship-drawer/types'
 
-export default function RelationshipDrawer({ selectedRow, elements, views, connectors, onSelectRow }: RelationshipDrawerProps) {
+export default function RelationshipDrawer({ selectedRow, elements, views, connectors, placementByViewElement, onSelectRow }: RelationshipDrawerProps) {
   const { accent } = useTheme()
 
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -219,12 +219,16 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
     const conn = selectedRow.connector
     const sourceEl = elements.find((el) => el.id === conn.source_element_id)
     const targetEl = elements.find((el) => el.id === conn.target_element_id)
+    const sourcePlacement = placementByViewElement[`${conn.view_id}:${conn.source_element_id}`]
+    const targetPlacement = placementByViewElement[`${conn.view_id}:${conn.target_element_id}`]
     return {
       connector: conn,
       sourceEl,
       targetEl,
+      sourcePlacement,
+      targetPlacement,
     }
-  }, [selectedRow, elements])
+  }, [selectedRow, elements, placementByViewElement])
 
   // Render variables
   const isSelected = !!selectedRow
@@ -379,7 +383,6 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
               {selectedRow.objectType === 'connector' && connectorData && (
                 <ConnectorRelationshipView
                   data={connectorData}
-                  selectedName={selectedRow.name}
                   cardShadow={cardShadow}
                   onSelectRow={onSelectRow}
                 />

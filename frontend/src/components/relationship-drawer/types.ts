@@ -12,5 +12,6 @@ export interface RelationshipDrawerProps {
   elements: LibraryElement[]
   views: ViewTreeNode[]
   connectors: Connector[]
+  placementByViewElement: Record<string, { x: number; y: number }>
   onSelectRow: (key: string) => void
 }
