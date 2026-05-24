@@ -377,6 +377,9 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
                   data={viewData}
                   cardShadow={cardShadow}
                   onSelectRow={onSelectRow}
+                  connectors={connectors}
+                  placementByViewElement={placementByViewElement}
+                  views={views}
                 />
               )}
 
