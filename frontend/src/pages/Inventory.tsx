@@ -55,6 +55,7 @@ const QUALITY_OPTIONS = ['untagged', 'missing description', 'has child view', 'u
 const PAGE_SIZE_OPTIONS = [50, 100, 250]
 const DEFAULT_PAGE_SIZE = 100
 const MAX_VISIBLE_FILTER_OPTIONS = 100
+const DEFAULT_COLLAPSED_FILTER_SECTIONS = ['tags', 'kind', 'quality', 'sort']
 const ACCENT_CHECKBOX_SX = {
   '.chakra-checkbox__control[data-checked], .chakra-checkbox__control[data-indeterminate]': {
     bg: 'var(--accent)',
@@ -95,7 +96,7 @@ export default function Inventory() {
   const [availableTags, setAvailableTags] = useState<string[]>([])
   const [editing, setEditing] = useState<InventoryRow | null>(null)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set(DEFAULT_COLLAPSED_FILTER_SECTIONS))
   const [bulkLoading, setBulkLoading] = useState(false)
   const [sortKey, setSortKey] = useState<'name' | 'updatedAt' | 'usage' | 'type'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
