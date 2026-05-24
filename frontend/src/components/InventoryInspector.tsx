@@ -4,27 +4,27 @@ import { Box, Flex, HStack, VStack, Text, Badge, IconButton } from '@chakra-ui/r
 import { ChevronDownIcon, ChevronUpIcon } from '@chakra-ui/icons'
 import { hexToRgba } from '../constants/colors'
 import { useTheme } from '../context/ThemeContext'
-import { ConnectorRelationshipView } from './relationship-drawer/ConnectorRelationshipView'
-import { ElementRelationshipView } from './relationship-drawer/ElementRelationshipView'
-import type { RelationshipDrawerProps } from './relationship-drawer/types'
-import { getNeighbourGraph } from './relationship-drawer/utils'
-import { ViewRelationshipView } from './relationship-drawer/ViewRelationshipView'
+import { ConnectorInspector } from './InventoryDrawer/ConnectorInspector'
+import { ElementInspector } from './InventoryDrawer/ElementInspector'
+import type { RelationshipDrawerProps } from './InventoryDrawer/types'
+import { getNeighbourGraph } from './InventoryDrawer/utils'
+import { ViewInspector } from './InventoryDrawer/ViewInspector'
 
-export type { RelationshipDrawerProps, NeighbourNode } from './relationship-drawer/types'
+export type { RelationshipDrawerProps, NeighbourNode } from './InventoryDrawer/types'
 
 export default function RelationshipDrawer({ selectedRow, elements, views, connectors, placementByViewElement, onSelectRow }: RelationshipDrawerProps) {
   const { accent } = useTheme()
 
   const [isExpanded, setIsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('diag:relationship-drawer-expanded') !== 'false'
+      return localStorage.getItem('diag:InventoryDrawer-expanded') !== 'false'
     }
     return true
   })
 
   const [drawerHeight, setDrawerHeight] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('diag:relationship-drawer-height')
+      const saved = localStorage.getItem('diag:InventoryDrawer-height')
       return saved ? parseInt(saved, 10) : 340
     }
     return 340
@@ -33,7 +33,7 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
   const toggleExpand = useCallback(() => {
     setIsExpanded((prev) => {
       const next = !prev
-      localStorage.setItem('diag:relationship-drawer-expanded', String(next))
+      localStorage.setItem('diag:InventoryDrawer-expanded', String(next))
       return next
     })
   }, [])
@@ -67,7 +67,7 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
       const deltaY = e.clientY - dragStartYRef.current
       const nextHeight = Math.max(160, Math.min(window.innerHeight * 0.75, dragStartHeightRef.current - deltaY))
       setDrawerHeight(nextHeight)
-      localStorage.setItem('diag:relationship-drawer-height', String(nextHeight))
+      localStorage.setItem('diag:InventoryDrawer-height', String(nextHeight))
     };
 
     const handleTouchMove = (e: TouchEvent) => {
@@ -75,7 +75,7 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
       const deltaY = e.touches[0].clientY - dragStartYRef.current
       const nextHeight = Math.max(160, Math.min(window.innerHeight * 0.75, dragStartHeightRef.current - deltaY))
       setDrawerHeight(nextHeight)
-      localStorage.setItem('diag:relationship-drawer-height', String(nextHeight))
+      localStorage.setItem('diag:InventoryDrawer-height', String(nextHeight))
     };
 
     const stopDrag = () => {
@@ -288,7 +288,7 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
       >
         <HStack spacing={2}>
           <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase" letterSpacing="0.08em">
-            Relationships & Connections
+            Inspect
           </Text>
           {isSelected && (
             <>
@@ -301,101 +301,101 @@ export default function RelationshipDrawer({ selectedRow, elements, views, conne
               </Text>
             </>
           )}
-      </HStack>
+        </HStack>
 
-      <IconButton
-        size="xs"
-        variant="ghost"
-        aria-label={isExpanded ? 'Collapse' : 'Expand'}
-        icon={isExpanded ? <ChevronDownIcon /> : <ChevronUpIcon />}
-        onClick={(e) => {
-          e.stopPropagation()
-          toggleExpand()
-        }}
-      />
-    </Flex>
+        <IconButton
+          size="xs"
+          variant="ghost"
+          aria-label={isExpanded ? 'Collapse' : 'Expand'}
+          icon={isExpanded ? <ChevronDownIcon /> : <ChevronUpIcon />}
+          onClick={(e) => {
+            e.stopPropagation()
+            toggleExpand()
+          }}
+        />
+      </Flex>
 
-      {/* Canvas Area */ }
-  {
-    isExpanded && (
-      <Box
-        flex={1}
-        minH="120px"
-        display="flex"
-        alignItems="center"
-        justifyContent="center"
-        bg="var(--bg-canvas)"
-        backgroundImage="radial-gradient(circle, #2D3748 0.5px, transparent 0.5px)"
-        backgroundSize="24px 24px"
-        position="relative"
-        overflow="hidden"
-        ref={graphRef}
-        onMouseDown={onCanvasMouseDown}
-        onTouchStart={onCanvasTouchStart}
-        style={{ cursor: 'grab' }}
-        sx={{ touchAction: 'none' }}
-      >
-        {!isSelected ? (
-          <VStack spacing={2} opacity={0.5}>
-            <Text color="gray.400" fontSize="sm" fontWeight="medium">
-              Select an item in the list
-            </Text>
-            <Text color="gray.600" fontSize="xs">
-              Visual relationship graph will appear here
-            </Text>
-          </VStack>
-        ) : (
-          <div ref={panContainerRef} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.22 }}
-              style={{
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                position: 'relative',
-                zIndex: 1,
-                padding: '40px',
-              }}
-            >
-              {selectedRow.objectType === 'element' && (
-                <ElementRelationshipView
-                  selectedElement={selectedRow.element}
-                  neighborGraph={neighborGraph}
-                  graphHeight={graphHeight}
-                  cardShadow={cardShadow}
-                  accent={accent}
-                  onSelectRow={onSelectRow}
-                />
-              )}
+      {/* Canvas Area */}
+      {
+        isExpanded && (
+          <Box
+            flex={1}
+            minH="120px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            bg="var(--bg-canvas)"
+            backgroundImage="radial-gradient(circle, #2D3748 0.5px, transparent 0.5px)"
+            backgroundSize="24px 24px"
+            position="relative"
+            overflow="hidden"
+            ref={graphRef}
+            onMouseDown={onCanvasMouseDown}
+            onTouchStart={onCanvasTouchStart}
+            style={{ cursor: 'grab' }}
+            sx={{ touchAction: 'none' }}
+          >
+            {!isSelected ? (
+              <VStack spacing={2} opacity={0.5}>
+                <Text color="gray.400" fontSize="sm" fontWeight="medium">
+                  Select an item in the list
+                </Text>
+                <Text color="gray.600" fontSize="xs">
+                  Visual relationship graph will appear here
+                </Text>
+              </VStack>
+            ) : (
+              <div ref={panContainerRef} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.22 }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'relative',
+                    zIndex: 1,
+                    padding: '40px',
+                  }}
+                >
+                  {selectedRow.objectType === 'element' && (
+                    <ElementInspector
+                      selectedElement={selectedRow.element}
+                      neighborGraph={neighborGraph}
+                      graphHeight={graphHeight}
+                      cardShadow={cardShadow}
+                      accent={accent}
+                      onSelectRow={onSelectRow}
+                    />
+                  )}
 
-              {selectedRow.objectType === 'view' && viewData && (
-                <ViewRelationshipView
-                  data={viewData}
-                  cardShadow={cardShadow}
-                  onSelectRow={onSelectRow}
-                  connectors={connectors}
-                  placementByViewElement={placementByViewElement}
-                  views={views}
-                />
-              )}
+                  {selectedRow.objectType === 'view' && viewData && (
+                    <ViewInspector
+                      data={viewData}
+                      cardShadow={cardShadow}
+                      onSelectRow={onSelectRow}
+                      connectors={connectors}
+                      placementByViewElement={placementByViewElement}
+                      views={views}
+                    />
+                  )}
 
-              {selectedRow.objectType === 'connector' && connectorData && (
-                <ConnectorRelationshipView
-                  data={connectorData}
-                  cardShadow={cardShadow}
-                  onSelectRow={onSelectRow}
-                />
-              )}
-            </motion.div>
-          </div>
-        )}
-      </Box>
-    )
-  }
+                  {selectedRow.objectType === 'connector' && connectorData && (
+                    <ConnectorInspector
+                      data={connectorData}
+                      cardShadow={cardShadow}
+                      onSelectRow={onSelectRow}
+                    />
+                  )}
+                </motion.div>
+              </div>
+            )}
+          </Box>
+        )
+      }
     </Box >
   )
 }

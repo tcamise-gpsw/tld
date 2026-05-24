@@ -302,7 +302,7 @@ interface ViewRelationshipData {
   childrenViews: ViewTreeNode[]
 }
 
-interface ViewRelationshipViewProps {
+interface ViewInspectorProps {
   data: ViewRelationshipData
   cardShadow: string
   onSelectRow: (key: string) => void
@@ -311,14 +311,14 @@ interface ViewRelationshipViewProps {
   views?: ViewTreeNode[]
 }
 
-export function ViewRelationshipView({
+export function ViewInspector({
   data,
   cardShadow,
   onSelectRow,
   connectors = [],
   placementByViewElement = {},
   views = [],
-}: ViewRelationshipViewProps) {
+}: ViewInspectorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
 

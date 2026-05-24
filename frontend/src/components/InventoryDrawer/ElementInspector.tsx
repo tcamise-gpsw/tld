@@ -6,7 +6,7 @@ import { chunkNodes, toCompactLevel } from './utils'
 import { RelationshipCard } from './RelationshipCard'
 import { ConnectionIndicator } from './ConnectionIndicator'
 
-interface ElementRelationshipViewProps {
+interface ElementInspectorProps {
   selectedElement: LibraryElement | null | undefined
   neighborGraph: NeighbourNode[]
   graphHeight: number
@@ -15,14 +15,14 @@ interface ElementRelationshipViewProps {
   onSelectRow: (key: string) => void
 }
 
-export function ElementRelationshipView({
+export function ElementInspector({
   selectedElement,
   neighborGraph,
   graphHeight,
   cardShadow,
   accent,
   onSelectRow,
-}: ElementRelationshipViewProps) {
+}: ElementInspectorProps) {
   const leftNodes = neighborGraph.filter((n) => n.position === 'left')
   const rightNodes = neighborGraph.filter((n) => n.position === 'right')
   const topNodes = neighborGraph.filter((n) => n.position === 'top')
