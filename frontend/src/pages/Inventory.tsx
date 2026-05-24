@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import {
   Badge,
   Box,
   Button,
-  Divider,
   Flex,
-  FormControl,
-  FormLabel,
   HStack,
   Input,
   InputGroup,
@@ -18,8 +15,6 @@ import {
   MenuList,
   Spinner,
   Tag,
-  TagCloseButton,
-  TagLabel,
   Text,
   VStack,
   Wrap,
@@ -29,8 +24,8 @@ import { ChevronDownIcon, SearchIcon } from '@chakra-ui/icons'
 import { api } from '../api/client'
 import ConnectorPanel from '../components/ConnectorPanel'
 import ElementPanel from '../components/ElementPanel'
-import TagUpsert from '../components/TagUpsert'
 import ViewPanel from '../components/ViewPanel'
+import RelationshipDrawer from '../components/RelationshipDrawer'
 import { useSetHeader } from '../components/HeaderContext'
 import { ViewEditorContext } from './ViewEditor/context'
 import type { Connector, LibraryElement, ViewTreeNode } from '../types'
@@ -73,16 +68,13 @@ function typeColor(type: InventoryObjectType) {
 
 export default function Inventory() {
   const setHeader = useSetHeader()
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
-  const [savingTags, setSavingTags] = useState(false)
   const [elements, setElements] = useState<LibraryElement[]>([])
   const [views, setViews] = useState<ViewTreeNode[]>([])
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [countsByView, setCountsByView] = useState<Record<number, { placements: number; connectors: number }>>({})
   const [availableTags, setAvailableTags] = useState<string[]>([])
-  const [draftTags, setDraftTags] = useState<string[]>([])
   const [editing, setEditing] = useState<InventoryRow | null>(null)
 
   const selectedType = parseInventoryType(searchParams.get('type'))
@@ -144,9 +136,7 @@ export default function Inventory() {
     return rows.find((row) => row.key === selectedObject) ?? filteredRows[0] ?? null
   }, [filteredRows, rows, selectedObject])
 
-  useEffect(() => {
-    setDraftTags(selectedRow?.tags ?? [])
-  }, [selectedRow?.key, selectedRow?.tags])
+
 
   const setParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(searchParams)
@@ -169,38 +159,18 @@ export default function Inventory() {
     setSearchParams(new URLSearchParams(selectedType === 'all' ? {} : { type: selectedType }), { replace: true })
   }
 
-  const saveTags = async () => {
-    if (!selectedRow) return
-    setSavingTags(true)
-    try {
-      if (selectedRow.objectType === 'element' && selectedRow.element) {
-        await api.elements.update(selectedRow.id, { ...selectedRow.element, tags: draftTags })
-      } else if (selectedRow.objectType === 'view' && selectedRow.view) {
-        await api.workspace.views.update(selectedRow.id, {
-          name: selectedRow.view.name,
-          description: selectedRow.view.description ?? '',
-          label: selectedRow.view.level_label ?? undefined,
-          tags: draftTags,
-        })
-      } else if (selectedRow.objectType === 'connector' && selectedRow.connector) {
-        await api.workspace.connectors.update(selectedRow.connector.view_id, selectedRow.id, { tags: draftTags })
-      }
-      await refresh()
-    } finally {
-      setSavingTags(false)
-    }
-  }
 
-  const editorContext = {
-    viewId: editing?.connector?.view_id ?? null,
+
+  const editorContext = useMemo(() => ({
+    viewId: editing?.connector?.view_id ?? selectedRow?.connector?.view_id ?? null,
     canEdit: true,
     isOwner: true,
     isFreePlan: false,
     snapToGrid: false,
     setSnapToGrid: () => undefined,
-    selectedElement: editing?.element ?? null,
-    selectedConnector: editing?.connector ?? null,
-  }
+    selectedElement: editing?.element ?? selectedRow?.element ?? null,
+    selectedConnector: editing?.connector ?? selectedRow?.connector ?? null,
+  }), [editing, selectedRow])
 
   const distinctTypeLabels = useMemo(() => {
     return Array.from(new Set(rows.map((row) => row.typeLabel).filter(Boolean))).sort((a, b) => a.localeCompare(b))
@@ -275,69 +245,112 @@ export default function Inventory() {
             </Box>
           </Box>
 
-          <Box flex={1} minW={0} overflow="auto">
-            {loading ? (
-              <Flex h="100%" align="center" justify="center"><Spinner size="xl" /></Flex>
-            ) : (
-              <Box minW="720px">
-                <Flex h="34px" px={4} align="center" borderBottom="1px solid" borderColor="whiteAlpha.100" color="gray.500" fontSize="10px" fontWeight="bold" textTransform="uppercase">
-                  <Box flex={1}>Name</Box>
-                  <Box w="210px">Tags</Box>
-                  <Box w="170px">Usage</Box>
-                  <Box w="90px">Updated</Box>
-                </Flex>
-                {filteredRows.map((row) => (
-                  <Flex
-                    data-testid="inventory-row"
-                    key={row.key}
-                    px={4}
-                    py={3}
-                    align="center"
-                    borderBottom="1px solid"
-                    borderColor="whiteAlpha.50"
-                    bg={selectedRow?.key === row.key ? 'rgba(var(--accent-rgb), 0.08)' : 'transparent'}
-                    cursor="pointer"
-                    _hover={{ bg: 'whiteAlpha.50' }}
-                    onClick={() => selectRow(row)}
-                  >
-                    <HStack flex={1} minW={0} spacing={3}>
-                      <Box w="4px" h="34px" borderRadius="full" bg={`${typeColor(row.objectType)}.300`} flexShrink={0} />
-                      <Box minW={0}>
-                        <HStack spacing={2}>
-                          <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>{row.name}</Text>
-                          <Badge size="sm" colorScheme={typeColor(row.objectType)}>{row.objectType}</Badge>
-                        </HStack>
-                        <Text fontSize="xs" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
-                      </Box>
-                    </HStack>
-                    <Box w="210px">
-                      {row.tags.slice(0, 3).map((tag) => <Tag key={tag} size="sm" mr={1} bg="whiteAlpha.100">{tag}</Tag>)}
-                      {row.tags.length === 0 && <Text fontSize="xs" color="gray.600">-</Text>}
-                    </Box>
-                    <Text w="170px" fontSize="xs" color="gray.400" noOfLines={1}>{row.usageLabel}</Text>
-                    <Text w="90px" fontSize="xs" color="gray.500">{formatUpdated(row.updatedAt)}</Text>
+          <Flex flex={1} minW={0} direction="column" overflow="hidden">
+            <Box flex={1} overflow="auto">
+              {loading ? (
+                <Flex h="100%" align="center" justify="center"><Spinner size="xl" /></Flex>
+              ) : (
+                <Box minW="720px">
+                  <Flex h="34px" px={4} align="center" borderBottom="1px solid" borderColor="whiteAlpha.100" color="gray.500" fontSize="10px" fontWeight="bold" textTransform="uppercase">
+                    <Box flex={1}>Name</Box>
+                    <Box w="210px">Tags</Box>
+                    <Box w="170px">Usage</Box>
+                    <Box w="90px">Updated</Box>
                   </Flex>
-                ))}
-              </Box>
-            )}
-          </Box>
-
-          <Box w={{ base: '0', xl: '340px' }} display={{ base: 'none', xl: 'block' }} borderLeft="1px solid" borderColor="whiteAlpha.100" overflowY="auto">
-            <Inspector
-              row={selectedRow}
-              draftTags={draftTags}
-              availableTags={availableTags}
-              savingTags={savingTags}
-              onDraftTagsChange={setDraftTags}
-              onSaveTags={saveTags}
-              onEdit={() => selectedRow && setEditing(selectedRow)}
-              onOpen={() => {
-                if (!selectedRow) return
-                if (selectedRow.objectType === 'view') navigate(`/views/${selectedRow.id}`)
-                else if (selectedRow.objectType === 'element') navigate(`/dependencies?element=${selectedRow.id}`)
-                else if (selectedRow.connector) navigate(`/views/${selectedRow.connector.view_id}`)
+                  {filteredRows.map((row) => (
+                    <Flex
+                      data-testid="inventory-row"
+                      key={row.key}
+                      px={4}
+                      py={3}
+                      align="center"
+                      borderBottom="1px solid"
+                      borderColor="whiteAlpha.50"
+                      bg={selectedRow?.key === row.key ? 'rgba(var(--accent-rgb), 0.08)' : 'transparent'}
+                      cursor="pointer"
+                      _hover={{ bg: 'whiteAlpha.50' }}
+                      onClick={() => selectRow(row)}
+                    >
+                      <HStack flex={1} minW={0} spacing={3}>
+                        <Box w="4px" h="34px" borderRadius="full" bg={`${typeColor(row.objectType)}.300`} flexShrink={0} />
+                        <Box minW={0}>
+                          <HStack spacing={2}>
+                            <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>{row.name}</Text>
+                            <Badge size="sm" colorScheme={typeColor(row.objectType)}>{row.objectType}</Badge>
+                          </HStack>
+                          <Text fontSize="xs" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
+                        </Box>
+                      </HStack>
+                      <Box w="210px">
+                        {row.tags.slice(0, 3).map((tag) => <Tag key={tag} size="sm" mr={1} bg="whiteAlpha.100">{tag}</Tag>)}
+                        {row.tags.length === 0 && <Text fontSize="xs" color="gray.600">-</Text>}
+                      </Box>
+                      <Text w="170px" fontSize="xs" color="gray.400" noOfLines={1}>{row.usageLabel}</Text>
+                      <Text w="90px" fontSize="xs" color="gray.500">{formatUpdated(row.updatedAt)}</Text>
+                    </Flex>
+                  ))}
+                </Box>
+              )}
+            </Box>
+            <RelationshipDrawer
+              selectedRow={selectedRow}
+              elements={elements}
+              views={views}
+              connectors={connectors}
+              onSelectRow={(key) => {
+                const found = rows.find((r) => r.key === key)
+                if (found) selectRow(found)
               }}
             />
+          </Flex>
+
+          <Box w={{ base: '0', xl: '340px' }} display={{ base: 'none', xl: 'block' }} borderLeft="1px solid" borderColor="whiteAlpha.100" overflow="hidden" position="relative">
+            {selectedRow?.objectType === 'view' && (
+              <ViewPanel
+                isOpen={true}
+                onClose={() => {}}
+                view={selectedRow.view ?? null}
+                canEdit
+                onSave={() => refresh()}
+                availableTags={availableTags}
+                hasBackdrop={false}
+                isInline={true}
+              />
+            )}
+            {selectedRow?.objectType === 'element' && (
+              <ElementPanel
+                isOpen={true}
+                onClose={() => {}}
+                element={selectedRow.element ?? null}
+                onSave={() => refresh()}
+                onDelete={() => { setParam('object', ''); void refresh() }}
+                onPermanentDelete={() => { setParam('object', ''); void refresh() }}
+                availableTags={availableTags}
+                orgId=""
+                hasBackdrop={false}
+                isInline={true}
+                autoSave
+              />
+            )}
+            {selectedRow?.objectType === 'connector' && (
+              <ConnectorPanel
+                isOpen={true}
+                onClose={() => {}}
+                connector={selectedRow.connector ?? null}
+                orgId=""
+                onSave={() => refresh()}
+                onDelete={() => { setParam('object', ''); void refresh() }}
+                availableTags={availableTags}
+                hasBackdrop={false}
+                isInline={true}
+                autoSave
+              />
+            )}
+            {!selectedRow && (
+              <Flex h="100%" align="center" justify="center" color="gray.600" fontSize="sm">
+                No object selected.
+              </Flex>
+            )}
           </Box>
         </Flex>
 
@@ -384,86 +397,4 @@ function FilterSection({ title, children }: { title: string; children: React.Rea
   )
 }
 
-function Inspector({
-  row,
-  draftTags,
-  availableTags,
-  savingTags,
-  onDraftTagsChange,
-  onSaveTags,
-  onEdit,
-  onOpen,
-}: {
-  row: InventoryRow | null
-  draftTags: string[]
-  availableTags: string[]
-  savingTags: boolean
-  onDraftTagsChange: (tags: string[]) => void
-  onSaveTags: () => void
-  onEdit: () => void
-  onOpen: () => void
-}) {
-  if (!row) {
-    return (
-      <Flex h="100%" align="center" justify="center" color="gray.600" fontSize="sm">No object selected.</Flex>
-    )
-  }
-  return (
-    <Box>
-      <Flex px={4} py={3} align="center" justify="space-between" borderBottom="1px solid" borderColor="whiteAlpha.100">
-        <Text fontSize="xs" color="gray.500" fontWeight="bold" textTransform="uppercase">Inspector</Text>
-        <Button size="xs" variant="elevated" onClick={onOpen}>Open</Button>
-      </Flex>
-      <VStack align="stretch" spacing={4} p={4}>
-        <HStack align="center" spacing={3}>
-          <Flex w="42px" h="42px" borderRadius="lg" align="center" justify="center" bg={`${typeColor(row.objectType)}.900`} color={`${typeColor(row.objectType)}.200`} fontWeight="bold">
-            {row.objectType.slice(0, 2).toUpperCase()}
-          </Flex>
-          <Box minW={0}>
-            <Text fontWeight="bold" noOfLines={2}>{row.name}</Text>
-            <Text fontSize="xs" color="gray.500">{row.subtitle}</Text>
-          </Box>
-        </HStack>
-        <Divider borderColor="whiteAlpha.100" />
-        <Info label="Type" value={row.typeLabel} />
-        <Info label="Usage" value={row.usageLabel} />
-        {row.viewName && <Info label="View" value={row.viewName} />}
-        {row.sourceName && <Info label="Source" value={row.sourceName} />}
-        {row.targetName && <Info label="Target" value={row.targetName} />}
-        <FormControl>
-          <FormLabel>Tags</FormLabel>
-          <TagUpsert
-            currentTags={draftTags}
-            availableTags={availableTags}
-            onAddTag={(tag) => {
-              if (!draftTags.includes(tag)) onDraftTagsChange([...draftTags, tag])
-            }}
-          />
-          <Wrap mt={3}>
-            {draftTags.map((tag) => (
-              <WrapItem key={tag}>
-                <Tag size="sm" variant="subtle" bg="whiteAlpha.100" border="1px solid" borderColor="whiteAlpha.200">
-                  <TagLabel color="white">{tag}</TagLabel>
-                  <TagCloseButton onClick={() => onDraftTagsChange(draftTags.filter((item) => item !== tag))} />
-                </Tag>
-              </WrapItem>
-            ))}
-          </Wrap>
-        </FormControl>
-        <HStack>
-          <Button size="sm" colorScheme="blue" onClick={onSaveTags} isLoading={savingTags}>Save tags</Button>
-          <Button size="sm" variant="elevated" onClick={onEdit}>Edit details</Button>
-        </HStack>
-      </VStack>
-    </Box>
-  )
-}
 
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <Flex gap={3} fontSize="sm">
-      <Text w="74px" color="gray.500">{label}</Text>
-      <Text flex={1} color="gray.100">{value || '-'}</Text>
-    </Flex>
-  )
-}

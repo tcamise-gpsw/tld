@@ -37,6 +37,7 @@ interface Props {
   onUnsupportedMutation?: () => void
   hasBackdrop?: boolean
   availableTags?: string[]
+  isInline?: boolean
 }
 
 /**
@@ -45,7 +46,7 @@ interface Props {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: View Properties, View Settings.
  */
-function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsupportedMutation, hasBackdrop = true, availableTags = [] }: Props) {
+function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsupportedMutation, hasBackdrop = true, availableTags = [], isInline = false }: Props) {
   const ctx = useContext(ViewEditorContext)
   const canEdit = canEditProp ?? ctx?.canEdit ?? true
   const isReadOnly = !canEdit
@@ -94,8 +95,8 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
   }
 
   return (
-    <SlidingPanel data-testid="view-panel" isOpen={isOpen} onClose={onClose} panelKey="view" side={isMobile ? 'left' : 'right'} width="320px" hasBackdrop={hasBackdrop}>
-      <PanelHeader title="View Details" onClose={onClose} />
+    <SlidingPanel data-testid="view-panel" isOpen={isOpen} onClose={onClose} panelKey="view" side={isMobile ? 'left' : 'right'} width="320px" hasBackdrop={hasBackdrop} isInline={isInline}>
+      <PanelHeader title="View Details" onClose={onClose} hasCloseButton={!isInline} isInline={isInline} />
 
       {/* Body */}
       <ScrollIndicatorWrapper px={4} py={4}>
@@ -176,9 +177,11 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
       {/* Footer */}
       <HStack px={4} py={3} justify="flex-end" flexShrink={0}>
         <HStack>
-          <Button data-testid="view-panel-cancel" variant="ghost" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
+          {!isInline && (
+            <Button data-testid="view-panel-cancel" variant="ghost" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+          )}
           {canEdit && (
             <Button
               data-testid="view-panel-save"

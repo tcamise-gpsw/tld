@@ -85,6 +85,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
   hasBackdrop?: boolean
   noFocusLock?: boolean
   availableTags?: string[]
+  isInline?: boolean
 }
 
 /**
@@ -93,7 +94,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: Connector Properties, Connector Details.
  */
-function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, noFocusLock, availableTags = [], connectorPanelAfterContentSlot }: ConnectorPanelProps) {
+function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, noFocusLock, availableTags = [], connectorPanelAfterContentSlot, isInline = false }: ConnectorPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isReadOnly = !canEdit
   const autoSaveEdit = autoSave && !!connector && !isReadOnly
@@ -278,8 +279,8 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
 
   return (
     <>
-      <SlidingPanel data-testid="connector-panel" isOpen={isOpen} onClose={handleClose} panelKey="connector" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop} noFocusLock={noFocusLock} autoFocus={true}>
-        <PanelHeader title="Edit Connector" onClose={handleClose} />
+      <SlidingPanel data-testid="connector-panel" isOpen={isOpen} onClose={handleClose} panelKey="connector" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop} noFocusLock={noFocusLock} autoFocus={true} isInline={isInline}>
+        <PanelHeader title="Edit Connector" onClose={handleClose} hasCloseButton={!isInline} isInline={isInline} />
 
         {/* Body */}
         <Box px={4} py={4} overflowY="auto" flex={1}>
@@ -490,9 +491,11 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
           <HStack>
             {!autoSaveEdit && (
               <>
-                <Button variant="ghost" size="sm" onClick={handleClose}>
-                  Cancel
-                </Button>
+                {!isInline && (
+                  <Button variant="ghost" size="sm" onClick={handleClose}>
+                    Cancel
+                  </Button>
+                )}
                 {canEdit && (
                   <Button size="sm" px={5} colorScheme="blue" onClick={handleSave} isLoading={loading}>
                     Save
@@ -500,7 +503,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
                 )}
               </>
             )}
-            {autoSaveEdit && (
+            {autoSaveEdit && !isInline && (
               <Button variant="ghost" size="sm" onClick={handleClose}>
                 Close
               </Button>
