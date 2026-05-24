@@ -83,6 +83,79 @@ func TestListTrackedFilesStopsAtLimit(t *testing.T) {
 	}
 }
 
+func TestFileBlobHashesIncludesTrackedFiles(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{
+		"a.go":             "package main\n",
+		"dir/file name.go": "package main\n",
+	})
+
+	hashes, err := FileBlobHashes(dir)
+	if err != nil {
+		t.Fatalf("FileBlobHashes: %v", err)
+	}
+	for _, path := range []string{"a.go", "dir/file name.go"} {
+		want, err := FileBlobHash(dir, path)
+		if err != nil {
+			t.Fatalf("FileBlobHash(%s): %v", path, err)
+		}
+		if hashes[path] != want {
+			t.Fatalf("hashes[%q] = %q, want %q", path, hashes[path], want)
+		}
+	}
+}
+
+func TestRecentChangedFilesReturnsNewestUniqueFilesWithoutDeleted(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{
+		"a.go": "package main\n",
+		"b.go": "package main\n",
+	})
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\nfunc A() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "a.go")
+	git("commit", "-m", "update a")
+	if err := os.WriteFile(filepath.Join(dir, "c.go"), []byte("package main\nfunc C() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "c.go")
+	git("commit", "-m", "add c")
+	if err := os.Remove(filepath.Join(dir, "b.go")); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "b.go")
+	git("commit", "-m", "delete b")
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\nfunc A2() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "a.go")
+	git("commit", "-m", "update a again")
+
+	got, err := RecentChangedFiles(dir, 3)
+	if err != nil {
+		t.Fatalf("RecentChangedFiles: %v", err)
+	}
+	want := []string{"a.go", "c.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("RecentChangedFiles = %+v, want %+v", got, want)
+	}
+}
+
 func TestEnsureDetachedWorktreeCreatesReusableCheckout(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir, map[string]string{"main.go": "package main\nfunc Main() {}\n"})

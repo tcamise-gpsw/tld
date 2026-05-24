@@ -49,7 +49,8 @@ test('creates edits connects tags reloads and exports a small diagram', async ({
   if (!path) throw new Error('Expected download path')
   const content = await readFile(path, 'utf8')
   expect(content).toContain(secondName)
-  expect(content).toMatch(/obj_\d+:[A-Z]+ -- [A-Z]+:obj_\d+/)
+  expect(content).toContain('flowchart LR')
+  expect(content).toMatch(/node_\d+ -- "full-flow" --> node_\d+/)
 })
 
 test('builds parent and child views and navigates through editor controls', async ({ page }) => {

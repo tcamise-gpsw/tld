@@ -1,5 +1,152 @@
 import { describe, it, expect } from 'vitest'
-import { parseMermaid } from './mermaid'
+import { extractMermaidCode, parseMermaid, parseMermaidAsync, serializeViewToMermaid, tryParseMermaid } from './mermaid'
+import type { Connector, PlacedElement } from '../../types'
+
+const compatibleMermaidFixtures = [
+  {
+    name: 'flowchart',
+    sourceUrl: 'https://mermaid.js.org/syntax/flowchart.html',
+    code: 'flowchart LR\n  Browser[Browser] --> API[API]\n  API --> DB[(Database)]',
+    elements: 3,
+    connectors: 2,
+  },
+  {
+    name: 'C4 context',
+    sourceUrl: 'https://mermaid.js.org/syntax/c4.html',
+    code: `C4Context
+  Person(customer, "Customer", "Uses online banking")
+  System(app, "Banking App", "Serves account data")
+  System_Ext(email, "Email System", "Sends notifications")
+  Rel(customer, app, "Uses")
+  Rel(app, email, "Sends email")`,
+    elements: 3,
+    connectors: 2,
+  },
+  {
+    name: 'sequence',
+    sourceUrl: 'https://mermaid.js.org/syntax/sequenceDiagram.html',
+    code: 'sequenceDiagram\n  Alice->>John: Hello John\n  John-->>Alice: Great',
+    elements: 2,
+    connectors: 2,
+  },
+  {
+    name: 'class',
+    sourceUrl: 'https://mermaid.js.org/syntax/classDiagram.html',
+    code: 'classDiagram\n  Animal <|-- Duck\n  Animal : +int age\n  Duck : +quack()',
+    elements: 2,
+    connectors: 1,
+  },
+  {
+    name: 'entity relationship',
+    sourceUrl: 'https://mermaid.js.org/syntax/entityRelationshipDiagram.html',
+    code: 'erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  ORDER ||--|{ LINE_ITEM : contains',
+    elements: 3,
+    connectors: 2,
+  },
+  {
+    name: 'state',
+    sourceUrl: 'https://mermaid.js.org/syntax/stateDiagram.html',
+    code: 'stateDiagram-v2\n  [*] --> Still\n  Still --> Moving\n  Moving --> Crash',
+    elements: 4,
+    connectors: 3,
+  },
+  {
+    name: 'requirement',
+    sourceUrl: 'https://mermaid.js.org/syntax/requirementDiagram.html',
+    code: `requirementDiagram
+  requirement checkout_req {
+    id: 1
+    text: checkout must be reliable
+    risk: high
+    verifymethod: test
+  }
+  element checkout_service {
+    type: service
+    docref: checkout.md
+  }
+  checkout_service - satisfies -> checkout_req`,
+    elements: 2,
+    connectors: 1,
+  },
+  {
+    name: 'sankey',
+    sourceUrl: 'https://mermaid.js.org/syntax/sankey.html',
+    code: 'sankey-beta\n  API,Worker,10\n  Worker,Database,7',
+    elements: 3,
+    connectors: 2,
+  },
+  {
+    name: 'pie',
+    sourceUrl: 'https://mermaid.js.org/syntax/pie.html',
+    code: 'pie title Runtime usage\n  "API" : 386\n  "Worker" : 85',
+    elements: 3,
+    connectors: 2,
+  },
+  {
+    name: 'git graph',
+    sourceUrl: 'https://mermaid.js.org/syntax/gitgraph.html',
+    code: 'gitGraph\n  commit id:"start"\n  branch develop\n  checkout develop\n  commit id:"work"\n  checkout main\n  merge develop',
+    elements: 5,
+    connectors: 4,
+  },
+  {
+    name: 'quadrant',
+    sourceUrl: 'https://mermaid.js.org/syntax/quadrantChart.html',
+    code: `quadrantChart
+  title Campaign reach
+  x-axis Low Reach --> High Reach
+  y-axis Low Engagement --> High Engagement
+  Campaign A: [0.3, 0.6]
+  Campaign B: [0.78, 0.34]`,
+    elements: 3,
+    connectors: 2,
+  },
+  {
+    name: 'mindmap',
+    sourceUrl: 'https://mermaid.js.org/syntax/mindmap.html',
+    code: 'mindmap\n  root((Architecture))\n    API\n      REST\n    Data\n      PostgreSQL',
+    elements: 5,
+    connectors: 4,
+  },
+  {
+    name: 'journey',
+    sourceUrl: 'https://mermaid.js.org/syntax/userJourney.html',
+    code: 'journey\n  title Developer workflow\n  section Code\n    Write tests: 5: Dev\n    Review diff: 4: Dev',
+    elements: 4,
+    connectors: 3,
+  },
+  {
+    name: 'gantt',
+    sourceUrl: 'https://mermaid.js.org/syntax/gantt.html',
+    code: 'gantt\n  title Release plan\n  dateFormat YYYY-MM-DD\n  section Build\n  Implement import :a1, 2026-01-01, 3d',
+    elements: 3,
+    connectors: 2,
+  },
+  {
+    name: 'timeline',
+    sourceUrl: 'https://mermaid.js.org/syntax/timeline.html',
+    code: 'timeline\n  title Release history\n  2025 : Prototype\n  2026 : Stable release',
+    elements: 5,
+    connectors: 4,
+  },
+  {
+    name: 'xy chart',
+    sourceUrl: 'https://mermaid.js.org/syntax/xyChart.html',
+    code: 'xychart-beta\n  title "Requests"\n  x-axis [Jan, Feb]\n  y-axis "Count" 0 --> 100\n  bar [40, 70]',
+    elements: 4,
+    connectors: 3,
+  },
+  {
+    name: 'architecture',
+    sourceUrl: 'https://mermaid.js.org/syntax/architecture.html',
+    code: `architecture-beta
+  service database1(database)[My Database]
+  service server(server)[Server]
+  database1:R --> L:server`,
+    elements: 2,
+    connectors: 1,
+  },
+] as const
 
 describe('Mermaid Importer Compliance', () => {
   it('should parse a simple left-right graph (Example 1)', () => {
@@ -34,6 +181,7 @@ flowchart LR
     const result = parseMermaid(code)
     expect(result.elements.length).toBe(6)
     expect(result.connectors.length).toBe(6)
+    expect(result.direction).toBe('LR')
     
     const chapter1 = result.elements.find(o => o.ref === 'a')
     expect(chapter1?.name).toBe('Chapter 1')
@@ -75,6 +223,7 @@ C-->D;
 `
     const result = parseMermaid(code)
     expect(result.connectors.length).toBe(4)
+    expect(result.direction).toBe('TD')
   })
 
   it('should parse a binary tree (Example 5)', () => {
@@ -137,5 +286,84 @@ E--No-->C
     const ids = result.elements.map(o => o.ref)
     expect(result.elements.length, `IDs found: ${ids.join(', ')}`).toBe(6)
     expect(result.connectors.length).toBe(8)
+  })
+
+  it('extracts Mermaid from raw and fenced markdown', () => {
+    expect(extractMermaidCode('flowchart LR\n  A --> B')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('architecture-beta\n  service a(server)[A]')).toBe('architecture-beta\n  service a(server)[A]')
+    expect(extractMermaidCode('Before\n\n```mermaid\nflowchart TB\n  A --> B\n```\nAfter')).toBe('flowchart TB\n  A --> B')
+    expect(extractMermaidCode('Before\n\n```mmd\nflowchart LR\n  A --> B\n```')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('```mermaid   \nflowchart LR\n  A --> B\n```')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('```mermaid\r\nflowchart LR\n  A --> B\r\n```')).toBe('flowchart LR\n  A --> B')
+    expect(extractMermaidCode('```mmd' + '\n '.repeat(5000))).toBeNull()
+    expect(extractMermaidCode('not a diagram')).toBeNull()
+  })
+
+  it('returns null for non-Mermaid clipboard text', () => {
+    expect(tryParseMermaid('ordinary text')).toBeNull()
+  })
+
+  it('serializes a view to round-trippable flowchart Mermaid', () => {
+    const elements = [
+      { element_id: 2, name: 'Worker "A"', view_id: 1, id: 1, position_x: 0, position_y: 0, kind: 'service', description: null, technology: null, url: null, logo_url: null, technology_connectors: [], tags: [], has_view: false, view_label: null },
+      { element_id: 3, name: 'Database', view_id: 1, id: 2, position_x: 0, position_y: 0, kind: 'database', description: null, technology: null, url: null, logo_url: null, technology_connectors: [], tags: [], has_view: false, view_label: null },
+    ] satisfies PlacedElement[]
+    const connectors = [
+      { id: 9, view_id: 1, source_element_id: 2, target_element_id: 3, label: 'writes to', description: null, relationship: null, direction: 'forward', style: 'bezier', url: null, source_handle: null, target_handle: null, created_at: '', updated_at: '' },
+    ] satisfies Connector[]
+
+    const code = serializeViewToMermaid(elements, connectors)
+    expect(code).toContain('flowchart LR')
+    expect(code).toContain('node_2["Worker \\"A\\""]')
+    expect(code).toContain('node_2 -- "writes to" --> node_3')
+
+    const parsed = parseMermaid(code)
+    expect(parsed.warnings).toHaveLength(0)
+    expect(parsed.elements).toHaveLength(2)
+    expect(parsed.connectors).toHaveLength(1)
+  })
+
+  it('converts architecture-beta services, junctions, and side-qualified edges', async () => {
+    const code = `architecture-beta
+    service left_disk(disk)[Disk]
+    service top_disk(disk)[Disk]
+    service bottom_disk(disk)[Disk]
+    service top_gateway(internet)[Gateway]
+    service bottom_gateway(internet)[Gateway]
+    junction junctionCenter
+    junction junctionRight
+
+    left_disk:R -- L:junctionCenter
+    top_disk:B -- T:junctionCenter
+    bottom_disk:T -- B:junctionCenter
+    junctionCenter:R -- L:junctionRight
+    top_gateway:B -- T:junctionRight
+    bottom_gateway:T -- B:junctionRight`
+
+    const result = await parseMermaidAsync(code)
+
+    expect(result.warnings).toHaveLength(0)
+    expect(result.elements).toHaveLength(7)
+    expect(result.connectors).toHaveLength(6)
+    expect(result.elements.filter((element) => element.name === 'Disk')).toHaveLength(3)
+    expect(result.elements.filter((element) => element.name === 'Gateway')).toHaveLength(2)
+    expect(result.elements.find((element) => element.ref === 'junctionCenter')?.name).toBe('junctionCenter')
+    expect(result.elements.find((element) => element.ref === 'left_disk')?.kind).toBe('database')
+    expect(result.elements.find((element) => element.ref === 'top_gateway')?.kind).toBe('external')
+
+    const firstConnector = result.connectors.find((connector) => connector.sourceElementRef === 'left_disk')
+    expect(firstConnector?.targetElementRef).toBe('junctionCenter')
+    expect(firstConnector?.direction).toBe('none')
+    expect(firstConnector?.sourceHandle).toBe('right')
+    expect(firstConnector?.targetHandle).toBe('left')
+  })
+
+  it.each(compatibleMermaidFixtures)('converts compatible $name fixture from $sourceUrl', async (fixture) => {
+    const result = await parseMermaidAsync(fixture.code)
+
+    expect(result.warnings, fixture.name).toHaveLength(0)
+    expect(result.elements.length, fixture.name).toBeGreaterThanOrEqual(fixture.elements)
+    expect(result.connectors.length, fixture.name).toBeGreaterThanOrEqual(fixture.connectors)
+    expect(result.elements.every((element) => element.placements.some((placement) => placement.parentRef === 'root'))).toBe(true)
   })
 })

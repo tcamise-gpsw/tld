@@ -2,13 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import type { BBox, DiagramGroupLayout, LayoutNode, ZUIViewState, HoveredItem } from './types'
-import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY } from './renderer'
+import { getExpandThresholds, screenToWorldX, screenToWorldY, viewOriginX, viewOriginY, worldToScreenX, worldToScreenY } from './layoutEngine'
 import { hitTestZUIRenderedNode, warmZUIHitTestIndexes } from './hitTest'
-import {
-  DEFAULT_SOURCE_HANDLE_SIDE,
-  DEFAULT_TARGET_HANDLE_SIDE,
-  getHandleFlowPosition,
-} from '../../utils/edgeDistribution'
+import { buildEdgeSpatialIndex, findHoveredEdge, type EdgeSpatialIndex } from './edgeHover'
 
 export function constrainViewState(view: ZUIViewState, canvasW: number, canvasH: number, bbox: BBox): ZUIViewState {
   const padding = Math.min(600, canvasW * 0.45, canvasH * 0.45)
@@ -43,8 +39,6 @@ function normalizeViewState(view: ZUIViewState, canvasW: number, canvasH: number
   }
 }
 
-type EdgeRoutePoint = { x: number; y: number }
-
 function findHoveredGroup(worldX: number, worldY: number, groups: DiagramGroupLayout[], view: ZUIViewState): DiagramGroupLayout | null {
   for (const group of groups) {
     // Check if mouse is near the diagram label (placed above the main diagram box)
@@ -63,342 +57,65 @@ function findHoveredGroup(worldX: number, worldY: number, groups: DiagramGroupLa
   return null
 }
 
-type IndexedEdge =
-  | {
-    kind: 'edge'
-    x1: number
-    y1: number
-    x2: number
-    y2: number
-    midX: number
-    midY: number
-    points: EdgeRoutePoint[]
-    sourceLabel: string
-    targetLabel: string
-    label: string
-    id: number
-    diagramId: number
-    sourceObjId: number
-    targetObjId: number
-  }
-  | {
-    kind: 'portal'
-    x1: number
-    y1: number
-    x2: number
-    y2: number
-    midX: number
-    midY: number
-    points: EdgeRoutePoint[]
-    sourceLabel: string
-    targetLabel: string
-    diagramId: number
-    targetDiagId?: number
-  }
-
-interface EdgeSpatialIndex {
-  cellSize: number
-  cells: Map<string, IndexedEdge[]>
-}
-
-const EDGE_INDEX_CELL_SIZE = 360
-
-function cellKey(cx: number, cy: number): string {
-  return `${cx},${cy}`
-}
-
-function addEdgeToSpatialIndex(index: EdgeSpatialIndex, edge: IndexedEdge): void {
-  const points = edge.points.length > 0 ? edge.points : [{ x: edge.x1, y: edge.y1 }, { x: edge.x2, y: edge.y2 }]
-  const minX = Math.min(...points.map((point) => point.x))
-  const maxX = Math.max(...points.map((point) => point.x))
-  const minY = Math.min(...points.map((point) => point.y))
-  const maxY = Math.max(...points.map((point) => point.y))
-  const startX = Math.floor(minX / index.cellSize)
-  const endX = Math.floor(maxX / index.cellSize)
-  const startY = Math.floor(minY / index.cellSize)
-  const endY = Math.floor(maxY / index.cellSize)
-
-  for (let cx = startX; cx <= endX; cx++) {
-    for (let cy = startY; cy <= endY; cy++) {
-      const key = cellKey(cx, cy)
-      let bucket = index.cells.get(key)
-      if (!bucket) {
-        bucket = []
-        index.cells.set(key, bucket)
-      }
-      bucket.push(edge)
-    }
-  }
-}
-
-function normalizeEdgeRouteType(type: string | null | undefined): 'bezier' | 'straight' | 'step' | 'smoothstep' {
-  if (type === 'straight' || type === 'step' || type === 'smoothstep') return type
-  return 'bezier'
-}
-
-function cubicBezierPoint(
-  p0: EdgeRoutePoint,
-  p1: EdgeRoutePoint,
-  p2: EdgeRoutePoint,
-  p3: EdgeRoutePoint,
-  t: number,
-): EdgeRoutePoint {
-  const mt = 1 - t
-  const mt2 = mt * mt
-  const t2 = t * t
-  return {
-    x: mt2 * mt * p0.x + 3 * mt2 * t * p1.x + 3 * mt * t2 * p2.x + t2 * t * p3.x,
-    y: mt2 * mt * p0.y + 3 * mt2 * t * p1.y + 3 * mt * t2 * p2.y + t2 * t * p3.y,
-  }
-}
-
-function buildEdgeRoutePoints(
-  source: LayoutNode,
-  target: LayoutNode,
-  edge: DiagramGroupLayout['edges'][number],
-): { points: EdgeRoutePoint[]; midX: number; midY: number } {
-  const sourcePoint = getHandleFlowPosition(
-    source.worldX,
-    source.worldY,
-    source.worldW,
-    source.worldH,
-    edge.sourceHandle,
-    DEFAULT_SOURCE_HANDLE_SIDE,
-  )
-  const targetPoint = getHandleFlowPosition(
-    target.worldX,
-    target.worldY,
-    target.worldW,
-    target.worldH,
-    edge.targetHandle,
-    DEFAULT_TARGET_HANDLE_SIDE,
-  )
-  const type = normalizeEdgeRouteType(edge.type)
-
-  if (type === 'bezier') {
-    const dx = Math.abs(targetPoint.x - sourcePoint.x)
-    const dy = Math.abs(targetPoint.y - sourcePoint.y)
-    const sourceStem = Math.max(
-      (sourcePoint.side === 'left' || sourcePoint.side === 'right' ? dx : dy) * 0.5,
-      (sourcePoint.side === 'left' || sourcePoint.side === 'right' ? source.worldW : source.worldH) * 0.5,
-    )
-    const targetStem = Math.max(
-      (targetPoint.side === 'left' || targetPoint.side === 'right' ? dx : dy) * 0.5,
-      (targetPoint.side === 'left' || targetPoint.side === 'right' ? target.worldW : target.worldH) * 0.5,
-    )
-    const cp1 = {
-      x: sourcePoint.x + (sourcePoint.side === 'left' ? -sourceStem : sourcePoint.side === 'right' ? sourceStem : 0),
-      y: sourcePoint.y + (sourcePoint.side === 'top' ? -sourceStem : sourcePoint.side === 'bottom' ? sourceStem : 0),
-    }
-    const cp2 = {
-      x: targetPoint.x + (targetPoint.side === 'left' ? -targetStem : targetPoint.side === 'right' ? targetStem : 0),
-      y: targetPoint.y + (targetPoint.side === 'top' ? -targetStem : targetPoint.side === 'bottom' ? targetStem : 0),
-    }
-    const p0 = { x: sourcePoint.x, y: sourcePoint.y }
-    const p3 = { x: targetPoint.x, y: targetPoint.y }
-    const points = Array.from({ length: 17 }, (_, index) => cubicBezierPoint(p0, cp1, cp2, p3, index / 16))
-    const mid = cubicBezierPoint(p0, cp1, cp2, p3, 0.5)
-    return { points, midX: mid.x, midY: mid.y }
-  }
-
-  if (type === 'step' || type === 'smoothstep') {
-    const midX = (sourcePoint.x + targetPoint.x) / 2
-    const midY = (sourcePoint.y + targetPoint.y) / 2
-    const sourceOrth = sourcePoint.side === 'left' || sourcePoint.side === 'right' ? 'h' : 'v'
-    const targetOrth = targetPoint.side === 'left' || targetPoint.side === 'right' ? 'h' : 'v'
-    const points: EdgeRoutePoint[] = [{ x: sourcePoint.x, y: sourcePoint.y }]
-
-    if (sourceOrth === 'h' && targetOrth === 'h') {
-      points.push({ x: midX, y: sourcePoint.y }, { x: midX, y: targetPoint.y })
-    } else if (sourceOrth === 'v' && targetOrth === 'v') {
-      points.push({ x: sourcePoint.x, y: midY }, { x: targetPoint.x, y: midY })
-    } else if (sourceOrth === 'h' && targetOrth === 'v') {
-      points.push({ x: targetPoint.x, y: sourcePoint.y })
-    } else {
-      points.push({ x: sourcePoint.x, y: targetPoint.y })
-    }
-    points.push({ x: targetPoint.x, y: targetPoint.y })
-    const midIndex = Math.floor((points.length - 1) / 2)
-    return {
-      points,
-      midX: (points[midIndex].x + points[midIndex + 1].x) / 2,
-      midY: (points[midIndex].y + points[midIndex + 1].y) / 2,
-    }
-  }
-
-  const points = [{ x: sourcePoint.x, y: sourcePoint.y }, { x: targetPoint.x, y: targetPoint.y }]
-  return {
-    points,
-    midX: (sourcePoint.x + targetPoint.x) / 2,
-    midY: (sourcePoint.y + targetPoint.y) / 2,
-  }
-}
-
-function nearestDistanceSquaredToRoute(worldX: number, worldY: number, points: EdgeRoutePoint[]): number {
-  let best = Number.POSITIVE_INFINITY
-  for (let index = 1; index < points.length; index++) {
-    const start = points[index - 1]
-    const end = points[index]
-    const dx = end.x - start.x
-    const dy = end.y - start.y
-    const lengthSquared = dx * dx + dy * dy
-    if (lengthSquared === 0) continue
-
-    let t = ((worldX - start.x) * dx + (worldY - start.y) * dy) / lengthSquared
-    t = Math.max(0, Math.min(1, t))
-    const nearestX = start.x + t * dx
-    const nearestY = start.y + t * dy
-    best = Math.min(best, (worldX - nearestX) ** 2 + (worldY - nearestY) ** 2)
-  }
-  return best
-}
-
-function buildEdgeSpatialIndex(groups: DiagramGroupLayout[]): EdgeSpatialIndex {
-  const index: EdgeSpatialIndex = { cellSize: EDGE_INDEX_CELL_SIZE, cells: new Map() }
-
-  for (const group of groups) {
-    const nodeMap = new Map<string, LayoutNode>()
-    for (const node of group.nodes) {
-      nodeMap.set(node.id, node)
-    }
-
-    for (const edge of group.edges) {
-      const source = nodeMap.get(edge.sourceId)
-      const target = nodeMap.get(edge.targetId)
-      if (!source || !target) continue
-
-      const route = buildEdgeRoutePoints(source, target, edge)
-      const first = route.points[0]
-      const last = route.points[route.points.length - 1]
-      addEdgeToSpatialIndex(index, {
-        kind: 'edge',
-        x1: first.x,
-        y1: first.y,
-        x2: last.x,
-        y2: last.y,
-        midX: route.midX,
-        midY: route.midY,
-        points: route.points,
-        sourceLabel: source.label,
-        targetLabel: target.label,
-        label: edge.label || 'Connection',
-        id: edge.id,
-        diagramId: group.diagramId,
-        sourceObjId: source.elementId,
-        targetObjId: target.elementId,
-      })
-    }
-
-    for (const node of group.nodes) {
-      if (!node.isPortal) continue
-      const x1 = group.worldX + group.diagramX + group.diagramW / 2
-      const y1 = group.worldY + group.diagramY + group.diagramH
-      const x2 = node.worldX + node.worldW / 2
-      const y2 = node.worldY
-      addEdgeToSpatialIndex(index, {
-        kind: 'portal',
-        x1,
-        y1,
-        x2,
-        y2,
-        midX: (x1 + x2) / 2,
-        midY: (y1 + y2) / 2,
-        points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
-        sourceLabel: group.label,
-        targetLabel: node.label,
-        diagramId: group.diagramId,
-        targetDiagId: node.linkedDiagramId,
-      })
-    }
-  }
-
-  return index
-}
-
-function findHoveredEdge(
-  worldX: number,
-  worldY: number,
-  index: EdgeSpatialIndex,
-  view: ZUIViewState
-): HoveredItem | null {
-  const threshold = 18 / view.zoom // 18 screen pixels converted to world distance
-  const startX = Math.floor((worldX - threshold) / index.cellSize)
-  const endX = Math.floor((worldX + threshold) / index.cellSize)
-  const startY = Math.floor((worldY - threshold) / index.cellSize)
-  const endY = Math.floor((worldY + threshold) / index.cellSize)
-  const thresholdSquared = threshold * threshold
-  let bestEdge: IndexedEdge | null = null
-  let bestDistSquared = thresholdSquared
-
-  for (let cx = startX; cx <= endX; cx++) {
-    for (let cy = startY; cy <= endY; cy++) {
-      const bucket = index.cells.get(cellKey(cx, cy))
-      if (!bucket) continue
-
-      for (const edge of bucket) {
-        const distSquared = nearestDistanceSquaredToRoute(worldX, worldY, edge.points)
-        if (distSquared < bestDistSquared) {
-          bestDistSquared = distSquared
-          bestEdge = edge
-        }
-      }
-    }
-  }
-
-  if (!bestEdge) return null
-  if (bestEdge.kind === 'portal') {
-    return {
-      type: 'edge',
-      data: {
-        sourceId: bestEdge.sourceLabel,
-        targetId: bestEdge.targetLabel,
-        label: '',
-        diagramId: bestEdge.diagramId,
-        targetDiagId: bestEdge.targetDiagId,
-        isPortalConn: true
-      },
-      absX: bestEdge.midX,
-      absY: bestEdge.midY
-    }
-  }
-
-  return {
-    type: 'edge',
-    data: {
-      sourceId: bestEdge.sourceLabel,
-      targetId: bestEdge.targetLabel,
-      label: bestEdge.label,
-      id: bestEdge.id,
-      diagramId: bestEdge.diagramId,
-      sourceObjId: bestEdge.sourceObjId,
-      targetObjId: bestEdge.targetObjId
-    },
-    absX: bestEdge.midX,
-    absY: bestEdge.midY
-  }
-}
-
-export function calculateMaxZoom(groups: DiagramGroupLayout[], canvasW: number): number {
+export function calculateMaxZoom(groups: DiagramGroupLayout[], canvasW: number, view?: ZUIViewState, canvasH?: number): number {
   if (canvasW <= 0) return 40
+  const cH = canvasH ?? canvasW
   const thresholds = getExpandThresholds(canvasW)
   let maxPossibleZoom = 40
 
-  function visitNodes(nodes: LayoutNode[], cumulativeScale: number) {
+  let hasVisibleExpandable = !view
+  let anyVisible = !view
+  let minVisibleAbsW = Infinity
+
+  function visitNodes(nodes: LayoutNode[], cumulativeScale: number,
+    parentAbsX: number, parentAbsY: number,
+    parentChildOffsetX: number, parentChildOffsetY: number,
+  ) {
     for (const node of nodes) {
+      const absW = node.worldW * cumulativeScale
+
       if (!node.children || node.children.length === 0) {
-        // This is a leaf node. We want it to be able to fill 'thresholds.end' of the canvas.
-        const neededZoom = thresholds.end / (node.worldW * cumulativeScale)
+        const neededZoom = thresholds.end / absW
         if (neededZoom > maxPossibleZoom) {
           maxPossibleZoom = neededZoom
         }
       } else {
-        visitNodes(node.children, cumulativeScale * node.childScale)
+        visitNodes(node.children, cumulativeScale * (node.childScale > 0 ? node.childScale : 1),
+          parentAbsX + (node.worldX - parentChildOffsetX) * cumulativeScale,
+          parentAbsY + (node.worldY - parentChildOffsetY) * cumulativeScale,
+          node.childOffsetX, node.childOffsetY)
+      }
+
+      if (view) {
+        const absX = parentAbsX + (node.worldX - parentChildOffsetX) * cumulativeScale
+        const absY = parentAbsY + (node.worldY - parentChildOffsetY) * cumulativeScale
+        const sx = worldToScreenX(absX, view)
+        const sy = worldToScreenY(absY, view)
+        const sw = absW * view.zoom
+        const sh = node.worldH * cumulativeScale * view.zoom
+        if (sx + sw > 0 && sy + sh > 0 && sx < canvasW && sy < cH) {
+          anyVisible = true
+          if (absW < minVisibleAbsW) minVisibleAbsW = absW
+          if (node.children && node.children.length > 0 && sw < thresholds.end) {
+            hasVisibleExpandable = true
+          }
+        }
       }
     }
   }
 
   for (const group of groups) {
-    visitNodes(group.nodes, 1)
+    visitNodes(group.nodes, 1, 0, 0, 0, 0)
+  }
+
+  if (view) {
+    if (!anyVisible) {
+      return view.zoom
+    }
+    if (!hasVisibleExpandable && minVisibleAbsW < Infinity) {
+      const capZoom = thresholds.end / minVisibleAbsW
+      return Math.min(maxPossibleZoom, capZoom)
+    }
   }
 
   return maxPossibleZoom
@@ -473,6 +190,7 @@ export function useZUIInteraction(
   isMobile: boolean = false,
   resolveHoveredProxyItem?: (worldX: number, worldY: number, view: ZUIViewState, canvasW: number) => HoveredItem | null,
   hiddenTags: string[] = [],
+  canvasWidth: number = 0,
 ): ZUIInteraction {
   const [viewState, setViewStateInternal] = useState<ZUIViewState>(initialView)
   const [hoveredItem, setHoveredItemInternal] = useState<HoveredItem | null>(null)
@@ -540,45 +258,81 @@ export function useZUIInteraction(
     hiddenTagsRef.current = new Set(hiddenTags)
   }, [hiddenTags])
 
-  const [lastCanvasW, setLastCanvasW] = useState(0)
-
   const dynamicMaxZoom = useMemo(() => {
-    return calculateMaxZoom(groups, lastCanvasW || 1200) // Fallback width for initial calc
-  }, [groups, lastCanvasW])
+    return calculateMaxZoom(groups, canvasWidth || 1200, viewState) // Fallback width for initial calc
+  }, [groups, canvasWidth, viewState])
 
   const maxZoomRef = useRef(40)
+  const pendingViewStateRef = useRef<ZUIViewState | null>(null)
+  const queuedViewStateRafRef = useRef<number | null>(null)
   useEffect(() => {
     maxZoomRef.current = dynamicMaxZoom
   }, [dynamicMaxZoom])
 
+  const resolveViewState = useCallback((
+    update: React.SetStateAction<ZUIViewState>,
+    baseView: ZUIViewState,
+  ): ZUIViewState => {
+    const next = typeof update === 'function' ? (update as (p: ZUIViewState) => ZUIViewState)(baseView) : update
+    const box = bboxRef.current
+    if (!box || !canvasRef.current) {
+      return next
+    }
+
+    const el = canvasRef.current
+    const w = el.clientWidth || el.width / (window.devicePixelRatio || 1)
+    const h = el.clientHeight || el.height / (window.devicePixelRatio || 1)
+
+    if (w === 0 || h === 0) {
+      return next
+    }
+
+    return constrainViewState(next, w, h, box)
+  }, [canvasRef])
+
+  const flushQueuedViewState = useCallback(() => {
+    queuedViewStateRafRef.current = null
+    const next = pendingViewStateRef.current
+    pendingViewStateRef.current = null
+    if (!next) return
+
+    viewStateRef.current = next
+    setViewStateInternal(next)
+  }, [])
+
   const setViewState = useCallback(
     (update: React.SetStateAction<ZUIViewState>) => {
-      setViewStateInternal((prev) => {
-        const next = typeof update === 'function' ? (update as (p: ZUIViewState) => ZUIViewState)(prev) : update
-        const box = bboxRef.current
-        if (!box || !canvasRef.current) {
-          viewStateRef.current = next
-          return next
-        }
-        const el = canvasRef.current
-        const w = el.clientWidth || el.width / (window.devicePixelRatio || 1)
-        const h = el.clientHeight || el.height / (window.devicePixelRatio || 1)
+      if (queuedViewStateRafRef.current !== null) {
+        cancelAnimationFrame(queuedViewStateRafRef.current)
+        queuedViewStateRafRef.current = null
+      }
 
-        if (w !== lastCanvasW && w > 0) {
-          setLastCanvasW(w)
-        }
-
-        if (w === 0 || h === 0) {
-          viewStateRef.current = next
-          return next
-        }
-        const constrained = constrainViewState(next, w, h, box)
-        viewStateRef.current = constrained
-        return constrained
-      })
+      const baseView = pendingViewStateRef.current ?? viewStateRef.current
+      const next = resolveViewState(update, baseView)
+      pendingViewStateRef.current = null
+      viewStateRef.current = next
+      setViewStateInternal(next)
     },
-    [canvasRef, lastCanvasW],
+    [resolveViewState],
   )
+
+  const scheduleViewState = useCallback((update: React.SetStateAction<ZUIViewState>) => {
+    const baseView = pendingViewStateRef.current ?? viewStateRef.current
+    const next = resolveViewState(update, baseView)
+    pendingViewStateRef.current = next
+    viewStateRef.current = next
+
+    if (queuedViewStateRafRef.current !== null) return
+    queuedViewStateRafRef.current = requestAnimationFrame(flushQueuedViewState)
+  }, [flushQueuedViewState, resolveViewState])
+
+  useEffect(() => {
+    return () => {
+      if (queuedViewStateRafRef.current !== null) {
+        cancelAnimationFrame(queuedViewStateRafRef.current)
+      }
+    }
+  }, [])
 
   const dragging = useRef(false)
   const lastMouse = useRef({ x: 0, y: 0 })
@@ -592,9 +346,6 @@ export function useZUIInteraction(
       bbox: { minX: number; minY: number; maxX: number; maxY: number },
       padding = 0.1,
     ) => {
-      if (canvasW !== lastCanvasW && canvasW > 0) {
-        setLastCanvasW(canvasW)
-      }
       const bboxW = bbox.maxX - bbox.minX
       const bboxH = bbox.maxY - bbox.minY
       if (bboxW <= 0 || bboxH <= 0) return
@@ -610,7 +361,7 @@ export function useZUIInteraction(
       const y = (canvasH - bboxH * zoom) / 2 - bbox.minY * zoom
       setViewState({ x, y, zoom })
     },
-    [setViewState, lastCanvasW],
+    [setViewState],
   )
 
   const lastPanTimeRef = useRef(0)
@@ -667,13 +418,13 @@ export function useZUIInteraction(
         let factor = 1 - e.deltaY * (isRealMouseWheel ? 0.002 : 0.01)
         factor = Math.max(0.85, Math.min(1.15, factor))
 
-        setViewState((prev) => {
+        scheduleViewState((prev) => {
           return zoomAround(prev, focalX, focalY, factor, maxZoomRef.current)
         })
         onZoomRef.current?.()
       } else if (!isMobile) {
         // Trackpad panning - disabled on mobile to avoid interference with pinch-to-zoom
-        setViewState((prev) => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }))
+        scheduleViewState((prev) => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }))
         onPanRef.current?.()
       }
     }
@@ -699,7 +450,7 @@ export function useZUIInteraction(
         const dy = e.clientY - lastMouse.current.y
         lastMouse.current.x = e.clientX
         lastMouse.current.y = e.clientY
-        setViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+        scheduleViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
         onPanRef.current?.()
         return
       }
@@ -807,7 +558,7 @@ export function useZUIInteraction(
         const dy = e.touches[0].clientY - lastMouse.current.y
         lastMouse.current.x = e.touches[0].clientX
         lastMouse.current.y = e.touches[0].clientY
-        setViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+        scheduleViewState((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
         onPanRef.current?.()
       } else if (e.touches.length >= 2) {
         const dist = pinchDist(e.touches)
@@ -818,7 +569,7 @@ export function useZUIInteraction(
           const dy = mid.y - lastPinchMid.current.y
 
           if (isFinite(factor) && factor > 0) {
-            setViewState((prev) => {
+            scheduleViewState((prev) => {
               const zoomed = zoomAround(prev, mid.x, mid.y, factor, maxZoomRef.current)
               return { ...zoomed, x: zoomed.x + dx, y: zoomed.y + dy }
             })
@@ -874,7 +625,7 @@ export function useZUIInteraction(
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchEnd)
     }
-  }, [canvasRef, setViewState, setHoveredItem, isMobile, resolveHoveredProxyItem]) // groupsRef handles groups updates without re-binding!
+  }, [canvasRef, scheduleViewState, setViewState, setHoveredItem, isMobile, resolveHoveredProxyItem]) // groupsRef handles groups updates without re-binding!
 
   return { viewState, viewStateRef, setViewState, fitView, maxZoom: dynamicMaxZoom, hoveredItem, setHoveredItem, setHoverLocked }
 }

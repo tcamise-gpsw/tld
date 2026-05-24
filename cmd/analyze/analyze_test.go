@@ -467,7 +467,8 @@ func TestAnalyzeCmd_WarnsWhenLimitedScanModeIsActive(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Limited scan mode active: tracked files exceed 1.",
-		"Scanned selected high-signal files only; source symbols and connectors may be omitted.",
+		"Scanned recent files plus bounded reference/caller context; source symbols and connectors may still be omitted.",
+		"Limited expansion: recent=",
 		"Use `tld config set watch.scale.strategy full` or raise `watch.scale.max_tracked_files` for a full scan.",
 	} {
 		if !strings.Contains(stdout, want) {

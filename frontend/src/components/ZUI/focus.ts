@@ -1,5 +1,5 @@
 import type { DiagramGroupLayout, LayoutNode, ZUIViewState } from './types'
-import { getExpandThresholds } from './renderer'
+import { getExpandThresholds } from './layoutEngine'
 
 interface Rect {
   x: number

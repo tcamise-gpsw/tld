@@ -21,7 +21,7 @@ import {
   TabPanels,
   TabPanel,
 } from '@chakra-ui/react'
-import { parseMermaid, ParsedImport } from '../pkg/importer/mermaid'
+import { parseMermaidAsync, ParsedImport } from '../pkg/importer/mermaid'
 import { api } from '../api/client'
 import type { PlanConnector, PlanElement } from '@buf/tldiagramcom_diagram.bufbuild_es/diag/v1/workspace_service_pb'
 
@@ -72,9 +72,18 @@ function ImportModal({ isOpen, onClose, isImporting, onImport }: Props) {
     setParseError(null)
 
     if (format === 'mermaid') {
-      const result = parseMermaid(code)
-      setParsed(result)
-      setStep('summary')
+      setIsParsing(true)
+      try {
+        const result = await parseMermaidAsync(code)
+        if (result.warnings.length > 0 && result.elements.length === 0 && result.connectors.length === 0) {
+          setParseError(result.warnings[0] ?? 'Unsupported diagram type')
+          return
+        }
+        setParsed(result)
+        setStep('summary')
+      } finally {
+        setIsParsing(false)
+      }
       return
     }
 
@@ -86,6 +95,8 @@ function ImportModal({ isOpen, onClose, isImporting, onImport }: Props) {
         elements: res.elements as PlanElement[],
         connectors: res.connectors as PlanConnector[],
         warnings: res.warnings,
+        direction: 'LR',
+        source: code,
       }
       setParsed(result)
       setStep('summary')
@@ -129,7 +140,7 @@ function ImportModal({ isOpen, onClose, isImporting, onImport }: Props) {
                         fontFamily="mono"
                       />
                       <Text mt={1.5} fontSize="xs" color="gray.400">
-                        Supported: flowchart / graph, C4Context.
+                        Supported: flowchart, C4, sequence, class, ER, state, requirement, sankey, pie, git graph, quadrant, mindmap, journey, gantt, timeline, and XY chart.
                       </Text>
                     </FormControl>
                   </TabPanel>

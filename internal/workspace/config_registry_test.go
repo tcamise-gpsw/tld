@@ -152,6 +152,24 @@ func TestGlobalConfigLSPDefaultsAndEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestGlobalConfigScaleRecentAndCallerEnvOverrides(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	t.Setenv("TLD_WATCH_SCALE_MAX_RECENT_FILES", "123")
+	t.Setenv("TLD_WATCH_SCALE_MAX_CALLER_DEPTH", "7")
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Watch.Scale.MaxRecentFiles != 123 {
+		t.Fatalf("MaxRecentFiles = %d, want 123", cfg.Watch.Scale.MaxRecentFiles)
+	}
+	if cfg.Watch.Scale.MaxCallerDepth != 7 {
+		t.Fatalf("MaxCallerDepth = %d, want 7", cfg.Watch.Scale.MaxCallerDepth)
+	}
+}
+
 func TestSetGlobalConfigLSPValue(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("TLD_CONFIG_DIR", configDir)
