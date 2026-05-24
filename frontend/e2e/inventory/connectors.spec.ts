@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import {
-  createDependencyGraph,
+  createConnectorGraph,
   prepareStorage,
   uniqueName,
 } from '../helpers/vieweditor'
@@ -31,7 +31,7 @@ test('search empty state can be cleared in inventory', async ({ page }) => {
 })
 
 test('lists elements, totals, and connector counts from the workspace', async ({ page }) => {
-  const graph = await createDependencyGraph(page, 'Deps Totals')
+  const graph = await createConnectorGraph(page, 'Connector Totals')
 
   await page.goto('/inventory')
   await page.goto(`/inventory?object=element:${graph.center.id}`)
@@ -42,7 +42,7 @@ test('lists elements, totals, and connector counts from the workspace', async ({
 })
 
 test('query param selects an element and renders its connector graph', async ({ page }) => {
-  const graph = await createDependencyGraph(page, 'Deps Query')
+  const graph = await createConnectorGraph(page, 'Connector Query')
 
   // Tests redirect from /dependencies to /inventory?object=element:ID
   await page.goto(`/dependencies?element=${graph.center.id}`)
@@ -53,7 +53,7 @@ test('query param selects an element and renders its connector graph', async ({ 
 })
 
 test('connector graph groups incoming outgoing bidirectional and undirected connectors', async ({ page }) => {
-  const graph = await createDependencyGraph(page, 'Deps Directions')
+  const graph = await createConnectorGraph(page, 'Connector Directions')
 
   await page.goto(`/inventory?object=element:${graph.center.id}`)
 
@@ -88,7 +88,7 @@ test('connector graph groups incoming outgoing bidirectional and undirected conn
 })
 
 test('selecting a connector card recenters the graph on that element', async ({ page }) => {
-  const graph = await createDependencyGraph(page, 'Deps Neighbor Select')
+  const graph = await createConnectorGraph(page, 'Connector Neighbor Select')
 
   await page.goto(`/dependencies?element=${graph.center.id}`)
   await neighbourCard(page, graph.outgoing.name).click({ force: true })

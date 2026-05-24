@@ -94,6 +94,7 @@ export function ElementInspector({
 
         <Box position="relative" zIndex={10} isolation="isolate" data-pan-block="true">
           <RelationshipCard
+            testId="inventory-selected-card"
             isSelected
             name={selectedElement?.name || ''}
             type={selectedElement?.kind || ''}

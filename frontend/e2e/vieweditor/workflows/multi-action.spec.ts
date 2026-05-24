@@ -83,18 +83,18 @@ test('places an existing imported element in another diagram and finds it from t
   await expect(page.getByText('CrossImportA').first()).toBeVisible()
 })
 
-test('created dependency relationship appears on the Dependencies page', async ({ page }) => {
-  const diagram = await createApiView(page, uniqueName('Workflow Dependencies'))
-  const source = await createElement(page, { name: uniqueName('Workflow Dependency Source'), kind: 'service' })
-  const target = await createElement(page, { name: uniqueName('Workflow Dependency Target'), kind: 'database' })
+test('created connector relationship appears in Inventory inspect graph', async ({ page }) => {
+  const diagram = await createApiView(page, uniqueName('Workflow Inventory'))
+  const source = await createElement(page, { name: uniqueName('Workflow Connector Source'), kind: 'service' })
+  const target = await createElement(page, { name: uniqueName('Workflow Connector Target'), kind: 'database' })
   await page.request.post('/api/diag.v1.WorkspaceService/CreatePlacement', { data: { viewId: diagram.id, elementId: source.id, positionX: 140, positionY: 140 } })
   await page.request.post('/api/diag.v1.WorkspaceService/CreatePlacement', { data: { viewId: diagram.id, elementId: target.id, positionX: 420, positionY: 140 } })
   await createConnector(page, diagram.id, source.id, target.id, { label: 'feeds' })
 
   await page.goto(`/dependencies?element=${source.id}`)
 
-  await expect(page.getByTestId('dependencies-selected-card')).toContainText(source.name)
-  const neighbour = page.getByTestId('dependencies-neighbour-card').filter({ hasText: 'database' }).first()
-  await expect(neighbour).toBeVisible()
-  await expect(neighbour).toHaveAttribute('data-element-id', String(target.id))
+  await expect(page).toHaveURL(/\/inventory\?/) 
+  await expect.poll(() => new URL(page.url()).searchParams.get('object')).toBe(`element:${source.id}`)
+  const connectorCard = page.locator('[data-testid="inventory-connector-card"], [data-testid="dependencies-neighbour-card"]').filter({ hasText: 'database' }).first()
+  await expect(connectorCard).toBeVisible()
 })

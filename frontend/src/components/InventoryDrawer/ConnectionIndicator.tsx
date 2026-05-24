@@ -34,7 +34,7 @@ export function ConnectionIndicator({ position, compactLevel = 0 }: ConnectionIn
 
   return (
     <Flex
-      data-testid="dependencies-connection-indicator"
+      data-testid="inventory-connector-indicator"
       data-position={position}
       align="center"
       justify="center"

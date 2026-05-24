@@ -416,7 +416,7 @@ export async function createAndLoadDiagramWithNodes(page: Page, count: number, p
   return { diagram, elements }
 }
 
-export async function createDependencyGraph(page: Page, prefix = 'Dependency') {
+export async function createConnectorGraph(page: Page, prefix = 'Connector') {
   const diagram = await createApiView(page, uniqueName(`${prefix} Diagram`))
   const center = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Center`), kind: 'service', technology: 'go' }, 480, 260)
   const incoming = await createPlacedElement(page, diagram.id, { name: uniqueName(`${prefix} Incoming`), kind: 'api', technology: 'typescript' }, 180, 260)

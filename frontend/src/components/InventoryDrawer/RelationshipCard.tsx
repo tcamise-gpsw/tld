@@ -21,7 +21,7 @@ export function RelationshipCard({
   borderColor = 'whiteAlpha.200',
   onClick,
   compactLevel = 0,
-  testId = 'dependencies-neighbour-card',
+  testId = 'inventory-connector-card',
   isSelected = false,
   shadow,
 }: RelationshipCardProps) {
