@@ -42,6 +42,7 @@ interface Props {
   onTapAdd?: (obj: LibraryElement) => void
   onFindElement?: (id: number) => void
   onTouchDrop?: (obj: LibraryElement, clientX: number, clientY: number) => void
+  deletedElementIds?: readonly number[]
   noFocusLock?: boolean
 }
 
@@ -97,6 +98,7 @@ function ElementLibrary({
   onTapAdd,
   onFindElement,
   onTouchDrop,
+  deletedElementIds = [],
   noFocusLock,
 }: Props) {
   const { canEdit } = useViewEditorContext()
@@ -115,6 +117,12 @@ function ElementLibrary({
   const [listScrollTop, setListScrollTop] = useState(0)
   const [listViewportHeight, setListViewportHeight] = useState(600)
   useEffect(() => { searchRef.current = search }, [search])
+
+  useEffect(() => {
+    if (deletedElementIds.length === 0) return
+    const deletedIds = new Set(deletedElementIds)
+    setElements((prev) => prev.filter((element) => !deletedIds.has(element.id)))
+  }, [deletedElementIds])
 
   const fetchElements = useCallback(async (offset: number, currentSearch: string, isInitial = false) => {
     if (isFetching.current) return
