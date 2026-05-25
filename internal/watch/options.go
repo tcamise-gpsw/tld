@@ -11,7 +11,7 @@ func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model str
 	embedding := EmbeddingConfig{}
 	if cfg != nil {
 		embedding.Provider = cfg.Watch.Embedding.Provider
-		embedding.Endpoint = cfg.Watch.Embedding.Endpoint
+		embedding.Endpoint = cfg.Watch.Embedding.Endpoint.String()
 		embedding.Model = cfg.Watch.Embedding.Model
 		embedding.Dimension = cfg.Watch.Embedding.Dimension
 		embedding.RuntimePath = cfg.Watch.Embedding.RuntimePath

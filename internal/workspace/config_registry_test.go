@@ -3,6 +3,7 @@ package workspace_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -96,6 +97,41 @@ func TestSetGlobalConfigValueSupportsEmbeddingMaxTokens(t *testing.T) {
 	}
 	if err := workspace.SetGlobalConfigValue("watch.embedding.max_tokens", "-1"); err == nil {
 		t.Fatal("expected negative max_tokens to fail validation")
+	}
+}
+
+func TestWatchEmbeddingEndpointSupportsMultipleValues(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	configPath := filepath.Join(configDir, "tld.yaml")
+	writeFile(t, configPath, `watch:
+  embedding:
+    provider: openai
+    endpoint:
+      - http://127.0.0.1:8000/v1/embeddings
+      - http://127.0.0.1:8001/v1/embeddings
+    model: embeddinggemma-300m-4bit
+    health_threshold: 0.7
+`)
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	want := []string{"http://127.0.0.1:8000/v1/embeddings", "http://127.0.0.1:8001/v1/embeddings"}
+	if got := cfg.Watch.Embedding.Endpoint.Values(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("endpoints = %#v, want %#v", got, want)
+	}
+
+	if err := workspace.SetGlobalConfigValue("watch.embedding.endpoint", strings.Join(want, ",")); err != nil {
+		t.Fatalf("SetGlobalConfigValue: %v", err)
+	}
+	cfg, err = workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig after set: %v", err)
+	}
+	if got := cfg.Watch.Embedding.Endpoint.Values(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("endpoints after set = %#v, want %#v", got, want)
 	}
 }
 

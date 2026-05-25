@@ -4264,6 +4264,69 @@ func TestOpenAIHealthCheckUsesCompatibleEmbeddingsEndpoint(t *testing.T) {
 	}
 }
 
+func TestOpenAIMultiEndpointHealthCheckAndSplitsWork(t *testing.T) {
+	requests := make([]int, 2)
+	servers := make([]*httptest.Server, 0, 2)
+	for serverIndex := 0; serverIndex < 2; serverIndex++ {
+		index := serverIndex
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/embeddings" {
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
+			var body struct {
+				Input []string `json:"input"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			requests[index] += len(body.Input)
+			w.Header().Set("Content-Type", "application/json")
+			data := make([]string, 0, len(body.Input))
+			for i := range body.Input {
+				if i%2 == 0 {
+					data = append(data, fmt.Sprintf(`{"object":"embedding","index":%d,"embedding":[1,0,0]}`, i))
+				} else {
+					data = append(data, fmt.Sprintf(`{"object":"embedding","index":%d,"embedding":[0.95,0.05,0]}`, i))
+				}
+			}
+			_, _ = w.Write([]byte(`{"object":"list","model":"embeddinggemma-300m-4bit","data":[` + strings.Join(data, ",") + `]}`))
+		}))
+		defer server.Close()
+		servers = append(servers, server)
+	}
+
+	cfg, result, err := CheckEmbeddingHealth(context.Background(), EmbeddingConfig{
+		Provider:  "openai",
+		Endpoints: []string{servers[0].URL + "/v1/embeddings", servers[1].URL + "/v1/embeddings"},
+		Model:     "embeddinggemma-300m-4bit",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dimension != 3 || result.Dimension != 3 || result.Similarity < DefaultEmbeddingHealthThreshold {
+		t.Fatalf("unexpected health result cfg=%+v result=%+v", cfg, result)
+	}
+	provider, err := NewEmbeddingProvider(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vectors, err := provider.Embed(context.Background(), []EmbeddingInput{
+		{Text: "a"},
+		{Text: "b"},
+		{Text: "c"},
+		{Text: "d"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors) != 4 {
+		t.Fatalf("vectors len = %d, want 4", len(vectors))
+	}
+	if requests[0] != 4 || requests[1] != 4 {
+		t.Fatalf("requests = %v, want each endpoint to handle 2 health inputs and 2 work inputs", requests)
+	}
+}
+
 func TestOpenAIProviderAddsJinaCodeEmbeddingInstructions(t *testing.T) {
 	var requestBody struct {
 		Model string   `json:"model"`

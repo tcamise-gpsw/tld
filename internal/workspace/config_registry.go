@@ -256,8 +256,15 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 		add("watch.embedding.max_tokens", "must be non-negative")
 	}
 	if provider == "openai" || provider == "ollama" {
-		if strings.TrimSpace(cfg.Watch.Embedding.Endpoint) == "" || !validHTTPURL(cfg.Watch.Embedding.Endpoint) {
+		endpoints := cfg.Watch.Embedding.Endpoint.Values()
+		if len(endpoints) == 0 {
 			add("watch.embedding.endpoint", "must be a valid URL for the selected provider")
+		}
+		for _, endpoint := range endpoints {
+			if !validHTTPURL(endpoint) {
+				add("watch.embedding.endpoint", "must be a valid URL for the selected provider")
+				break
+			}
 		}
 		if strings.TrimSpace(cfg.Watch.Embedding.Model) == "" {
 			add("watch.embedding.model", "must be non-empty for the selected provider")
@@ -749,7 +756,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 	case "watch.embedding.provider":
 		cfg.Watch.Embedding.Provider = strings.TrimSpace(value)
 	case "watch.embedding.endpoint":
-		cfg.Watch.Embedding.Endpoint = strings.TrimSpace(value)
+		cfg.Watch.Embedding.Endpoint = EndpointList{value}
 	case "watch.embedding.model":
 		cfg.Watch.Embedding.Model = strings.TrimSpace(value)
 	case "watch.embedding.dimension":
@@ -903,7 +910,7 @@ func getConfigValue(cfg *Config, key string) any {
 	case "watch.embedding.provider":
 		return cfg.Watch.Embedding.Provider
 	case "watch.embedding.endpoint":
-		return cfg.Watch.Embedding.Endpoint
+		return cfg.Watch.Embedding.Endpoint.String()
 	case "watch.embedding.model":
 		return cfg.Watch.Embedding.Model
 	case "watch.embedding.dimension":
@@ -1019,7 +1026,7 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 
 	embedding := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	addScalar(embedding, "provider", cfg.Watch.Embedding.Provider, desc("watch.embedding.provider"))
-	addScalar(embedding, "endpoint", cfg.Watch.Embedding.Endpoint, desc("watch.embedding.endpoint"))
+	addScalar(embedding, "endpoint", cfg.Watch.Embedding.Endpoint.String(), desc("watch.embedding.endpoint"))
 	addScalar(embedding, "model", cfg.Watch.Embedding.Model, desc("watch.embedding.model"))
 	addScalar(embedding, "dimension", cfg.Watch.Embedding.Dimension, desc("watch.embedding.dimension"))
 	addScalar(embedding, "max_tokens", cfg.Watch.Embedding.MaxTokens, desc("watch.embedding.max_tokens"))

@@ -171,7 +171,7 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			}
 			embCfg := watch.EmbeddingConfig{
 				Provider:        modelProvider,
-				Endpoint:        cfg.Watch.Embedding.Endpoint,
+				Endpoint:        cfg.Watch.Embedding.Endpoint.String(),
 				Model:           modelName,
 				Dimension:       modelDimension,
 				RuntimePath:     cfg.Watch.Embedding.RuntimePath,

@@ -233,7 +233,7 @@ func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, mo
 	if cfg != nil {
 		embedding = watchpkg.EmbeddingConfig{
 			Provider:        cfg.Watch.Embedding.Provider,
-			Endpoint:        cfg.Watch.Embedding.Endpoint,
+			Endpoint:        cfg.Watch.Embedding.Endpoint.String(),
 			Model:           cfg.Watch.Embedding.Model,
 			Dimension:       cfg.Watch.Embedding.Dimension,
 			RuntimePath:     cfg.Watch.Embedding.RuntimePath,

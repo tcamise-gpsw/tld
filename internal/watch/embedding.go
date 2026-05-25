@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -65,6 +66,132 @@ type HealthCheckingProvider interface {
 
 type ClosableProvider interface {
 	Close() error
+}
+
+type multiEndpointProvider struct {
+	cfg       EmbeddingConfig
+	providers []Provider
+}
+
+func (p *multiEndpointProvider) ModelID() ModelID {
+	cfg := normalizeEmbeddingConfig(p.cfg)
+	return ModelID{Provider: cfg.Provider, Model: cfg.Model, Dimension: cfg.Dimension, ConfigHash: stableHash(cfg)}
+}
+
+func (p *multiEndpointProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]Vector, error) {
+	if len(inputs) == 0 {
+		return []Vector{}, nil
+	}
+	if len(p.providers) == 0 {
+		return nil, fmt.Errorf("embedding endpoint pool is empty")
+	}
+	out := make([]Vector, len(inputs))
+	errs := make(chan error, len(p.providers))
+	var wg sync.WaitGroup
+	for providerIndex, provider := range p.providers {
+		indexes := make([]int, 0, (len(inputs)+len(p.providers)-1)/len(p.providers))
+		chunk := make([]EmbeddingInput, 0, cap(indexes))
+		for i := providerIndex; i < len(inputs); i += len(p.providers) {
+			indexes = append(indexes, i)
+			chunk = append(chunk, inputs[i])
+		}
+		if len(chunk) == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(provider Provider, indexes []int, chunk []EmbeddingInput) {
+			defer wg.Done()
+			vectors, err := provider.Embed(ctx, chunk)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if len(vectors) != len(chunk) {
+				errs <- fmt.Errorf("embedding endpoint returned %d vectors for %d inputs", len(vectors), len(chunk))
+				return
+			}
+			for i, vector := range vectors {
+				out[indexes[i]] = vector
+			}
+		}(provider, indexes, chunk)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (p *multiEndpointProvider) HealthCheck(ctx context.Context) (HealthResult, error) {
+	if len(p.providers) == 0 {
+		return HealthResult{}, fmt.Errorf("embedding endpoint pool is empty")
+	}
+	inputs := []EmbeddingInput{
+		{OwnerType: "query", Text: "Why is the sky blue?"},
+		{OwnerType: "query", Text: "What causes the sky to look blue during the day?"},
+	}
+	threshold := p.cfg.HealthThreshold
+	if threshold <= 0 {
+		threshold = DefaultEmbeddingHealthThreshold
+	}
+	var reference []Vector
+	var dimension int
+	var minSimilarity float64 = 1
+	for i, provider := range p.providers {
+		vectors, err := provider.Embed(ctx, inputs)
+		if err != nil {
+			return HealthResult{}, fmt.Errorf("embedding endpoint %d healthcheck: %w", i+1, err)
+		}
+		if len(vectors) != 2 || len(vectors[0]) == 0 || len(vectors[1]) == 0 {
+			return HealthResult{}, fmt.Errorf("embedding endpoint %d healthcheck returned empty embeddings", i+1)
+		}
+		if len(vectors[0]) != len(vectors[1]) {
+			return HealthResult{}, fmt.Errorf("embedding endpoint %d healthcheck returned mismatched dimensions %d and %d", i+1, len(vectors[0]), len(vectors[1]))
+		}
+		sim := CosineSimilarity(vectors[0], vectors[1])
+		if sim < threshold {
+			return HealthResult{}, fmt.Errorf("embedding endpoint %d healthcheck similarity %.3f is below threshold %.3f", i+1, sim, threshold)
+		}
+		if sim < minSimilarity {
+			minSimilarity = sim
+		}
+		if i == 0 {
+			reference = vectors
+			dimension = len(vectors[0])
+			continue
+		}
+		if len(vectors[0]) != dimension {
+			return HealthResult{}, fmt.Errorf("embedding endpoint %d dimension %d differs from endpoint 1 dimension %d", i+1, len(vectors[0]), dimension)
+		}
+		for inputIndex := range vectors {
+			crossSim := CosineSimilarity(reference[inputIndex], vectors[inputIndex])
+			if crossSim < threshold {
+				return HealthResult{}, fmt.Errorf("embedding endpoint %d result similarity %.3f for health input %d is below cross-check threshold %.3f", i+1, crossSim, inputIndex+1, threshold)
+			}
+			if crossSim < minSimilarity {
+				minSimilarity = crossSim
+			}
+		}
+	}
+	p.cfg.Dimension = dimension
+	return HealthResult{Dimension: dimension, Similarity: minSimilarity}, nil
+}
+
+func (p *multiEndpointProvider) Close() error {
+	var firstErr error
+	for _, provider := range p.providers {
+		closer, ok := provider.(ClosableProvider)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 type NoopProvider struct{}
@@ -562,6 +689,20 @@ func NewEmbeddingProvider(cfg EmbeddingConfig) (Provider, error) {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
+	if (cfg.Provider == "openai" || cfg.Provider == "ollama") && len(cfg.Endpoints) > 1 {
+		providers := make([]Provider, 0, len(cfg.Endpoints))
+		for _, endpoint := range cfg.Endpoints {
+			endpointCfg := cfg
+			endpointCfg.Endpoint = endpoint
+			endpointCfg.Endpoints = nil
+			provider, err := NewEmbeddingProvider(endpointCfg)
+			if err != nil {
+				return nil, err
+			}
+			providers = append(providers, provider)
+		}
+		return &multiEndpointProvider{cfg: cfg, providers: providers}, nil
+	}
 	switch cfg.Provider {
 	case "none":
 		return NoopProvider{}, nil
@@ -594,12 +735,17 @@ func NewEmbeddingProvider(cfg EmbeddingConfig) (Provider, error) {
 func normalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
 	cfg.Provider = strings.TrimSpace(cfg.Provider)
 	cfg.Endpoint = strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
+	cfg.Endpoints = normalizeEmbeddingEndpoints(append(cfg.Endpoints, cfg.Endpoint))
+	if len(cfg.Endpoints) > 0 {
+		cfg.Endpoint = cfg.Endpoints[0]
+	}
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	if cfg.Provider == "" {
 		cfg.Provider = DefaultEmbeddingProvider
 	}
 	if cfg.Provider == "none" {
 		cfg.Endpoint = ""
+		cfg.Endpoints = nil
 		cfg.Model = ""
 		cfg.Dimension = 0
 		cfg.HealthThreshold = 0
@@ -607,6 +753,9 @@ func normalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
 	if cfg.Provider == "openai" {
 		if cfg.Endpoint == "" {
 			cfg.Endpoint = DefaultOpenAIEndpoint
+		}
+		if len(cfg.Endpoints) == 0 {
+			cfg.Endpoints = []string{cfg.Endpoint}
 		}
 		if cfg.Model == "" {
 			cfg.Model = DefaultOpenAIModel
@@ -619,6 +768,9 @@ func normalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
 		if cfg.Endpoint == "" {
 			cfg.Endpoint = DefaultOllamaEndpoint
 		}
+		if len(cfg.Endpoints) == 0 {
+			cfg.Endpoints = []string{cfg.Endpoint}
+		}
 		if cfg.Model == "" {
 			cfg.Model = DefaultOllamaModel
 		}
@@ -628,6 +780,7 @@ func normalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
 	}
 	if cfg.Provider == "local-lexical" {
 		cfg.Endpoint = ""
+		cfg.Endpoints = nil
 		if cfg.Model == "" {
 			cfg.Model = DefaultLexicalModel
 		}
@@ -638,6 +791,8 @@ func normalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
 	}
 
 	if cfg.Provider == "local-deterministic-test" && cfg.Dimension <= 0 {
+		cfg.Endpoint = ""
+		cfg.Endpoints = nil
 		cfg.Dimension = 8
 	}
 	if cfg.TimeoutSeconds <= 0 {
@@ -651,6 +806,25 @@ func normalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
 		}
 	}
 	return cfg
+}
+
+func normalizeEmbeddingEndpoints(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimRight(strings.TrimSpace(part), "/")
+			if part == "" {
+				continue
+			}
+			if _, ok := seen[part]; ok {
+				continue
+			}
+			seen[part] = struct{}{}
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func NormalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
