@@ -526,7 +526,10 @@ func passesPopulateScoreGate(finalScore, lexicalPathScore float64) bool {
 	if finalScore >= 0.35 {
 		return true
 	}
-	return finalScore >= 0.25 && lexicalPathScore >= 0.30
+	if finalScore >= 0.25 && lexicalPathScore >= 0.30 {
+		return true
+	}
+	return lexicalPathScore >= 0.50 && finalScore >= 0.15
 }
 
 func bytesToVector(data []byte) watch.Vector {

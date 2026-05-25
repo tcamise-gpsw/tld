@@ -338,6 +338,17 @@ func (p *OllamaProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]
 	if len(vectors) != len(inputs) {
 		return nil, fmt.Errorf("ollama returned %d embeddings for %d inputs", len(vectors), len(inputs))
 	}
+	for i := range vectors {
+		if isZeroVector(vectors[i]) && len(inputs) > 1 {
+			single, err := p.embedTexts(ctx, []string{texts[i]})
+			if err != nil {
+				return nil, err
+			}
+			if len(single) == 1 {
+				vectors[i] = single[0]
+			}
+		}
+	}
 	if len(vectors) > 0 && p.Dimension <= 0 {
 		p.Dimension = len(vectors[0])
 	}
@@ -446,6 +457,17 @@ func (p *OpenAIProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]
 	}
 	if len(vectors) != len(inputs) {
 		return nil, fmt.Errorf("openai returned %d embeddings for %d inputs", len(vectors), len(inputs))
+	}
+	for i := range vectors {
+		if isZeroVector(vectors[i]) && len(inputs) > 1 {
+			single, err := p.embedTexts(ctx, []string{texts[i]})
+			if err != nil {
+				return nil, err
+			}
+			if len(single) == 1 {
+				vectors[i] = single[0]
+			}
+		}
 	}
 	if len(vectors) > 0 && p.Dimension <= 0 {
 		p.Dimension = len(vectors[0])
@@ -682,6 +704,15 @@ func vectorsFromFloatSlices(values [][]float32) []Vector {
 		out = append(out, Vector(value))
 	}
 	return out
+}
+
+func isZeroVector(v Vector) bool {
+	for _, val := range v {
+		if val != 0 {
+			return false
+		}
+	}
+	return len(v) > 0
 }
 
 func CosineSimilarity(left, right Vector) float64 {
