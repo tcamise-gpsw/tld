@@ -599,27 +599,28 @@ func (r *Representer) populateResourceEmbeddingInputs(ctx context.Context, repos
 			OwnerType: "populate_resource",
 			OwnerKey:  resource.ownerType + ":" + resource.ownerKey,
 			Text:      text,
+			Language:  resource.language,
 		})
 	}
 	return inputs, nil
 }
 
 func (r *Representer) populateResourceEmbeddingText(ctx context.Context, repositoryID int64, ownerType, ownerKey, name, kind, description, technology, filePath, language, tags string) (string, error) {
-	parts := []string{
-		"Architecture resource",
-		"name: " + name,
-		"kind: " + kind,
-		"owner: " + ownerType + " " + ownerKey,
+	parts := []string{}
+	if strings.TrimSpace(name) != "" {
+		parts = append(parts, "name "+name)
 	}
-	for _, value := range []string{
-		"description: " + description,
-		"technology: " + technology,
-		"path: " + filePath,
-		"language: " + language,
-		"tags: " + tags,
-	} {
-		if strings.TrimSpace(strings.TrimPrefix(value, strings.Split(value, ":")[0]+":")) != "" {
-			parts = append(parts, value)
+	if kind != "" {
+		parts = append(parts, "kind "+kind)
+	}
+	parts = append(parts, fmt.Sprintf("owner %s %s", ownerType, ownerKey))
+	if signals := embeddingSemanticSignals(name, kind, filePath, tags); len(signals) > 0 {
+		parts = append(parts, "signals "+strings.Join(signals, ", "))
+	}
+	for _, s := range []string{description, technology, filePath} {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			parts = append(parts, s)
 		}
 	}
 	children, err := r.populateResourceChildSummary(ctx, ownerType, ownerKey)
@@ -627,16 +628,16 @@ func (r *Representer) populateResourceEmbeddingText(ctx context.Context, reposit
 		return "", err
 	}
 	if children != "" {
-		parts = append(parts, "representative children: "+children)
+		parts = append(parts, "children "+children)
 	}
 	refs, err := r.populateResourceReferenceSummary(ctx, repositoryID, filePath)
 	if err != nil {
 		return "", err
 	}
 	if refs != "" {
-		parts = append(parts, "nearby references: "+refs)
+		parts = append(parts, "refs "+refs)
 	}
-	return shrinkEmbeddingText(strings.Join(parts, "\n"), maxEmbeddingInputApproxTokens), nil
+	return shrinkEmbeddingText(strings.Join(parts, " "), maxEmbeddingInputApproxTokens), nil
 }
 
 func (r *Representer) populateResourceChildSummary(ctx context.Context, ownerType, ownerKey string) (string, error) {
@@ -701,10 +702,183 @@ func embeddingCandidateSymbols(symbols map[int64]Symbol, limit int) []Symbol {
 
 func symbolEmbeddingText(repoRoot string, sym Symbol, maxTokens int) string {
 	body := symbolCodeBody(repoRoot, sym)
-	if strings.TrimSpace(body) == "" {
-		body = sym.QualifiedName + "\n" + sym.Kind + "\n" + sym.FilePath
+	name := strings.TrimSpace(sym.QualifiedName)
+	if name == "" {
+		name = strings.TrimSpace(sym.Name)
 	}
-	return shrinkEmbeddingText(outdentCode(body), maxTokens)
+	parts := []string{}
+	if name != "" {
+		parts = append(parts, "symbol name "+name)
+	}
+	if strings.TrimSpace(sym.Kind) != "" {
+		parts = append(parts, "kind "+sym.Kind)
+	}
+	if strings.TrimSpace(sym.FilePath) != "" {
+		parts = append(parts, "path "+sym.FilePath)
+	}
+	if signals := embeddingSemanticSignals(name, sym.Kind, sym.FilePath, ""); len(signals) > 0 {
+		parts = append(parts, "signals "+strings.Join(signals, ", "))
+	}
+	if strings.TrimSpace(body) == "" {
+		return shrinkEmbeddingText(strings.Join(parts, "\n"), maxTokens)
+	}
+	parts = append(parts, "code\n"+outdentCode(body))
+	return shrinkEmbeddingText(strings.Join(parts, "\n"), maxTokens)
+}
+
+func embeddingSemanticSignals(name, kind, filePath, tagsJSON string) []string {
+	signals := []string{}
+	add := func(values ...string) {
+		for _, value := range values {
+			value = strings.TrimSpace(strings.ReplaceAll(value, ":", " "))
+			if value != "" && !containsEmbeddingSignal(signals, value) {
+				signals = append(signals, value)
+			}
+		}
+	}
+	if kind != "" {
+		add("granularity " + kind)
+	}
+	sourceParts := []string{name, kind, filePath}
+	for _, tag := range decodeEmbeddingTags(tagsJSON) {
+		sourceParts = append(sourceParts, strings.ReplaceAll(tag, ":", " "))
+	}
+	source := strings.ToLower(strings.Join(sourceParts, " "))
+	for _, rule := range embeddingSignalRules {
+		if hasEmbeddingSignalCue(source, rule.cues) {
+			add(rule.signals...)
+		}
+	}
+	return signals
+}
+
+type embeddingSignalRule struct {
+	cues    []string
+	signals []string
+}
+
+var embeddingSignalRules = []embeddingSignalRule{
+	{
+		cues:    []string{"api", "http", "rpc", "grpc", "rest", "graphql", "endpoint", "route", "handler", "controller", "websocket", "webhook"},
+		signals: []string{"responsibility interface boundary", "intent request handling", "intent service endpoint"},
+	},
+	{
+		cues:    []string{"cli", "cmd", "command", "terminal", "shell"},
+		signals: []string{"responsibility operator interface", "intent command workflow"},
+	},
+	{
+		cues:    []string{"ui", "frontend", "front end", "view", "page", "component", "canvas", "render", "screen", "layout", "style"},
+		signals: []string{"responsibility presentation", "intent user interaction", "intent rendering"},
+	},
+	{
+		cues:    []string{"store", "storage", "persist", "database", "db", "sql", "sqlite", "postgres", "mysql", "mongo", "redis", "cache", "migration", "schema", "repository", "dao"},
+		signals: []string{"responsibility data storage", "intent persistence", "intent data access"},
+	},
+	{
+		cues:    []string{"client", "adapter", "gateway", "connector", "provider", "sdk", "integration", "external", "third party"},
+		signals: []string{"responsibility external integration", "intent dependency boundary", "intent protocol adaptation"},
+	},
+	{
+		cues:    []string{"job", "worker", "queue", "scheduler", "cron", "event", "stream", "message", "consumer", "producer", "pubsub", "workflow", "state machine"},
+		signals: []string{"responsibility orchestration", "intent asynchronous processing", "intent event flow"},
+	},
+	{
+		cues:    []string{"parser", "analyzer", "compiler", "extractor", "mapper", "transformer", "serializer", "validator", "generator", "import", "export", "sync"},
+		signals: []string{"responsibility transformation", "intent data interpretation", "intent validation"},
+	},
+	{
+		cues:    []string{"service", "usecase", "use case", "domain", "entity", "aggregate", "policy", "rule", "manager", "coordinator"},
+		signals: []string{"responsibility domain logic", "intent business rule", "intent coordination"},
+	},
+	{
+		cues:    []string{"config", "setting", "option", "flag", "env", "environment", "yaml", "toml", "properties", "preference"},
+		signals: []string{"responsibility configuration", "intent runtime tuning", "intent environment setup"},
+	},
+	{
+		cues:    []string{"test", "spec", "mock", "fixture", "assert", "benchmark", "e2e", "integration test"},
+		signals: []string{"responsibility validation", "intent test coverage", "intent fixture setup"},
+	},
+	{
+		cues:    []string{"build", "release", "deploy", "docker", "container", "ci", "cd", "workflow", "pipeline", "package", "publish", "install"},
+		signals: []string{"responsibility delivery", "intent build automation", "intent deployment"},
+	},
+	{
+		cues:    []string{"log", "metric", "trace", "telemetry", "monitor", "health", "alert", "diagnostic"},
+		signals: []string{"responsibility observability", "intent operational insight", "intent health reporting"},
+	},
+	{
+		cues:    []string{"security", "permission", "token", "secret", "credential", "crypto", "certificate", "policy"},
+		signals: []string{"responsibility security boundary", "intent access protection", "intent sensitive data handling"},
+	},
+}
+
+func hasEmbeddingSignalCue(source string, cues []string) bool {
+	tokens := embeddingSignalTokens(source)
+	for _, cue := range cues {
+		cue = strings.ToLower(strings.TrimSpace(cue))
+		if cue == "" {
+			continue
+		}
+		if strings.Contains(cue, " ") {
+			if strings.Contains(source, cue) {
+				return true
+			}
+			continue
+		}
+		if len(cue) <= 3 {
+			if tokens[cue] {
+				return true
+			}
+			continue
+		}
+		for token := range tokens {
+			if token == cue || strings.Contains(token, cue) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func embeddingSignalTokens(source string) map[string]bool {
+	tokens := map[string]bool{}
+	var current strings.Builder
+	flush := func() {
+		if current.Len() > 0 {
+			tokens[current.String()] = true
+			current.Reset()
+		}
+	}
+	for _, r := range strings.ToLower(source) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			current.WriteRune(r)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return tokens
+}
+
+func containsEmbeddingSignal(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeEmbeddingTags(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var tags []string
+	if err := json.Unmarshal([]byte(raw), &tags); err != nil {
+		return nil
+	}
+	return tags
 }
 
 func symbolCodeBody(repoRoot string, sym Symbol) string {

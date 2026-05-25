@@ -488,6 +488,43 @@ func TestPopulateFallsBackToFilesAndExcludesPlaced(t *testing.T) {
 	}
 }
 
+func TestPopulateLexicalScoreIgnoresContextHints(t *testing.T) {
+	kind := "folder"
+	tags := json.RawMessage(`["role:persistence"]`)
+	workspacePath := "internal/workspace"
+	storePath := "internal/store/sqlite"
+	query := populateQuery{
+		Base:     "database sqlite",
+		ViewName: "Architecture",
+		Hints:    []string{"workspace", "local", "repository"},
+	}
+	candidates := []populateCandidate{
+		{
+			element: populateElementResult{
+				ID:       1,
+				Name:     "workspace",
+				Kind:     &kind,
+				FilePath: &workspacePath,
+				Tags:     json.RawMessage(`["role:config"]`),
+			},
+		},
+		{
+			element: populateElementResult{
+				ID:       2,
+				Name:     "sqlite store",
+				Kind:     &kind,
+				FilePath: &storePath,
+				Tags:     tags,
+			},
+		},
+	}
+
+	scored := scorePopulateCandidates(query, candidates, nil)
+	if scored[0].lexicalPathScore >= scored[1].lexicalPathScore {
+		t.Fatalf("context hint contaminated lexical score: workspace=%.2f store=%.2f", scored[0].lexicalPathScore, scored[1].lexicalPathScore)
+	}
+}
+
 type populateResultForTest struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`

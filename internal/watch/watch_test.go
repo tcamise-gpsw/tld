@@ -4134,8 +4134,11 @@ func TestPopulateResourceEmbeddingsAreCachedSeparately(t *testing.T) {
 	if stats.Created != 1 {
 		t.Fatalf("expected one populate resource embedding, got %+v", stats)
 	}
-	if provider.calls != 1 || !strings.Contains(provider.texts[0], "Architecture resource") || !strings.Contains(provider.texts[0], "Watch") {
+	if provider.calls != 1 || !strings.Contains(provider.texts[0], "kind folder") || !strings.Contains(provider.texts[0], "Watch") || !strings.Contains(provider.texts[0], "granularity folder") {
 		t.Fatalf("provider calls=%d texts=%v, want populate resource document", provider.calls, provider.texts)
+	}
+	if strings.Contains(provider.texts[0], "repository analysis") {
+		t.Fatalf("populate resource embedding text should not contain repository-specific role expansion:\n%s", provider.texts[0])
 	}
 	stats, err = NewRepresenter(store).cachePopulateResourceEmbeddings(context.Background(), modelID, provider, repoID, nil, 0)
 	if err != nil {
@@ -4143,6 +4146,21 @@ func TestPopulateResourceEmbeddingsAreCachedSeparately(t *testing.T) {
 	}
 	if stats.CacheHits != 1 || provider.calls != 1 {
 		t.Fatalf("expected cache hit without provider call, stats=%+v calls=%d", stats, provider.calls)
+	}
+}
+
+func TestEmbeddingSemanticSignalsUseCrossDomainTaxonomy(t *testing.T) {
+	signals := embeddingSemanticSignals("OrderController", "class", "src/orders/http/order_controller.ts", `["role:api"]`)
+
+	for _, want := range []string{"responsibility interface boundary", "intent request handling", "intent service endpoint"} {
+		if !containsEmbeddingSignal(signals, want) {
+			t.Fatalf("signals = %v, want %q", signals, want)
+		}
+	}
+	for _, unwanted := range []string{"role api", "responsibility repository analysis"} {
+		if containsEmbeddingSignal(signals, unwanted) {
+			t.Fatalf("signals = %v, should not include repo/tag-specific signal %q", signals, unwanted)
+		}
 	}
 }
 
@@ -4167,6 +4185,9 @@ func Outer() {
 
 	if !strings.Contains(text, `fmt.Println("body")`) {
 		t.Fatalf("expected embedding text to include code body, got:\n%s", text)
+	}
+	if !strings.Contains(text, "symbol name Outer") || !strings.Contains(text, "signals granularity function") {
+		t.Fatalf("expected embedding text to include normalized symbol signals, got:\n%s", text)
 	}
 	if strings.Contains(text, "Outer\nfunction\na.go") {
 		t.Fatalf("embedding text fell back to metadata instead of source body:\n%s", text)

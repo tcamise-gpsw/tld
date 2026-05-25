@@ -164,6 +164,7 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 		}
 
 		queryVector := watch.Vector(nil)
+		enrichedVector := watch.Vector(nil)
 		if hasModel {
 			cfg, err := workspace.LoadGlobalConfig()
 			if err != nil {
@@ -185,13 +186,24 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			if closer, ok := provider.(watch.ClosableProvider); ok {
 				defer func() { _ = closer.Close() }()
 			}
-			vectors, err := provider.Embed(r.Context(), []watch.EmbeddingInput{{OwnerType: "query", Text: popQuery.Enriched}})
+			embedInputs := []watch.EmbeddingInput{
+				{OwnerType: "query", Text: popQuery.Compact},
+			}
+			if popQuery.Compact != popQuery.Enriched {
+				embedInputs = append(embedInputs, watch.EmbeddingInput{OwnerType: "query", Text: popQuery.Enriched})
+			}
+			vectors, err := provider.Embed(r.Context(), embedInputs)
 			if err != nil {
 				writeJSONError(w, http.StatusInternalServerError, "failed to embed query: "+err.Error())
 				return
 			}
-			if len(vectors) == 1 {
+			if len(vectors) >= 1 {
 				queryVector = vectors[0]
+			}
+			if len(vectors) >= 2 {
+				enrichedVector = vectors[1]
+			} else {
+				enrichedVector = queryVector
 			}
 		}
 
@@ -209,6 +221,45 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 				return
 			}
 			scoredCandidates = filterPopulateCandidates(scorePopulateCandidates(popQuery, fallback, connectedIDs), true)
+		}
+
+		sort.Slice(scoredCandidates, func(i, j int) bool {
+			if scoredCandidates[i].finalScore == scoredCandidates[j].finalScore {
+				return scoredCandidates[i].element.ID < scoredCandidates[j].element.ID
+			}
+			return scoredCandidates[i].finalScore > scoredCandidates[j].finalScore
+		})
+
+		reRankSize := limit * 3
+		if reRankSize > len(scoredCandidates) {
+			reRankSize = len(scoredCandidates)
+		}
+		if reRankSize > 0 && len(enrichedVector) > 0 && !vectorsEqual(queryVector, enrichedVector) {
+			for i := 0; i < reRankSize; i++ {
+				cand := &scoredCandidates[i]
+				if cand.hasEmbedding {
+					cand.embeddingScore = math.Max(0, watch.CosineSimilarity(enrichedVector, bytesToVector(cand.vectorBytes)))
+				}
+			}
+			for i := 0; i < reRankSize; i++ {
+				cand := &scoredCandidates[i]
+				kind := ""
+				if cand.element.Kind != nil {
+					kind = *cand.element.Kind
+				}
+				connectivityScore := 0.0
+				if connectedIDs[cand.element.ID] {
+					connectivityScore = 1.0
+				}
+				aggregationBonus := math.Min(1.0, math.Log1p(float64(cand.childCount))/3.0)
+				abstractionScore := abstractionPriority(kind)
+				cand.finalScore = cand.lexicalPathScore*0.20 + cand.embeddingScore*0.40 + cand.archConfidence*0.14 + connectivityScore*0.10 + aggregationBonus*0.08 + abstractionScore*0.08
+				cand.element.SimilarityScore = cand.finalScore
+				cand.element.MatchReason = populateMatchReason(*cand)
+			}
+			sort.Slice(scoredCandidates[:reRankSize], func(i, j int) bool {
+				return scoredCandidates[i].finalScore > scoredCandidates[j].finalScore
+			})
 		}
 
 		sort.Slice(scoredCandidates, func(i, j int) bool {
@@ -243,6 +294,7 @@ func passesPopulateScoreGate(finalScore, lexicalPathScore float64) bool {
 
 type populateQuery struct {
 	Base     string
+	Compact  string
 	Enriched string
 	Tokens   map[string]bool
 	Hints    []string
@@ -259,6 +311,7 @@ type populateCandidate struct {
 	childCount       int
 	lexicalPathScore float64
 	finalScore       float64
+	vectorBytes      []byte
 }
 
 func buildPopulateQuery(ctx context.Context, db *sql.DB, viewID int64, userQuery string) (populateQuery, error) {
@@ -312,9 +365,10 @@ func buildPopulateQuery(ctx context.Context, db *sql.DB, viewID int64, userQuery
 	if len(hints) == 0 {
 		hints = []string{"service", "module", "subsystem", "application"}
 	}
-	enriched := fmt.Sprintf("Find code and architecture resources that implement the high-level architecture component: %s. Relevant aliases/roles: %s. Prefer services, apps, folders, modules, and major subsystems over individual functions.", base, strings.Join(hints, ", "))
+	compact := fmt.Sprintf("Architecture: %s. Roles: %s.", base, strings.Join(hints, ", "))
+	enriched := fmt.Sprintf("Architecture: %s. Roles: %s. Context: %s. Scope: subsystems and services.", base, strings.Join(hints, ", "), viewName)
 	tokens := getTokens(strings.Join(append([]string{base, viewName}, hints...), " "))
-	return populateQuery{Base: base, Enriched: enriched, Tokens: tokens, Hints: hints, ViewName: viewName}, nil
+	return populateQuery{Base: base, Compact: compact, Enriched: enriched, Tokens: tokens, Hints: hints, ViewName: viewName}, nil
 }
 
 func populateRoleHints(values ...string) []string {
@@ -328,23 +382,38 @@ func populateRoleHints(values ...string) []string {
 			}
 		}
 	}
-	if strings.Contains(source, "frontend") || strings.Contains(source, "front-end") || strings.Contains(source, "ui") || strings.Contains(source, "web") || strings.Contains(source, "react") || strings.Contains(source, "panel") {
+	if strings.Contains(source, "frontend") || strings.Contains(source, "front-end") || strings.Contains(source, "ui") || strings.Contains(source, "web") || strings.Contains(source, "react") || strings.Contains(source, "panel") || strings.Contains(source, "component") || strings.Contains(source, "canvas") || strings.Contains(source, "render") {
 		add("web app", "frontend", "ui", "client", "react", "panel")
 	}
-	if strings.Contains(source, "backend") || strings.Contains(source, "server") || strings.Contains(source, "api") || strings.Contains(source, "rpc") {
+	if strings.Contains(source, "backend") || strings.Contains(source, "server") || strings.Contains(source, "api") || strings.Contains(source, "rpc") || strings.Contains(source, "endpoint") || strings.Contains(source, "handler") || strings.Contains(source, "grpc") {
 		add("backend service", "api service", "server", "rpc", "handler")
 	}
-	if strings.Contains(source, "cli") || strings.Contains(source, "command") || strings.Contains(source, "cobra") {
+	if strings.Contains(source, "cli") || strings.Contains(source, "command") || strings.Contains(source, "cobra") || strings.Contains(source, "terminal") {
 		add("cli", "command", "terminal", "cobra")
 	}
-	if strings.Contains(source, "websocket") || strings.Contains(source, "real time") || strings.Contains(source, "realtime") || strings.Contains(source, "ws") {
+	if strings.Contains(source, "websocket") || strings.Contains(source, "real time") || strings.Contains(source, "realtime") || strings.Contains(source, "ws") || strings.Contains(source, "event") {
 		add("real time service", "websocket", "event stream", "live updates")
 	}
-	if strings.Contains(source, "watch") || strings.Contains(source, "scanner") || strings.Contains(source, "scan") {
+	if strings.Contains(source, "watch") || strings.Contains(source, "scanner") || strings.Contains(source, "scan") || strings.Contains(source, "analysis") {
 		add("watch service", "scanner", "repository analysis", "file watcher")
 	}
-	if strings.Contains(source, "job") || strings.Contains(source, "worker") || strings.Contains(source, "scheduler") {
+	if strings.Contains(source, "job") || strings.Contains(source, "worker") || strings.Contains(source, "scheduler") || strings.Contains(source, "queue") {
 		add("scheduler", "worker", "background job")
+	}
+	if strings.Contains(source, "database") || strings.Contains(source, "db") || strings.Contains(source, "sqlite") || strings.Contains(source, "storage") || strings.Contains(source, "sql") || strings.Contains(source, "persistence") {
+		add("database", "storage", "persistence", "sql")
+	}
+	if strings.Contains(source, "auth") || strings.Contains(source, "login") || strings.Contains(source, "session") || strings.Contains(source, "token") || strings.Contains(source, "permission") || strings.Contains(source, "security") {
+		add("authentication", "authorization", "security", "session")
+	}
+	if strings.Contains(source, "embedding") || strings.Contains(source, "vector") || strings.Contains(source, "semantic") || strings.Contains(source, "ai") || strings.Contains(source, "ml") || strings.Contains(source, "model") {
+		add("embedding", "vector", "semantic", "ai")
+	}
+	if strings.Contains(source, "config") || strings.Contains(source, "setting") || strings.Contains(source, "env") || strings.Contains(source, "environment") {
+		add("configuration", "settings", "environment")
+	}
+	if strings.Contains(source, "test") || strings.Contains(source, "mock") || strings.Contains(source, "fixture") {
+		add("testing", "test", "validation")
 	}
 	for _, value := range values {
 		for token := range getTokens(value) {
@@ -420,6 +489,7 @@ func loadPopulateCandidates(ctx context.Context, db *sql.DB, repoID, viewID, mod
 		if len(queryVector) > 0 && len(vectorBytes) > 0 {
 			cand.embeddingScore = math.Max(0, watch.CosineSimilarity(queryVector, bytesToVector(vectorBytes)))
 			cand.hasEmbedding = true
+			cand.vectorBytes = vectorBytes
 		}
 		out = append(out, cand)
 	}
@@ -444,14 +514,14 @@ func scorePopulateCandidates(query populateQuery, candidates []populateCandidate
 		if cand.element.Kind != nil {
 			kind = *cand.element.Kind
 		}
-		cand.lexicalPathScore = calculateLexicalPathScore(query.Base+" "+strings.Join(query.Hints, " "), query.ViewName, cand.element.Name, filePath+" "+kind+" "+string(cand.element.Tags))
+		cand.lexicalPathScore = calculateLexicalPathScore(query.Base, query.ViewName, cand.element.Name, filePath+" "+kind+" "+string(cand.element.Tags))
 		connectivityScore := 0.0
 		if connectedIDs[cand.element.ID] {
 			connectivityScore = 1.0
 		}
 		aggregationBonus := math.Min(1.0, math.Log1p(float64(cand.childCount))/3.0)
 		abstractionScore := abstractionPriority(kind)
-		cand.finalScore = cand.lexicalPathScore*0.34 + cand.embeddingScore*0.26 + cand.archConfidence*0.16 + connectivityScore*0.10 + aggregationBonus*0.08 + abstractionScore*0.06
+		cand.finalScore = cand.lexicalPathScore*0.20 + cand.embeddingScore*0.40 + cand.archConfidence*0.14 + connectivityScore*0.10 + aggregationBonus*0.08 + abstractionScore*0.08
 		cand.element.SimilarityScore = cand.finalScore
 		cand.element.MatchReason = populateMatchReason(*cand)
 	}
@@ -461,7 +531,7 @@ func scorePopulateCandidates(query populateQuery, candidates []populateCandidate
 func filterPopulateCandidates(candidates []populateCandidate, includeFiles bool) []populateCandidate {
 	out := []populateCandidate{}
 	for _, cand := range candidates {
-		if cand.finalScore >= 0.22 || cand.lexicalPathScore >= 0.35 || (cand.hasEmbedding && cand.embeddingScore >= 0.62) {
+		if cand.finalScore >= 0.18 || cand.lexicalPathScore >= 0.40 || (cand.hasEmbedding && cand.embeddingScore >= 0.55) {
 			if !includeFiles && cand.element.Kind != nil && *cand.element.Kind == "file" {
 				continue
 			}
@@ -514,6 +584,18 @@ func bytesToVector(data []byte) watch.Vector {
 	return vector
 }
 
+func vectorsEqual(a, b watch.Vector) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func formatIDs(ids []int64) string {
 	var sb strings.Builder
 	for i, id := range ids {
@@ -552,7 +634,6 @@ func calculateLexicalPathScore(q string, viewName string, elementName string, fi
 
 	score := 0.0
 
-	// 1. Exact or variant match with query/view name
 	qLower := strings.ToLower(strings.TrimSpace(q))
 	elLower := strings.ToLower(strings.TrimSpace(elementName))
 	vLower := strings.ToLower(strings.TrimSpace(viewName))
@@ -578,19 +659,40 @@ func calculateLexicalPathScore(q string, viewName string, elementName string, fi
 		}
 	}
 
-	// 2. Path segment match
-	pathMatch := false
+	pathMatch := 0.0
 	for t := range pathTokens {
 		if queryTokens[t] || viewTokens[t] {
-			pathMatch = true
+			pathMatch = 0.3
 			break
 		}
 	}
-	if pathMatch {
-		score += 0.3
+	if pathMatch == 0.0 {
+		pathLower := strings.ToLower(filePath)
+		qLower2 := strings.ToLower(q)
+		vLower2 := strings.ToLower(viewName)
+		for token := range queryTokens {
+			if len(token) >= 3 && strings.Contains(pathLower, token) {
+				pathMatch = 0.15
+				break
+			}
+		}
+		if pathMatch == 0.0 {
+			for token := range viewTokens {
+				if len(token) >= 3 && strings.Contains(pathLower, token) {
+					pathMatch = 0.15
+					break
+				}
+			}
+		}
+		if pathMatch == 0.0 && (strings.Contains(qLower2, " ") || strings.Contains(vLower2, " ")) {
+			pathMatch = 0.0
+		}
 	}
+	if pathMatch == 0.0 {
+		pathMatch = 0.05
+	}
+	score += pathMatch
 
-	// 3. Token overlap
 	overlapCount := 0
 	for t := range nameTokens {
 		if queryTokens[t] || viewTokens[t] {

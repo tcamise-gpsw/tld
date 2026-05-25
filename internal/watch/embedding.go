@@ -46,6 +46,7 @@ type EmbeddingInput struct {
 	OwnerType string
 	OwnerKey  string
 	Text      string
+	Language  string
 }
 
 type Vector []float32
