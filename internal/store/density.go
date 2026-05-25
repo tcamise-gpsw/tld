@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/pkg/app"
 	"github.com/uptrace/bun"
 )
 

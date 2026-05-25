@@ -2,6 +2,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS elements (
   id BIGSERIAL PRIMARY KEY,
+  org_id UUID NULL,
   name TEXT NOT NULL,
   kind TEXT NULL,
   description TEXT NULL,
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS elements (
 
 CREATE TABLE IF NOT EXISTS views (
   id BIGSERIAL PRIMARY KEY,
+  org_id UUID NULL,
   owner_element_id BIGINT NULL REFERENCES elements(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NULL,
@@ -44,6 +46,7 @@ CREATE TABLE IF NOT EXISTS placements (
 
 CREATE TABLE IF NOT EXISTS connectors (
   id BIGSERIAL PRIMARY KEY,
+  org_id UUID NULL,
   view_id BIGINT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
   source_element_id BIGINT NOT NULL REFERENCES elements(id) ON DELETE CASCADE,
   target_element_id BIGINT NOT NULL REFERENCES elements(id) ON DELETE CASCADE,
@@ -71,6 +74,7 @@ CREATE TABLE IF NOT EXISTS view_layers (
 );
 
 CREATE TABLE IF NOT EXISTS tags (
+  org_id TEXT NULL,
   name TEXT PRIMARY KEY,
   color TEXT NOT NULL,
   description TEXT NULL
@@ -451,6 +455,7 @@ CREATE INDEX IF NOT EXISTS idx_watch_representation_diffs_version_id
 
 CREATE TABLE IF NOT EXISTS workspace_versions (
   id BIGSERIAL PRIMARY KEY,
+  org_id UUID NULL,
   version_id TEXT NOT NULL UNIQUE,
   source TEXT NOT NULL,
   parent_version_id BIGINT NULL REFERENCES workspace_versions(id) ON DELETE SET NULL,

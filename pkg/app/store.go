@@ -102,6 +102,10 @@ type PlanConnector struct {
 	TargetHandle     *string `json:"target_handle"`
 }
 
+func NewStore(db *sql.DB, bunDB *bun.DB, dialect dbrepo.Dialect) *Store {
+	return &Store{db: db, bun: bunDB, dialect: dialect}
+}
+
 func OpenStore(dbPath string, migrations embed.FS) (*Store, error) {
 	return OpenStoreWithOptions(context.Background(), dbrepo.DBOptions{
 		Dialect:    dbrepo.DialectSQLite,

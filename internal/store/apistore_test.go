@@ -9,7 +9,7 @@ import (
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"github.com/google/uuid"
 	assets "github.com/mertcikla/tld/v2"
-	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/pkg/app"
 	"github.com/mertcikla/tld/v2/pkg/api"
 	"google.golang.org/protobuf/encoding/protojson"
 )

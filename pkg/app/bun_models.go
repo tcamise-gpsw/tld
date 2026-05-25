@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 )
 
@@ -21,9 +22,10 @@ type viewLayerModel struct {
 type tagModel struct {
 	bun.BaseModel `bun:"table:tags"`
 
-	Name        string  `bun:"name,pk"`
-	Color       string  `bun:"color"`
-	Description *string `bun:"description"`
+	OrgID       *uuid.UUID `bun:"org_id,nullzero"`
+	Name        string     `bun:"name,pk"`
+	Color       string     `bun:"color"`
+	Description *string    `bun:"description"`
 }
 
 type elementPlacementModel struct {
@@ -41,56 +43,59 @@ type elementPlacementModel struct {
 type connectorModel struct {
 	bun.BaseModel `bun:"table:connectors"`
 
-	ID              int64   `bun:"id,pk,autoincrement"`
-	ViewID          int64   `bun:"view_id"`
-	SourceElementID int64   `bun:"source_element_id"`
-	TargetElementID int64   `bun:"target_element_id"`
-	Label           *string `bun:"label"`
-	Description     *string `bun:"description"`
-	Relationship    *string `bun:"relationship"`
-	Direction       string  `bun:"direction"`
-	Style           string  `bun:"style"`
-	URL             *string `bun:"url"`
-	SourceHandle    *string `bun:"source_handle"`
-	TargetHandle    *string `bun:"target_handle"`
-	Tags            string  `bun:"tags"`
-	CreatedAt       string  `bun:"created_at"`
-	UpdatedAt       string  `bun:"updated_at"`
+	ID              int64      `bun:"id,pk,autoincrement"`
+	OrgID           *uuid.UUID `bun:"org_id,nullzero"`
+	ViewID          int64      `bun:"view_id"`
+	SourceElementID int64      `bun:"source_element_id"`
+	TargetElementID int64      `bun:"target_element_id"`
+	Label           *string    `bun:"label"`
+	Description     *string    `bun:"description"`
+	Relationship    *string    `bun:"relationship"`
+	Direction       string     `bun:"direction"`
+	Style           string     `bun:"style"`
+	URL             *string    `bun:"url"`
+	SourceHandle    *string    `bun:"source_handle"`
+	TargetHandle    *string    `bun:"target_handle"`
+	Tags            string     `bun:"tags"`
+	CreatedAt       string     `bun:"created_at"`
+	UpdatedAt       string     `bun:"updated_at"`
 }
 
 type elementModel struct {
 	bun.BaseModel `bun:"table:elements"`
 
-	ID                   int64   `bun:"id,pk,autoincrement"`
-	Name                 string  `bun:"name"`
-	Kind                 *string `bun:"kind"`
-	Description          *string `bun:"description"`
-	Technology           *string `bun:"technology"`
-	URL                  *string `bun:"url"`
-	LogoURL              *string `bun:"logo_url"`
-	TechnologyConnectors string  `bun:"technology_connectors"`
-	Tags                 string  `bun:"tags"`
-	Repo                 *string `bun:"repo"`
-	Branch               *string `bun:"branch"`
-	FilePath             *string `bun:"file_path"`
-	Language             *string `bun:"language"`
-	CreatedAt            string  `bun:"created_at"`
-	UpdatedAt            string  `bun:"updated_at"`
+	ID                   int64      `bun:"id,pk,autoincrement"`
+	OrgID                *uuid.UUID `bun:"org_id,nullzero"`
+	Name                 string     `bun:"name"`
+	Kind                 *string    `bun:"kind"`
+	Description          *string    `bun:"description"`
+	Technology           *string    `bun:"technology"`
+	URL                  *string    `bun:"url"`
+	LogoURL              *string    `bun:"logo_url"`
+	TechnologyConnectors string     `bun:"technology_connectors"`
+	Tags                 string     `bun:"tags"`
+	Repo                 *string    `bun:"repo"`
+	Branch               *string    `bun:"branch"`
+	FilePath             *string    `bun:"file_path"`
+	Language             *string    `bun:"language"`
+	CreatedAt            string     `bun:"created_at"`
+	UpdatedAt            string     `bun:"updated_at"`
 }
 
 type viewModel struct {
 	bun.BaseModel `bun:"table:views"`
 
-	ID             int64   `bun:"id,pk,autoincrement"`
-	OwnerElementID *int64  `bun:"owner_element_id"`
-	Name           string  `bun:"name"`
-	Description    *string `bun:"description"`
-	LevelLabel     *string `bun:"level_label"`
-	Tags           string  `bun:"tags"`
-	Level          int     `bun:"level"`
-	DensityLevel   int     `bun:"density_level"`
-	CreatedAt      string  `bun:"created_at"`
-	UpdatedAt      string  `bun:"updated_at"`
+	ID             int64      `bun:"id,pk,autoincrement"`
+	OrgID          *uuid.UUID `bun:"org_id,nullzero"`
+	OwnerElementID *int64     `bun:"owner_element_id"`
+	Name           string     `bun:"name"`
+	Description    *string    `bun:"description"`
+	LevelLabel     *string    `bun:"level_label"`
+	Tags           string     `bun:"tags"`
+	Level          int        `bun:"level"`
+	DensityLevel   int        `bun:"density_level"`
+	CreatedAt      string     `bun:"created_at"`
+	UpdatedAt      string     `bun:"updated_at"`
 }
 
 type visibilityOverrideModel struct {

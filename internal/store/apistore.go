@@ -12,7 +12,7 @@ import (
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/pkg/app"
 	"github.com/mertcikla/tld/v2/internal/layout"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/mertcikla/tld/v2/pkg/api"
