@@ -116,19 +116,40 @@ export default function ProxyConnectorPanel({
     >
       <PanelHeader title="Connectors" onClose={onClose} />
 
-      <Box flex={1} overflowY="auto" px={4} py={4}>
+      <Box flex={1} overflowY="auto" px={4} py={3}>
         {details ? (
-          <VStack align="stretch" spacing={6}>
-            {/* Header info */}
+          <VStack align="stretch" spacing={5}>
+            {/* Summary header */}
             <Box>
-              <HStack spacing={2} mb={1}>
-                <Text color="white" fontSize="s" letterSpacing="-0.01em">
+              <HStack spacing={1.5} mb={1} minWidth={0} overflow="hidden">
+                <Text
+                  color="white"
+                  fontSize="sm"
+                  fontWeight="semibold"
+                  letterSpacing="-0.01em"
+                  isTruncated
+                  flex={1}
+                  minWidth={0}
+                >
                   {details.sourceAnchorName}
                 </Text>
-                <Text color="whiteAlpha.500" fontSize="sm" fontFamily="mono">
+                <Text
+                  color="whiteAlpha.400"
+                  fontSize="xs"
+                  fontFamily="mono"
+                  flexShrink={0}
+                >
                   {connectorDirectionArrow(summarizedDirection(details))}
                 </Text>
-                <Text color="white" fontSize="s" letterSpacing="-0.01em">
+                <Text
+                  color="white"
+                  fontSize="sm"
+                  fontWeight="semibold"
+                  letterSpacing="-0.01em"
+                  isTruncated
+                  flex={1}
+                  minWidth={0}
+                >
                   {details.targetAnchorName}
                 </Text>
               </HStack>
@@ -139,93 +160,130 @@ export default function ProxyConnectorPanel({
 
             <Divider borderColor="whiteAlpha.100" />
 
-            <VStack align="stretch" spacing={4}>
-              <Text color="gray.500" fontSize="10px" fontWeight="800" letterSpacing="0.1em" textTransform="uppercase">
+            <VStack align="stretch" spacing={3}>
+              <Text
+                color="gray.500"
+                fontSize="10px"
+                fontWeight="800"
+                letterSpacing="0.12em"
+                textTransform="uppercase"
+              >
                 Underlying Connectors
               </Text>
 
-              <VStack align="stretch" spacing={3}>
+              <VStack align="stretch" spacing={2}>
                 {details.connectors.map((leaf, idx) => {
                   const navigationTarget = resolveLeafNavigationTarget(leaf, snapshot, viewId)
                   return (
                     <Box
                       key={`${leaf.connector.id}-${idx}`}
                       px={3}
-                      py={3}
-                      rounded="xl"
+                      py={2.5}
+                      rounded="lg"
                       bg="whiteAlpha.50"
                       border="1px solid"
                       borderColor="whiteAlpha.100"
                       _hover={{ bg: 'whiteAlpha.100', borderColor: 'whiteAlpha.200' }}
-                      transition="all 0.2s"
+                      transition="all 0.15s"
                     >
-                      <VStack align="stretch" spacing={3}>
-                        <Box>
-                          <HStack justify="space-between" align="start">
-                            <VStack align="start" spacing={1} flex={1}>
-                              <HStack spacing={2}>
-                                <Text color="white" fontSize="sm" fontWeight="semibold" isTruncated>
-                                  {truncate(leaf.source.actualElementName)}
-                                </Text>
-                                <Text color="whiteAlpha.500" fontSize="sm" fontFamily="mono">
-                                  {connectorDirectionArrow(leaf.connector.direction)}
-                                </Text>
-                                <Text color="white" fontSize="sm" fontWeight="semibold" isTruncated>
-                                  {truncate(leaf.target.actualElementName)}
-                                </Text>
-                              </HStack>
-
-                              {(leaf.connector.label || leaf.connector.relationship) && (
-                                <Text color="gray.400" fontSize="xs" fontStyle={!leaf.connector.label ? 'italic' : 'normal'}>
-                                  {leaf.connector.label || leaf.connector.relationship}
-                                </Text>
-                              )}
-                            </VStack>
-
-                            {canEdit && (
-                              <HStack spacing={1} mt={-1}>
-                                <IconButton
-                                  aria-label="Edit connector"
-                                  icon={<EditIcon size={14} />}
-                                  size="xs"
-                                  variant="ghost"
-                                  color="blue.300"
-                                  _hover={{ bg: 'blue.900', color: 'blue.100' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    onEdit?.(leaf.connector)
-                                  }}
-                                />
-                                <IconButton
-                                  aria-label="Delete connector"
-                                  icon={<TrashIcon size={14} />}
-                                  size="xs"
-                                  variant="ghost"
-                                  color="red.400"
-                                  _hover={{ bg: 'red.900', color: 'red.100' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    onDelete?.(leaf.connector.id, leaf.ownerViewId)
-                                  }}
-                                />
-                              </HStack>
-                            )}
+                      <VStack align="stretch" spacing={2}>
+                        {/* Connector identity row */}
+                        <HStack justify="space-between" align="center" spacing={1}>
+                          {/* Source → Target */}
+                          <HStack spacing={1} flex={1} minWidth={0} overflow="hidden">
+                            <Text
+                              color="white"
+                              fontSize="xs"
+                              fontWeight="semibold"
+                              isTruncated
+                              minWidth={0}
+                              flex={1}
+                            >
+                              {truncate(leaf.source.actualElementName)}
+                            </Text>
+                            <Text
+                              color="whiteAlpha.400"
+                              fontSize="xs"
+                              fontFamily="mono"
+                              flexShrink={0}
+                            >
+                              {connectorDirectionArrow(leaf.connector.direction)}
+                            </Text>
+                            <Text
+                              color="white"
+                              fontSize="xs"
+                              fontWeight="semibold"
+                              isTruncated
+                              minWidth={0}
+                              flex={1}
+                            >
+                              {truncate(leaf.target.actualElementName)}
+                            </Text>
                           </HStack>
-                        </Box>
 
+                          {/* Edit / Delete actions */}
+                          {canEdit && (
+                            <HStack spacing={0.5} flexShrink={0}>
+                              <IconButton
+                                aria-label="Edit connector"
+                                icon={<EditIcon size={13} />}
+                                size="xs"
+                                variant="ghost"
+                                color="blue.300"
+                                _hover={{ bg: 'blue.900', color: 'blue.100' }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onEdit?.(leaf.connector)
+                                }}
+                              />
+                              <IconButton
+                                aria-label="Delete connector"
+                                icon={<TrashIcon size={13} />}
+                                size="xs"
+                                variant="ghost"
+                                color="red.400"
+                                _hover={{ bg: 'red.900', color: 'red.100' }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onDelete?.(leaf.connector.id, leaf.ownerViewId)
+                                }}
+                              />
+                            </HStack>
+                          )}
+                        </HStack>
+
+                        {/* Label / relationship */}
+                        {(leaf.connector.label || leaf.connector.relationship) && (
+                          <Text
+                            color="gray.400"
+                            fontSize="xs"
+                            fontStyle={!leaf.connector.label ? 'italic' : 'normal'}
+                            noOfLines={1}
+                          >
+                            {leaf.connector.label || leaf.connector.relationship}
+                          </Text>
+                        )}
+
+                        {/* Description */}
                         {leaf.connector.description && (
-                          <Text color="gray.500" fontSize="xs" lineHeight="tall" pb={1}>
+                          <Text
+                            color="gray.500"
+                            fontSize="xs"
+                            lineHeight="1.5"
+                            noOfLines={3}
+                          >
                             {leaf.connector.description}
                           </Text>
                         )}
 
+                        {/* Navigation button */}
                         {navigationTarget && (
                           <Button
                             size="xs"
                             variant="clay"
                             colorScheme="blue"
                             color="blue.100"
-                            leftIcon={<NavigationIcon size={12} />}
+                            leftIcon={<NavigationIcon size={11} />}
                             onClick={(e) => {
                               e.preventDefault()
                               e.stopPropagation()
@@ -234,8 +292,9 @@ export default function ProxyConnectorPanel({
                             }}
                             w="full"
                             justifyContent="flex-start"
-                            h="28px"
+                            h="26px"
                             fontSize="11px"
+                            mt={0.5}
                           >
                             Open {navigationTarget.viewName}
                           </Button>
@@ -256,4 +315,3 @@ export default function ProxyConnectorPanel({
     </SlidingPanel>
   )
 }
-
