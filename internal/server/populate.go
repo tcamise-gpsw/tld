@@ -40,6 +40,10 @@ type populateElementResult struct {
 }
 
 func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore) {
+	mux.HandleFunc("GET /api/debug/populate-reranker-metrics", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, snapshotPopulateRerankerMetrics())
+	})
+
 	mux.HandleFunc("GET /api/views/{id}/populate-query", func(w http.ResponseWriter, r *http.Request) {
 		viewID, ok := parseViewID(w, r)
 		if !ok {
@@ -164,7 +168,8 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 		}
 
 		queryVector := watch.Vector(nil)
-		enrichedVector := watch.Vector(nil)
+		recallVectors := []watch.Vector(nil)
+		rerankVectors := []watch.Vector(nil)
 		if hasModel {
 			cfg, err := workspace.LoadGlobalConfig()
 			if err != nil {
@@ -186,25 +191,14 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			if closer, ok := provider.(watch.ClosableProvider); ok {
 				defer func() { _ = closer.Close() }()
 			}
-			embedInputs := []watch.EmbeddingInput{
-				{OwnerType: "query", Text: popQuery.Compact},
-			}
-			if popQuery.Compact != popQuery.Enriched {
-				embedInputs = append(embedInputs, watch.EmbeddingInput{OwnerType: "query", Text: popQuery.Enriched})
-			}
-			vectors, err := provider.Embed(r.Context(), embedInputs)
+			queryEmbeddings, err := embedPopulateQuery(r.Context(), provider, popQuery)
 			if err != nil {
 				writeJSONError(w, http.StatusInternalServerError, "failed to embed query: "+err.Error())
 				return
 			}
-			if len(vectors) >= 1 {
-				queryVector = vectors[0]
-			}
-			if len(vectors) >= 2 {
-				enrichedVector = vectors[1]
-			} else {
-				enrichedVector = queryVector
-			}
+			recallVectors = queryEmbeddings.recallVectors()
+			rerankVectors = queryEmbeddings.rerankVectors()
+			queryVector = firstPopulateQueryVector(recallVectors)
 		}
 
 		candidates, err := loadPopulateCandidates(r.Context(), sqliteStore.DB(), repoID, viewID, modelID, queryVector, false)
@@ -212,35 +206,39 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			writeJSONError(w, http.StatusInternalServerError, "failed to load populate candidates: "+err.Error())
 			return
 		}
+		applyPopulateEmbeddingScores(candidates, recallVectors)
 		scoredCandidates := scorePopulateCandidates(popQuery, candidates, connectedIDs)
+		sortPopulateCandidates(scoredCandidates)
 		scoredCandidates = filterPopulateCandidates(scoredCandidates, false)
+		if len(scoredCandidates) == 0 {
+			scoredCandidates = bootstrapPopulateCandidates(candidates, limit)
+		}
 		if len(scoredCandidates) == 0 {
 			fallback, err := loadPopulateCandidates(r.Context(), sqliteStore.DB(), repoID, viewID, modelID, queryVector, true)
 			if err != nil {
 				writeJSONError(w, http.StatusInternalServerError, "failed to load fallback populate candidates: "+err.Error())
 				return
 			}
-			scoredCandidates = filterPopulateCandidates(scorePopulateCandidates(popQuery, fallback, connectedIDs), true)
+			applyPopulateEmbeddingScores(fallback, recallVectors)
+			scoredCandidates = scorePopulateCandidates(popQuery, fallback, connectedIDs)
+			sortPopulateCandidates(scoredCandidates)
+			scoredCandidates = filterPopulateCandidates(scoredCandidates, true)
+			if len(scoredCandidates) == 0 {
+				scoredCandidates = bootstrapPopulateCandidates(fallback, limit)
+			}
 		}
 
-		sort.Slice(scoredCandidates, func(i, j int) bool {
-			if scoredCandidates[i].finalScore == scoredCandidates[j].finalScore {
-				return scoredCandidates[i].element.ID < scoredCandidates[j].element.ID
-			}
-			return scoredCandidates[i].finalScore > scoredCandidates[j].finalScore
-		})
+		sortPopulateCandidates(scoredCandidates)
 
-		reRankSize := limit * 3
+		reRankSize := limit * 2
 		if reRankSize > len(scoredCandidates) {
 			reRankSize = len(scoredCandidates)
 		}
-		if reRankSize > 0 && len(enrichedVector) > 0 && !vectorsEqual(queryVector, enrichedVector) {
+		if reRankSize > 0 && hasAdditionalPopulateQueryVectors(recallVectors, rerankVectors) {
 			for i := 0; i < reRankSize; i++ {
 				cand := &scoredCandidates[i]
-				if cand.hasEmbedding {
-					cand.embeddingScore = math.Max(0, watch.CosineSimilarity(enrichedVector, bytesToVector(cand.vectorBytes)))
-				}
-				rescorePopulateChildEmbeddings(cand, enrichedVector)
+				cand.embeddingScore = populateEmbeddingScore(rerankVectors, cand.vectorBytes)
+				rescorePopulateChildEmbeddings(cand, rerankVectors)
 			}
 			for i := 0; i < reRankSize; i++ {
 				cand := &scoredCandidates[i]
@@ -257,17 +255,10 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 				cand.element.SimilarityScore = cand.finalScore
 				cand.element.MatchReason = populateMatchReason(*cand)
 			}
-			sort.Slice(scoredCandidates[:reRankSize], func(i, j int) bool {
-				return scoredCandidates[i].finalScore > scoredCandidates[j].finalScore
-			})
+			sortPopulateCandidates(scoredCandidates)
 		}
 
-		sort.Slice(scoredCandidates, func(i, j int) bool {
-			if scoredCandidates[i].finalScore == scoredCandidates[j].finalScore {
-				return scoredCandidates[i].element.ID < scoredCandidates[j].element.ID
-			}
-			return scoredCandidates[i].finalScore > scoredCandidates[j].finalScore
-		})
+		bestEffortPopulateRerank(r.Context(), sqliteStore.DB(), repoID, popQuery, scoredCandidates, limit)
 
 		if len(scoredCandidates) > limit {
 			scoredCandidates = scoredCandidates[:limit]
@@ -301,6 +292,12 @@ type populateQuery struct {
 	ViewName string
 }
 
+type populateQueryEmbeddings struct {
+	Base     watch.Vector
+	Compact  watch.Vector
+	Enriched watch.Vector
+}
+
 type populateCandidate struct {
 	element          populateElementResult
 	ownerType        string
@@ -308,6 +305,8 @@ type populateCandidate struct {
 	children         []populateChildCandidate
 	embeddingScore   float64
 	hasEmbedding     bool
+	rerankerScore    float64
+	hasRerankerScore bool
 	archConfidence   float64
 	childCount       int
 	childMatchCount  int
@@ -330,125 +329,15 @@ type populateChildCandidate struct {
 
 func buildPopulateQuery(ctx context.Context, db *sql.DB, viewID int64, userQuery string) (populateQuery, error) {
 	var viewName string
-	var ownerElementID sql.NullInt64
-	var viewDescription sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT name, owner_element_id, description FROM views WHERE id = ?`, viewID).Scan(&viewName, &ownerElementID, &viewDescription); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT name FROM views WHERE id = ?`, viewID).Scan(&viewName); err != nil {
 		return populateQuery{}, err
 	}
 	base := strings.TrimSpace(userQuery)
 	if base == "" {
 		base = strings.TrimSpace(viewName)
 	}
-	parts := []string{base, viewName}
-	if viewDescription.Valid {
-		parts = append(parts, viewDescription.String)
-	}
-	if ownerElementID.Valid {
-		var name string
-		var kind, description, filePath sql.NullString
-		if err := db.QueryRowContext(ctx, `SELECT name, kind, description, file_path FROM elements WHERE id = ?`, ownerElementID.Int64).Scan(&name, &kind, &description, &filePath); err == nil {
-			parts = append(parts, name)
-			if kind.Valid {
-				parts = append(parts, kind.String)
-			}
-			if description.Valid {
-				parts = append(parts, description.String)
-			}
-			if filePath.Valid {
-				parts = append(parts, filePath.String)
-			}
-		}
-	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT e.name, COALESCE(e.kind, ''), COALESCE(e.file_path, '')
-		FROM placements p
-		JOIN elements e ON e.id = p.element_id
-		WHERE p.view_id = ?
-		ORDER BY p.id
-		LIMIT 12`, viewID)
-	if err == nil {
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var name, kind, filePath string
-			if rows.Scan(&name, &kind, &filePath) == nil {
-				parts = append(parts, name, kind, filePath)
-			}
-		}
-	}
-	hints := populateRoleHints(parts...)
-	if len(hints) == 0 {
-		hints = []string{"service", "module", "subsystem", "application"}
-	}
-	compact := fmt.Sprintf("Architecture: %s. Roles: %s.", base, strings.Join(hints, ", "))
-	enriched := fmt.Sprintf("Architecture: %s. Roles: %s. Context: %s. Scope: subsystems and services.", base, strings.Join(hints, ", "), viewName)
-	tokens := getTokens(strings.Join(append([]string{base, viewName}, hints...), " "))
-	return populateQuery{Base: base, Compact: compact, Enriched: enriched, Tokens: tokens, Hints: hints, ViewName: viewName}, nil
-}
-
-func populateRoleHints(values ...string) []string {
-	source := strings.ToLower(strings.Join(values, " "))
-	hints := []string{}
-	add := func(items ...string) {
-		for _, item := range items {
-			item = strings.TrimSpace(item)
-			if item != "" && !containsString(hints, item) {
-				hints = append(hints, item)
-			}
-		}
-	}
-	if strings.Contains(source, "frontend") || strings.Contains(source, "front-end") || strings.Contains(source, "ui") || strings.Contains(source, "web") || strings.Contains(source, "react") || strings.Contains(source, "panel") || strings.Contains(source, "component") || strings.Contains(source, "canvas") || strings.Contains(source, "render") {
-		add("web app", "frontend", "ui", "client", "react", "panel")
-	}
-	if strings.Contains(source, "backend") || strings.Contains(source, "server") || strings.Contains(source, "api") || strings.Contains(source, "rpc") || strings.Contains(source, "endpoint") || strings.Contains(source, "handler") || strings.Contains(source, "grpc") {
-		add("backend service", "api service", "server", "rpc", "handler")
-	}
-	if strings.Contains(source, "cli") || strings.Contains(source, "command") || strings.Contains(source, "cobra") || strings.Contains(source, "terminal") {
-		add("cli", "command", "terminal", "cobra")
-	}
-	if strings.Contains(source, "websocket") || strings.Contains(source, "real time") || strings.Contains(source, "realtime") || strings.Contains(source, "ws") || strings.Contains(source, "event") {
-		add("real time service", "websocket", "event stream", "live updates")
-	}
-	if strings.Contains(source, "watch") || strings.Contains(source, "scanner") || strings.Contains(source, "scan") || strings.Contains(source, "analysis") {
-		add("watch service", "scanner", "repository analysis", "file watcher")
-	}
-	if strings.Contains(source, "job") || strings.Contains(source, "worker") || strings.Contains(source, "scheduler") || strings.Contains(source, "queue") {
-		add("scheduler", "worker", "background job")
-	}
-	if strings.Contains(source, "database") || strings.Contains(source, "db") || strings.Contains(source, "sqlite") || strings.Contains(source, "storage") || strings.Contains(source, "sql") || strings.Contains(source, "persistence") {
-		add("database", "storage", "persistence", "sql")
-	}
-	if strings.Contains(source, "auth") || strings.Contains(source, "login") || strings.Contains(source, "session") || strings.Contains(source, "token") || strings.Contains(source, "permission") || strings.Contains(source, "security") {
-		add("authentication", "authorization", "security", "session")
-	}
-	if strings.Contains(source, "embedding") || strings.Contains(source, "vector") || strings.Contains(source, "semantic") || strings.Contains(source, "ai") || strings.Contains(source, "ml") || strings.Contains(source, "model") {
-		add("embedding", "vector", "semantic", "ai")
-	}
-	if strings.Contains(source, "config") || strings.Contains(source, "setting") || strings.Contains(source, "env") || strings.Contains(source, "environment") {
-		add("configuration", "settings", "environment")
-	}
-	if strings.Contains(source, "test") || strings.Contains(source, "mock") || strings.Contains(source, "fixture") {
-		add("testing", "test", "validation")
-	}
-	for _, value := range values {
-		for token := range getTokens(value) {
-			if len(token) >= 3 {
-				add(token)
-			}
-		}
-	}
-	if len(hints) > 12 {
-		hints = hints[:12]
-	}
-	return hints
-}
-
-func containsString(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
+	tokens := getTokens(base)
+	return populateQuery{Base: base, Compact: base, Enriched: base, Tokens: tokens, ViewName: viewName}, nil
 }
 
 func loadPopulateCandidates(ctx context.Context, db *sql.DB, repoID, viewID, modelID int64, queryVector watch.Vector, includeFiles bool) ([]populateCandidate, error) {
@@ -462,15 +351,17 @@ func loadPopulateCandidates(ctx context.Context, db *sql.DB, repoID, viewID, mod
 		       m.owner_type, m.owner_key,
 		       COALESCE((SELECT MAX(confidence) FROM watch_architecture_links al WHERE al.target_resource_type = 'element' AND al.target_resource_id = el.id), 0),
 		       COALESCE((SELECT COUNT(*) FROM placements cp JOIN views cv ON cv.id = cp.view_id WHERE cv.owner_element_id = el.id), 0),
-		       pe.vector
+		       pe_resource.vector,
+		       pe_owner.vector
 		FROM watch_materialization m
 		JOIN elements el ON el.id = m.resource_id
-		LEFT JOIN watch_embeddings pe ON pe.model_id = ? AND pe.owner_type = 'populate_resource' AND pe.owner_key = m.owner_type || ':' || m.owner_key
+		LEFT JOIN watch_embeddings pe_resource ON pe_resource.model_id = ? AND pe_resource.owner_type = 'populate_resource' AND pe_resource.owner_key = m.owner_type || ':' || m.owner_key
+		LEFT JOIN watch_embeddings pe_owner ON pe_owner.model_id = ? AND pe_owner.owner_type = m.owner_type AND pe_owner.owner_key = m.owner_key
 		WHERE m.repository_id = ?
 		  AND m.resource_type = 'element'
 		  AND COALESCE(el.kind, '') IN (%s)
 		  AND el.id NOT IN (SELECT element_id FROM placements WHERE view_id = ?)
-		ORDER BY el.kind, el.name`, strings.Join(kinds, ",")), modelID, repoID, viewID)
+		ORDER BY el.kind, el.name`, strings.Join(kinds, ",")), modelID, modelID, repoID, viewID)
 	if err != nil {
 		return nil, err
 	}
@@ -480,13 +371,14 @@ func loadPopulateCandidates(ctx context.Context, db *sql.DB, repoID, viewID, mod
 		var cand populateCandidate
 		var kind, description, technology, url, logoURL, repo, branch, filePath, language sql.NullString
 		var techRaw, tagRaw, createdAt, updatedAt string
-		var vectorBytes []byte
+		var resourceVectorBytes, ownerVectorBytes []byte
 		if err := rows.Scan(
 			&cand.element.ID, &cand.element.Name, &kind, &description, &technology, &url, &logoURL, &techRaw, &tagRaw, &repo, &branch, &filePath, &language, &createdAt, &updatedAt,
-			&cand.ownerType, &cand.ownerKey, &cand.archConfidence, &cand.childCount, &vectorBytes,
+			&cand.ownerType, &cand.ownerKey, &cand.archConfidence, &cand.childCount, &resourceVectorBytes, &ownerVectorBytes,
 		); err != nil {
 			return nil, err
 		}
+		vectorBytes := preferredPopulateEmbeddingVector(resourceVectorBytes, ownerVectorBytes)
 		cand.element.Kind = nullStringPtr(kind)
 		cand.element.Description = nullStringPtr(description)
 		cand.element.Technology = nullStringPtr(technology)
@@ -534,24 +426,26 @@ func hydratePopulateCandidateChildren(ctx context.Context, db *sql.DB, modelID i
 	}
 	sort.Slice(parentIDs, func(i, j int) bool { return parentIDs[i] < parentIDs[j] })
 	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT parent_id, name, kind, file_path, tags, vector
+		SELECT parent_id, name, kind, file_path, tags, resource_vector, owner_vector
 		FROM (
 			SELECT child_view.owner_element_id AS parent_id,
 			       child.name AS name,
 			       COALESCE(child.kind, '') AS kind,
 			       COALESCE(child.file_path, '') AS file_path,
 			       child.tags AS tags,
-			       pe.vector AS vector,
+			       pe_resource.vector AS resource_vector,
+			       pe_owner.vector AS owner_vector,
 			       ROW_NUMBER() OVER (PARTITION BY child_view.owner_element_id ORDER BY placement.id) AS child_rank
 			FROM views child_view
 			JOIN placements placement ON placement.view_id = child_view.id
 			JOIN elements child ON child.id = placement.element_id
 			LEFT JOIN watch_materialization child_mat ON child_mat.resource_type = 'element' AND child_mat.resource_id = child.id
-			LEFT JOIN watch_embeddings pe ON pe.model_id = ? AND pe.owner_type = 'populate_resource' AND pe.owner_key = child_mat.owner_type || ':' || child_mat.owner_key
+			LEFT JOIN watch_embeddings pe_resource ON pe_resource.model_id = ? AND pe_resource.owner_type = 'populate_resource' AND pe_resource.owner_key = child_mat.owner_type || ':' || child_mat.owner_key
+			LEFT JOIN watch_embeddings pe_owner ON pe_owner.model_id = ? AND pe_owner.owner_type = child_mat.owner_type AND pe_owner.owner_key = child_mat.owner_key
 			WHERE child_view.owner_element_id IN (%s)
 		)
 		WHERE child_rank <= 80
-		ORDER BY parent_id, child_rank`, formatIDs(parentIDs)), modelID)
+		ORDER BY parent_id, child_rank`, formatIDs(parentIDs)), modelID, modelID)
 	if err != nil {
 		return err
 	}
@@ -559,10 +453,11 @@ func hydratePopulateCandidateChildren(ctx context.Context, db *sql.DB, modelID i
 	for rows.Next() {
 		var parentID int64
 		var child populateChildCandidate
-		var vectorBytes []byte
-		if err := rows.Scan(&parentID, &child.name, &child.kind, &child.filePath, &child.tags, &vectorBytes); err != nil {
+		var resourceVectorBytes, ownerVectorBytes []byte
+		if err := rows.Scan(&parentID, &child.name, &child.kind, &child.filePath, &child.tags, &resourceVectorBytes, &ownerVectorBytes); err != nil {
 			return err
 		}
+		vectorBytes := preferredPopulateEmbeddingVector(resourceVectorBytes, ownerVectorBytes)
 		if len(vectorBytes) > 0 {
 			child.hasEmbedding = true
 			child.vectorBytes = vectorBytes
@@ -594,6 +489,13 @@ func nullStringPtr(value sql.NullString) *string {
 	return &value.String
 }
 
+func preferredPopulateEmbeddingVector(resourceVectorBytes, ownerVectorBytes []byte) []byte {
+	if len(resourceVectorBytes) > 0 {
+		return resourceVectorBytes
+	}
+	return ownerVectorBytes
+}
+
 func scorePopulateCandidates(query populateQuery, candidates []populateCandidate, connectedIDs map[int64]bool) []populateCandidate {
 	for i := range candidates {
 		cand := &candidates[i]
@@ -616,6 +518,65 @@ func scorePopulateCandidates(query populateQuery, candidates []populateCandidate
 		cand.element.MatchReason = populateMatchReason(*cand)
 	}
 	return candidates
+}
+
+func embedPopulateQuery(ctx context.Context, provider watch.Provider, query populateQuery) (populateQueryEmbeddings, error) {
+	if provider == nil {
+		return populateQueryEmbeddings{}, nil
+	}
+	embeddings := populateQueryEmbeddings{}
+	type target struct {
+		text   string
+		vector *watch.Vector
+	}
+	targets := []target{}
+	addTarget := func(text string, vector *watch.Vector) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		for _, existing := range targets {
+			if existing.text == text {
+				return
+			}
+		}
+		targets = append(targets, target{text: text, vector: vector})
+	}
+	addTarget(query.Base, &embeddings.Base)
+	addTarget(query.Compact, &embeddings.Compact)
+	addTarget(query.Enriched, &embeddings.Enriched)
+	if len(targets) == 0 {
+		return embeddings, nil
+	}
+	inputs := make([]watch.EmbeddingInput, 0, len(targets))
+	for _, target := range targets {
+		inputs = append(inputs, watch.EmbeddingInput{OwnerType: "query", Text: target.text})
+	}
+	vectors, err := provider.Embed(ctx, inputs)
+	if err != nil {
+		return populateQueryEmbeddings{}, err
+	}
+	if len(vectors) != len(targets) {
+		return populateQueryEmbeddings{}, fmt.Errorf("embedding provider returned %d vectors for %d query inputs", len(vectors), len(targets))
+	}
+	for i := range targets {
+		*targets[i].vector = vectors[i]
+	}
+	if len(embeddings.Compact) == 0 {
+		embeddings.Compact = embeddings.Base
+	}
+	if len(embeddings.Enriched) == 0 {
+		embeddings.Enriched = firstPopulateQueryVector(embeddings.recallVectors())
+	}
+	return embeddings, nil
+}
+
+func (embeddings populateQueryEmbeddings) recallVectors() []watch.Vector {
+	return uniquePopulateQueryVectors(embeddings.Base, embeddings.Compact)
+}
+
+func (embeddings populateQueryEmbeddings) rerankVectors() []watch.Vector {
+	return uniquePopulateQueryVectors(embeddings.Base, embeddings.Compact, embeddings.Enriched)
 }
 
 func (cand populateCandidate) kind() string {
@@ -657,16 +618,92 @@ func scorePopulateChildSupport(cand *populateCandidate, query populateQuery) {
 	cand.childSupport = clamp01(cand.childCoverage*0.70 + (total/count)*0.30)
 }
 
-func rescorePopulateChildEmbeddings(cand *populateCandidate, queryVector watch.Vector) {
-	if cand == nil || len(queryVector) == 0 {
+func applyPopulateEmbeddingScores(candidates []populateCandidate, queryVectors []watch.Vector) {
+	if len(queryVectors) == 0 {
+		return
+	}
+	for i := range candidates {
+		if len(candidates[i].vectorBytes) > 0 {
+			candidates[i].embeddingScore = populateEmbeddingScore(queryVectors, candidates[i].vectorBytes)
+			candidates[i].hasEmbedding = true
+		}
+		rescorePopulateChildEmbeddings(&candidates[i], queryVectors)
+	}
+}
+
+func rescorePopulateChildEmbeddings(cand *populateCandidate, queryVectors []watch.Vector) {
+	if cand == nil || len(queryVectors) == 0 {
 		return
 	}
 	for i := range cand.children {
 		if !cand.children[i].hasEmbedding || len(cand.children[i].vectorBytes) == 0 {
 			continue
 		}
-		cand.children[i].embeddingScore = math.Max(0, watch.CosineSimilarity(queryVector, bytesToVector(cand.children[i].vectorBytes)))
+		cand.children[i].embeddingScore = populateEmbeddingScore(queryVectors, cand.children[i].vectorBytes)
 	}
+}
+
+func populateEmbeddingScore(queryVectors []watch.Vector, vectorBytes []byte) float64 {
+	if len(vectorBytes) == 0 || len(queryVectors) == 0 {
+		return 0
+	}
+	vector := bytesToVector(vectorBytes)
+	if len(vector) == 0 {
+		return 0
+	}
+	best := 0.0
+	for _, queryVector := range queryVectors {
+		if len(queryVector) == 0 {
+			continue
+		}
+		score := math.Max(0, watch.CosineSimilarity(queryVector, vector))
+		if score > best {
+			best = score
+		}
+	}
+	return best
+}
+
+func firstPopulateQueryVector(vectors []watch.Vector) watch.Vector {
+	if len(vectors) == 0 {
+		return nil
+	}
+	return vectors[0]
+}
+
+func uniquePopulateQueryVectors(vectors ...watch.Vector) []watch.Vector {
+	out := make([]watch.Vector, 0, len(vectors))
+	for _, vector := range vectors {
+		if len(vector) == 0 {
+			continue
+		}
+		duplicate := false
+		for _, existing := range out {
+			if vectorsEqual(existing, vector) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			out = append(out, vector)
+		}
+	}
+	return out
+}
+
+func hasAdditionalPopulateQueryVectors(recallVectors, rerankVectors []watch.Vector) bool {
+	if len(rerankVectors) == 0 {
+		return false
+	}
+	if len(recallVectors) != len(rerankVectors) {
+		return true
+	}
+	for i := range rerankVectors {
+		if !vectorsEqual(recallVectors[i], rerankVectors[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 func supportsPopulateChildren(kind string) bool {
@@ -708,8 +745,31 @@ func filterPopulateCandidates(candidates []populateCandidate, includeFiles bool)
 	_ = includeFiles
 	out := []populateCandidate{}
 	for _, cand := range candidates {
-		if cand.finalScore >= 0.18 || cand.lexicalPathScore >= 0.40 || (cand.hasEmbedding && cand.embeddingScore >= 0.55) {
+		if cand.finalScore >= 0.18 || cand.lexicalPathScore >= 0.40 || (cand.hasEmbedding && cand.embeddingScore >= 0.25) {
 			out = append(out, cand)
+		}
+	}
+	return out
+}
+
+func bootstrapPopulateCandidates(candidates []populateCandidate, limit int) []populateCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	bootstrapSize := limit * 4
+	if bootstrapSize < 12 {
+		bootstrapSize = 12
+	}
+	if bootstrapSize > len(candidates) {
+		bootstrapSize = len(candidates)
+	}
+	out := make([]populateCandidate, 0, bootstrapSize)
+	for _, cand := range candidates {
+		if cand.hasEmbedding || cand.lexicalPathScore >= 0.10 || cand.archConfidence >= 0.10 || cand.childSupport >= 0.10 {
+			out = append(out, cand)
+			if len(out) == bootstrapSize {
+				break
+			}
 		}
 	}
 	return out
@@ -736,6 +796,9 @@ func abstractionPriority(kind string) float64 {
 
 func populateMatchReason(cand populateCandidate) string {
 	parts := []string{}
+	if cand.hasRerankerScore {
+		parts = append(parts, fmt.Sprintf("reranker %.2f", cand.rerankerScore))
+	}
 	if cand.lexicalPathScore > 0 {
 		parts = append(parts, fmt.Sprintf("lexical %.2f", cand.lexicalPathScore))
 	}

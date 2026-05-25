@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	diagv1connect "buf.build/gen/go/tldiagramcom/diagram/connectrpc/go/diag/v1/diagv1connect"
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
@@ -391,39 +394,131 @@ func TestPopulateScoreGateAllowsLexicallyAnchoredJinaMatches(t *testing.T) {
 	}
 }
 
-func TestPopulateQueryEnrichmentAddsArchitectureHints(t *testing.T) {
+func TestBuildPopulateQueryPreservesRawUserQuery(t *testing.T) {
 	tests := []struct {
-		query string
-		want  []string
+		name      string
+		viewName  string
+		userQuery string
+		want      string
 	}{
-		{query: "frontend", want: []string{"web app", "ui", "client"}},
-		{query: "backend", want: []string{"backend service", "api service", "server"}},
-		{query: "cli", want: []string{"cli", "command"}},
-		{query: "websocket", want: []string{"real time service", "websocket"}},
-		{query: "panel", want: []string{"panel"}},
-		{query: "watch", want: []string{"watch service", "scanner"}},
+		{name: "user query stays raw", viewName: "panel", userQuery: "panel", want: "panel"},
+		{name: "blank query falls back to view name", viewName: "frontend", userQuery: "", want: "frontend"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.query, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			sqliteStore, _ := newTestServer(t, uuid.New(), nil)
 			if _, err := sqliteStore.DB().Exec(`
 				INSERT INTO views(id, name, created_at, updated_at)
-				VALUES (20, ?, 'now', 'now')`, tt.query); err != nil {
+				VALUES (20, ?, 'now', 'now')`, tt.viewName); err != nil {
 				t.Fatal(err)
 			}
-			got, err := buildPopulateQuery(context.Background(), sqliteStore.DB(), 20, "")
+			got, err := buildPopulateQuery(context.Background(), sqliteStore.DB(), 20, tt.userQuery)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(got.Enriched, tt.query) {
-				t.Fatalf("enriched query %q should preserve user term %q", got.Enriched, tt.query)
-			}
-			for _, want := range tt.want {
-				if !strings.Contains(got.Enriched, want) {
-					t.Fatalf("enriched query %q missing hint %q", got.Enriched, want)
-				}
+			if got.Base != tt.want || got.Compact != tt.want || got.Enriched != tt.want {
+				t.Fatalf("populate query = %+v, want all query variants to equal %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEmbedPopulateQueryIncludesRawBaseQuery(t *testing.T) {
+	provider := &capturePopulateEmbeddingProvider{}
+	query := populateQuery{
+		Base:     "panel",
+		Compact:  "panel",
+		Enriched: "panel",
+	}
+
+	embeddings, err := embedPopulateQuery(context.Background(), provider, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.inputs) != 1 {
+		t.Fatalf("inputs = %+v, want only the raw user query to be embedded", provider.inputs)
+	}
+	if provider.inputs[0].Text != "panel" {
+		t.Fatalf("first query embedding = %q, want raw base query", provider.inputs[0].Text)
+	}
+	if got := embeddings.recallVectors(); len(got) != 1 {
+		t.Fatalf("recall vectors = %d, want only the raw query vector", len(got))
+	}
+}
+
+func TestPopulateEmbeddingScoreUsesStrongestQueryVariant(t *testing.T) {
+	base := watch.Vector{1, 0}
+	compact := watch.Vector{0, 1}
+	score := populateEmbeddingScore([]watch.Vector{base, compact}, populateVectorBytesForTest(1, 0))
+	if score < 0.99 {
+		t.Fatalf("populateEmbeddingScore = %.3f, want strongest query variant to match candidate", score)
+	}
+}
+
+func TestLoadPopulateCandidatesUsesOwnerEmbeddingsWhenPopulateResourceEmbeddingMissing(t *testing.T) {
+	sqliteStore, _ := newTestServer(t, uuid.New(), nil)
+	repoID := insertWatchRepository(t, sqliteStore.DB())
+	if _, err := sqliteStore.DB().Exec(`
+		INSERT INTO views(id, name, created_at, updated_at)
+		VALUES (20, 'panel', 'now', 'now');
+		INSERT INTO elements(id, name, kind, tags, technology_connectors, file_path, created_at, updated_at)
+		VALUES (100, 'PanelHeader', 'function', '[]', '[]', 'frontend/src/components/PanelHeader.tsx', 'now', 'now');
+		INSERT INTO watch_embedding_models(id, provider, model, dimension, config_hash, created_at)
+		VALUES (1, 'local-deterministic-test', 'test', 2, 'cfg', 'now');
+		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, created_at, updated_at)
+		VALUES (?, 'symbol', 'sym:panelheader', 'element', 100, 'now', 'now');
+	`, repoID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqliteStore.DB().Exec(`
+		INSERT INTO watch_embeddings(model_id, owner_type, owner_key, input_hash, vector, created_at)
+		VALUES (1, 'symbol', 'sym:panelheader', 'hash', ?, 'now');
+	`, populateVectorBytesForTest(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := loadPopulateCandidates(context.Background(), sqliteStore.DB(), repoID, 20, 1, watch.Vector{1, 0}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %+v, want one symbol candidate", candidates)
+	}
+	if !candidates[0].hasEmbedding {
+		t.Fatalf("candidate = %+v, want owner embedding to be loaded", candidates[0])
+	}
+	if candidates[0].embeddingScore < 0.99 {
+		t.Fatalf("embeddingScore = %.3f, want owner embedding similarity to be preserved", candidates[0].embeddingScore)
+	}
+}
+
+func TestBootstrapPopulateCandidatesKeepsLowConfidenceSemanticMatches(t *testing.T) {
+	kind := "function"
+	candidates := []populateCandidate{
+		{
+			element:          populateElementResult{ID: 1, Name: "PanelHeader", Kind: &kind},
+			hasEmbedding:     true,
+			embeddingScore:   0.08,
+			lexicalPathScore: 0.15,
+			finalScore:       0.09,
+		},
+		{
+			element:          populateElementResult{ID: 2, Name: "Workspace", Kind: &kind},
+			hasEmbedding:     true,
+			embeddingScore:   0.05,
+			lexicalPathScore: 0.05,
+			finalScore:       0.04,
+		},
+	}
+	if filtered := filterPopulateCandidates(candidates, false); len(filtered) != 0 {
+		t.Fatalf("filtered = %+v, want score gates to reject low-confidence candidates first", filtered)
+	}
+	bootstrapped := bootstrapPopulateCandidates(candidates, 2)
+	if len(bootstrapped) != 2 {
+		t.Fatalf("bootstrapped = %+v, want low-confidence semantic candidates to survive into reranking", bootstrapped)
+	}
+	if bootstrapped[0].element.ID != 1 {
+		t.Fatalf("bootstrapped[0] = %+v, want strongest low-confidence semantic match first", bootstrapped[0])
 	}
 }
 
@@ -594,11 +689,186 @@ func TestPopulateRewardsBroadFolderMatches(t *testing.T) {
 	}
 }
 
+func TestPopulateRerankerReordersTopTwoXLimitAndUsesCodeContext(t *testing.T) {
+	fixture := seedPopulateRerankerFixture(t)
+	withPopulateRerankerEndpoint(t, "")
+	baseline := requestPopulateResults(t, fixture.routes, "/api/views/20/populate?q=frontend&limit=2")
+	if len(baseline) != 2 {
+		t.Fatalf("baseline results = %+v, want 2 results", baseline)
+	}
+
+	payloadCh := make(chan populateRerankRequest, 1)
+	reranker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		var req populateRerankRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode reranker request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		payloadCh <- req
+		appIndex := -1
+		adminIndex := -1
+		results := make([]populateRerankResult, 0, len(req.Documents))
+		for i, doc := range req.Documents {
+			switch {
+			case strings.Contains(doc, "frontend/src/frontend-app.tsx"):
+				appIndex = i
+			case strings.Contains(doc, "frontend/src/frontend-admin-panel.tsx"):
+				adminIndex = i
+			}
+		}
+		if appIndex >= 0 {
+			results = append(results, populateRerankResult{Index: appIndex, RelevanceScore: 0.99})
+		}
+		if adminIndex >= 0 {
+			results = append(results, populateRerankResult{Index: adminIndex, RelevanceScore: 0.91})
+		}
+		for i := range req.Documents {
+			if i == appIndex || i == adminIndex {
+				continue
+			}
+			results = append(results, populateRerankResult{Index: i, RelevanceScore: 0.20})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(populateRerankResponse{Results: results}); err != nil {
+			t.Errorf("encode reranker response: %v", err)
+		}
+	}))
+	defer reranker.Close()
+	withPopulateRerankerEndpoint(t, reranker.URL)
+
+	reranked := requestPopulateResults(t, fixture.routes, "/api/views/20/populate?q=frontend&limit=2")
+	if len(reranked) != 2 {
+		t.Fatalf("reranked results = %+v, want 2 results", reranked)
+	}
+	if reranked[0].ID != fixture.appID || reranked[1].ID != fixture.adminID {
+		t.Fatalf("reranked results = %+v, want app/admin ordering", reranked)
+	}
+	if baseline[0].ID == reranked[0].ID && baseline[1].ID == reranked[1].ID {
+		t.Fatalf("baseline results = %+v, expected reranker to change the top ordering", baseline)
+	}
+
+	payload := <-payloadCh
+	if payload.Query != "frontend" {
+		t.Fatalf("reranker query = %q, want raw user query", payload.Query)
+	}
+	if payload.TopN != 4 {
+		t.Fatalf("reranker top_n = %d, want 4", payload.TopN)
+	}
+	if len(payload.Documents) != 4 {
+		t.Fatalf("reranker documents = %d, want 4 shortlisted candidates", len(payload.Documents))
+	}
+	appDoc := ""
+	for _, doc := range payload.Documents {
+		if strings.Contains(doc, "frontend/src/frontend-app.tsx") {
+			appDoc = doc
+			break
+		}
+	}
+	if appDoc == "" {
+		t.Fatalf("reranker documents missing app file context: %+v", payload.Documents)
+	}
+	if !strings.Contains(appDoc, "responsibility presentation") {
+		t.Fatalf("app reranker doc should include architectural responsibility signals: %s", appDoc)
+	}
+	if !strings.Contains(appDoc, "export function App") {
+		t.Fatalf("app reranker doc should include code snippet context: %s", appDoc)
+	}
+}
+
+func TestPopulateFallsBackWhenRerankerFails(t *testing.T) {
+	fixture := seedPopulateRerankerFixture(t)
+	withPopulateRerankerEndpoint(t, "")
+	baseline := requestPopulateResults(t, fixture.routes, "/api/views/20/populate?q=frontend&limit=2")
+
+	reranker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"reranker unavailable"}`))
+	}))
+	defer reranker.Close()
+	withPopulateRerankerEndpoint(t, reranker.URL)
+
+	results := requestPopulateResults(t, fixture.routes, "/api/views/20/populate?q=frontend&limit=2")
+	if len(results) != len(baseline) {
+		t.Fatalf("results = %+v, baseline = %+v", results, baseline)
+	}
+	for i := range baseline {
+		if results[i] != baseline[i] {
+			t.Fatalf("results = %+v, want fallback baseline %+v", results, baseline)
+		}
+	}
+}
+
+func TestPopulateRerankerMetricsTrackLatencyAndFallbacks(t *testing.T) {
+	fixture := seedPopulateRerankerFixture(t)
+	resetPopulateRerankerMetrics()
+	t.Cleanup(resetPopulateRerankerMetrics)
+
+	requestCount := 0
+	reranker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		defer func() { _ = r.Body.Close() }()
+		time.Sleep(15 * time.Millisecond)
+		if requestCount == 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"reranker unavailable"}`))
+			return
+		}
+		var req populateRerankRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode reranker request: %v", err)
+		}
+		results := make([]populateRerankResult, 0, len(req.Documents))
+		for i := range req.Documents {
+			results = append(results, populateRerankResult{Index: i, RelevanceScore: float64(len(req.Documents) - i)})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(populateRerankResponse{Results: results}); err != nil {
+			t.Fatalf("encode reranker response: %v", err)
+		}
+	}))
+	defer reranker.Close()
+	withPopulateRerankerEndpoint(t, reranker.URL)
+
+	_ = requestPopulateResults(t, fixture.routes, "/api/views/20/populate?q=frontend&limit=2")
+	_ = requestPopulateResults(t, fixture.routes, "/api/views/20/populate?q=frontend&limit=2")
+
+	metrics := requestPopulateRerankerMetrics(t, fixture.routes)
+	if metrics.RequestAttemptsTotal != 2 {
+		t.Fatalf("request_attempts_total = %d, want 2", metrics.RequestAttemptsTotal)
+	}
+	if metrics.RequestSuccessTotal != 1 || metrics.RequestFailureTotal != 1 {
+		t.Fatalf("success/failure totals = %+v, want 1 success and 1 failure", metrics)
+	}
+	if metrics.AppliedTotal != 1 {
+		t.Fatalf("applied_total = %d, want 1", metrics.AppliedTotal)
+	}
+	if metrics.FallbacksTotal != 1 || metrics.FallbacksByReason["request_error"] != 1 {
+		t.Fatalf("fallback metrics = %+v, want request_error fallback counted once", metrics)
+	}
+	if metrics.LastRequestDocumentCount != 4 {
+		t.Fatalf("last_request_document_count = %d, want 4", metrics.LastRequestDocumentCount)
+	}
+	if metrics.RequestLatencyMS.Count != 2 {
+		t.Fatalf("latency count = %d, want 2", metrics.RequestLatencyMS.Count)
+	}
+	if metrics.RequestLatencyMS.Avg <= 0 || metrics.RequestLatencyMS.Min <= 0 || metrics.RequestLatencyMS.Max <= 0 || metrics.RequestLatencyMS.Last <= 0 {
+		t.Fatalf("latency snapshot = %+v, want positive latency values", metrics.RequestLatencyMS)
+	}
+	bucketTotal := metrics.RequestLatencyMS.LE100 + metrics.RequestLatencyMS.LE250 + metrics.RequestLatencyMS.LE500 + metrics.RequestLatencyMS.LE1000 + metrics.RequestLatencyMS.GT1000
+	if bucketTotal != 2 {
+		t.Fatalf("latency buckets total = %d, want 2", bucketTotal)
+	}
+}
+
 type populateResultForTest struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Kind string `json:"kind"`
 }
+
+type populateRerankerMetricsForTest = populateRerankerMetricsSnapshot
 
 func requestPopulateResults(t *testing.T, routes http.Handler, path string) []populateResultForTest {
 	t.Helper()
@@ -616,13 +886,34 @@ func requestPopulateResults(t *testing.T, routes http.Handler, path string) []po
 	return body.Results
 }
 
+func requestPopulateRerankerMetrics(t *testing.T, routes http.Handler) populateRerankerMetricsForTest {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/debug/populate-reranker-metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body populateRerankerMetricsForTest
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
 func insertWatchRepository(t *testing.T, db interface {
 	Exec(string, ...any) (sql.Result, error)
 }) int64 {
 	t.Helper()
+	return insertWatchRepositoryAt(t, db, t.TempDir())
+}
+
+func insertWatchRepositoryAt(t *testing.T, db interface {
+	Exec(string, ...any) (sql.Result, error)
+}, repoRoot string) int64 {
+	t.Helper()
 	res, err := db.Exec(`
 		INSERT INTO watch_repositories(remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at)
-		VALUES ('local', ?, 'repo', 'main', '', 'clean', '', 'now', 'now')`, t.TempDir())
+		VALUES ('local', ?, 'repo', 'main', '', 'clean', '', 'now', 'now')`, repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,4 +940,121 @@ func newTestServer(t *testing.T, workspaceID uuid.UUID, static fs.FS) (*localsto
 		t.Fatal(err)
 	}
 	return sqliteStore, srv.Routes()
+}
+
+type populateRerankerFixture struct {
+	routes          http.Handler
+	architectureID  int64
+	appID           int64
+	adminID         int64
+	secondaryFileID int64
+}
+
+func seedPopulateRerankerFixture(t *testing.T) populateRerankerFixture {
+	t.Helper()
+	repoRoot := t.TempDir()
+	writePopulateFixtureFile(t, repoRoot, "frontend/src/frontend-app.tsx", `export function App() {
+	return <main>App</main>
+}
+`)
+	writePopulateFixtureFile(t, repoRoot, "frontend/src/frontend-admin-panel.tsx", `export function AdminPanel() {
+	return <section>Admin</section>
+}
+`)
+	writePopulateFixtureFile(t, repoRoot, "frontend/src/frontend-routes.tsx", `export const routes = ["/", "/admin"]
+`)
+
+	sqliteStore, routes := newTestServer(t, uuid.New(), nil)
+	repoID := insertWatchRepositoryAt(t, sqliteStore.DB(), repoRoot)
+	if _, err := sqliteStore.DB().Exec(`
+		INSERT INTO views(id, name, created_at, updated_at)
+		VALUES (20, 'frontend', 'now', 'now');
+		INSERT INTO elements(id, name, kind, tags, technology_connectors, file_path, language, created_at, updated_at)
+		VALUES
+			(100, 'frontend', 'folder', '["role:ui"]', '[]', 'frontend', NULL, 'now', 'now'),
+			(101, 'Frontend App', 'architecture-component', '["role:ui"]', '[]', 'frontend', NULL, 'now', 'now'),
+			(102, 'frontend-app.tsx', 'file', '["role:ui"]', '[]', 'frontend/src/frontend-app.tsx', 'tsx', 'now', 'now'),
+			(103, 'frontend-admin-panel.tsx', 'file', '["role:ui"]', '[]', 'frontend/src/frontend-admin-panel.tsx', 'tsx', 'now', 'now'),
+			(104, 'frontend-routes.tsx', 'file', '["role:ui"]', '[]', 'frontend/src/frontend-routes.tsx', 'tsx', 'now', 'now');
+		INSERT INTO views(id, name, owner_element_id, created_at, updated_at)
+		VALUES (21, 'Frontend App detail', 101, 'now', 'now');
+		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
+		VALUES
+			(21, 102, 0, 0, 'now', 'now'),
+			(21, 103, 40, 0, 'now', 'now'),
+			(21, 104, 80, 0, 'now', 'now');
+		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, created_at, updated_at)
+		VALUES
+			(?, 'folder', 'folder:frontend', 'element', 100, 'now', 'now'),
+			(?, 'architecture-component', 'component:frontend', 'element', 101, 'now', 'now'),
+			(?, 'file', 'file:frontend/src/frontend-app.tsx', 'element', 102, 'now', 'now'),
+			(?, 'file', 'file:frontend/src/frontend-admin-panel.tsx', 'element', 103, 'now', 'now'),
+			(?, 'file', 'file:frontend/src/frontend-routes.tsx', 'element', 104, 'now', 'now');
+		INSERT INTO watch_files(id, repository_id, path, language, worktree_hash, size_bytes, mtime_unix, scan_status, created_at, updated_at)
+		VALUES
+			(201, ?, 'frontend/src/frontend-app.tsx', 'tsx', 'a', 10, 1, 'parsed', 'now', 'now'),
+			(202, ?, 'frontend/src/frontend-admin-panel.tsx', 'tsx', 'b', 10, 1, 'parsed', 'now', 'now'),
+			(203, ?, 'frontend/src/frontend-routes.tsx', 'tsx', 'c', 10, 1, 'parsed', 'now', 'now');
+		INSERT INTO watch_symbols(id, repository_id, file_id, stable_key, name, qualified_name, kind, start_line, end_line, signature_hash, content_hash, raw_json, created_at, updated_at)
+		VALUES
+			(301, ?, 201, 'sym:app', 'App', 'App', 'function', 1, 3, 'sa', 'ca', '{}', 'now', 'now'),
+			(302, ?, 202, 'sym:admin', 'AdminPanel', 'AdminPanel', 'function', 1, 3, 'sb', 'cb', '{}', 'now', 'now'),
+			(303, ?, 203, 'sym:routes', 'routes', 'routes', 'const', 1, 1, 'sc', 'cc', '{}', 'now', 'now')`,
+		repoID, repoID, repoID, repoID, repoID,
+		repoID, repoID, repoID,
+		repoID, repoID, repoID); err != nil {
+		t.Fatal(err)
+	}
+	return populateRerankerFixture{
+		routes:          routes,
+		architectureID:  101,
+		appID:           102,
+		adminID:         103,
+		secondaryFileID: 104,
+	}
+}
+
+func writePopulateFixtureFile(t *testing.T, repoRoot, relativePath, content string) {
+	t.Helper()
+	path := filepath.Join(repoRoot, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func withPopulateRerankerEndpoint(t *testing.T, endpoint string) {
+	t.Helper()
+	oldEndpoint := populateRerankerEndpoint
+	populateRerankerEndpoint = endpoint
+	t.Cleanup(func() {
+		populateRerankerEndpoint = oldEndpoint
+	})
+}
+
+type capturePopulateEmbeddingProvider struct {
+	inputs []watch.EmbeddingInput
+}
+
+func (p *capturePopulateEmbeddingProvider) ModelID() watch.ModelID {
+	return watch.ModelID{Provider: "capture-test", Model: "capture-test", Dimension: 2}
+}
+
+func (p *capturePopulateEmbeddingProvider) Embed(_ context.Context, inputs []watch.EmbeddingInput) ([]watch.Vector, error) {
+	p.inputs = append([]watch.EmbeddingInput(nil), inputs...)
+	vectors := make([]watch.Vector, len(inputs))
+	for i := range inputs {
+		vectors[i] = watch.Vector{float32(i + 1), 0}
+	}
+	return vectors, nil
+}
+
+func populateVectorBytesForTest(values ...float32) []byte {
+	data := make([]byte, len(values)*4)
+	for i, value := range values {
+		binary.LittleEndian.PutUint32(data[i*4:], math.Float32bits(value))
+	}
+	return data
 }
