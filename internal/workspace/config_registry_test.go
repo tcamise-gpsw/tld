@@ -80,6 +80,25 @@ func TestSetGlobalConfigValuePreservesUnknownAndValidates(t *testing.T) {
 	}
 }
 
+func TestSetGlobalConfigValueSupportsEmbeddingMaxTokens(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+
+	if err := workspace.SetGlobalConfigValue("watch.embedding.max_tokens", "8192"); err != nil {
+		t.Fatalf("SetGlobalConfigValue: %v", err)
+	}
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Watch.Embedding.MaxTokens != 8192 {
+		t.Fatalf("max_tokens = %v, want 8192", cfg.Watch.Embedding.MaxTokens)
+	}
+	if err := workspace.SetGlobalConfigValue("watch.embedding.max_tokens", "-1"); err == nil {
+		t.Fatal("expected negative max_tokens to fail validation")
+	}
+}
+
 func TestEnsureGlobalConfigDoesNotRewriteExistingConfig(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("TLD_CONFIG_DIR", configDir)

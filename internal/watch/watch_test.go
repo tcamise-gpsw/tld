@@ -4037,7 +4037,7 @@ func TestEmbeddingCacheAvoidsProviderCalls(t *testing.T) {
 	stats, _, err := representer.cacheEmbeddings(context.Background(), modelID, provider, "", []Symbol{
 		symbols[1],
 		symbols[2],
-	}, nil, nil, 0)
+	}, nil, nil, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4050,7 +4050,7 @@ func TestEmbeddingCacheAvoidsProviderCalls(t *testing.T) {
 	stats, _, err = representer.cacheEmbeddings(context.Background(), modelID, provider, "", []Symbol{
 		symbols[1],
 		symbols[2],
-	}, nil, nil, 0)
+	}, nil, nil, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4079,7 +4079,7 @@ func TestEmbeddingCacheChunksProviderCallsAndReportsProgress(t *testing.T) {
 	}
 	progress := &recordingProgress{}
 
-	stats, _, err := NewRepresenter(store).cacheEmbeddings(context.Background(), modelID, provider, "", symbols, nil, progress, 0)
+	stats, _, err := NewRepresenter(store).cacheEmbeddings(context.Background(), modelID, provider, "", symbols, nil, progress, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4116,7 +4116,7 @@ func Outer() {
 		FilePath:      "a.go",
 		StartLine:     3,
 		EndLine:       &end,
-	})
+	}, 4000)
 
 	if !strings.Contains(text, `fmt.Println("body")`) {
 		t.Fatalf("expected embedding text to include code body, got:\n%s", text)
@@ -4127,7 +4127,7 @@ func Outer() {
 }
 
 func TestShrinkEmbeddingTextFitsApproximateTokenBudget(t *testing.T) {
-	text := shrinkEmbeddingText(strings.Repeat("// comment that should be removed\n", 600) + strings.Repeat("statement := value + otherValue\n", 700))
+	text := shrinkEmbeddingText(strings.Repeat("// comment that should be removed\n", 600)+strings.Repeat("statement := value + otherValue\n", 700), 0)
 	if approximateTokenCount(text) > maxEmbeddingInputApproxTokens {
 		t.Fatalf("expected text within token budget, got %d", approximateTokenCount(text))
 	}
@@ -4214,6 +4214,49 @@ func TestOpenAIHealthCheckUsesCompatibleEmbeddingsEndpoint(t *testing.T) {
 	}
 	if cfg.Dimension != 3 || result.Dimension != 3 || result.Similarity < DefaultEmbeddingHealthThreshold {
 		t.Fatalf("unexpected health result cfg=%+v result=%+v", cfg, result)
+	}
+}
+
+func TestOpenAIProviderAddsJinaCodeEmbeddingInstructions(t *testing.T) {
+	var requestBody struct {
+		Model string   `json:"model"`
+		Input []string `json:"input"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","model":"jinaai/jina-code-embeddings-1.5b","data":[{"object":"embedding","index":0,"embedding":[1,0,0]},{"object":"embedding","index":1,"embedding":[0,1,0]},{"object":"embedding","index":2,"embedding":[0,0,1]}]}`))
+	}))
+	defer server.Close()
+
+	provider := OpenAIProvider{
+		Endpoint: server.URL + "/v1/embeddings",
+		Model:    "jinaai/jina-code-embeddings-1.5b",
+		Client:   server.Client(),
+	}
+	vectors, err := provider.Embed(context.Background(), []EmbeddingInput{
+		{OwnerType: "query", Text: "watch"},
+		{OwnerType: "symbol", Text: "func Watch() {}"},
+		{OwnerType: "file", Text: "package watch"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors) != 3 {
+		t.Fatalf("vectors len = %d, want 3", len(vectors))
+	}
+	want := []string{
+		"Find the most relevant code snippet given the following query:\nwatch",
+		"Candidate code snippet:\nfunc Watch() {}",
+		"package watch",
+	}
+	if !reflect.DeepEqual(requestBody.Input, want) {
+		t.Fatalf("input = %#v, want %#v", requestBody.Input, want)
 	}
 }
 

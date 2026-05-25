@@ -10,14 +10,12 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 
-	"github.com/clems4ever/all-minilm-l6-v2-go/all_minilm_l6_v2"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
@@ -31,9 +29,7 @@ const (
 	DefaultOllamaModel              = "jina/jina-embeddings-v2-base-en"
 	DefaultLexicalModel             = "lexical-code-fingerprint-v1"
 	DefaultLexicalDimension         = 512
-	DefaultMiniLMModel              = "all-MiniLM-L6-v2"
-	DefaultMiniLMDimension          = 384
-	DefaultMiniLMHealthThreshold    = 0.40
+
 	DefaultEmbeddingHealthThreshold = 0.70
 	RenameEmbeddingThreshold        = 0.78
 )
@@ -142,110 +138,7 @@ func (p LexicalProvider) Embed(_ context.Context, inputs []EmbeddingInput) ([]Ve
 	return out, nil
 }
 
-type MiniLMProvider struct {
-	Model           string
-	Dimension       int
-	RuntimePath     string
-	HealthThreshold float64
-	model           *all_minilm_l6_v2.Model
-}
 
-func (p *MiniLMProvider) ModelID() ModelID {
-	cfg := normalizeEmbeddingConfig(EmbeddingConfig{
-		Provider:        "local-minilm",
-		Model:           p.Model,
-		Dimension:       p.Dimension,
-		RuntimePath:     p.RuntimePath,
-		HealthThreshold: p.HealthThreshold,
-	})
-	return ModelID{Provider: cfg.Provider, Model: cfg.Model, Dimension: cfg.Dimension, ConfigHash: stableHash(cfg)}
-}
-
-func (p *MiniLMProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]Vector, error) {
-	if len(inputs) == 0 {
-		return []Vector{}, nil
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	model, err := p.ensureModel()
-	if err != nil {
-		return nil, err
-	}
-	texts := make([]string, 0, len(inputs))
-	for _, input := range inputs {
-		texts = append(texts, input.Text)
-	}
-	embeddings, err := model.ComputeBatch(texts, false)
-	if err != nil {
-		return nil, fmt.Errorf("minilm compute embeddings: %w", err)
-	}
-	if len(embeddings) != len(inputs) {
-		return nil, fmt.Errorf("minilm returned %d embeddings for %d inputs", len(embeddings), len(inputs))
-	}
-	vectors := vectorsFromFloatSlices(embeddings)
-	for _, vector := range vectors {
-		if len(vector) != DefaultMiniLMDimension {
-			return nil, fmt.Errorf("minilm returned dimension %d, want %d", len(vector), DefaultMiniLMDimension)
-		}
-	}
-	return vectors, nil
-}
-
-func (p *MiniLMProvider) HealthCheck(ctx context.Context) (HealthResult, error) {
-	texts := []EmbeddingInput{
-		{Text: "The HTTP handler loads repository symbols from SQLite."},
-		{Text: "A web endpoint reads code symbols out of the database."},
-	}
-	vectors, err := p.Embed(ctx, texts)
-	if err != nil {
-		return HealthResult{}, err
-	}
-	if len(vectors) != 2 || len(vectors[0]) == 0 || len(vectors[1]) == 0 {
-		return HealthResult{}, fmt.Errorf("minilm healthcheck returned empty embeddings")
-	}
-	sim := CosineSimilarity(vectors[0], vectors[1])
-	threshold := p.HealthThreshold
-	if threshold <= 0 {
-		threshold = DefaultEmbeddingHealthThreshold
-	}
-	if sim < threshold {
-		return HealthResult{}, fmt.Errorf("minilm healthcheck similarity %.3f is below threshold %.3f", sim, threshold)
-	}
-	p.Dimension = len(vectors[0])
-	return HealthResult{Dimension: len(vectors[0]), Similarity: sim}, nil
-}
-
-func (p *MiniLMProvider) Close() error {
-	if p.model == nil {
-		return nil
-	}
-	_ = p.model.Close()
-	p.model = nil
-	return nil
-}
-
-func (p *MiniLMProvider) ensureModel() (*all_minilm_l6_v2.Model, error) {
-	if p.model != nil {
-		return p.model, nil
-	}
-	runtimePath := strings.TrimSpace(p.RuntimePath)
-	if runtimePath == "" {
-		runtimePath = strings.TrimSpace(os.Getenv("ONNXRUNTIME_LIB_PATH"))
-	}
-	if runtimePath == "" {
-		return nil, fmt.Errorf("local-minilm requires ONNX Runtime; set --embedding-runtime-path, watch.embedding.runtime_path, or ONNXRUNTIME_LIB_PATH")
-	}
-	model, err := all_minilm_l6_v2.NewModel(all_minilm_l6_v2.WithRuntimePath(runtimePath))
-	if err != nil {
-		if strings.Contains(err.Error(), "protobuf parsing failed") {
-			return nil, fmt.Errorf("initialize local-minilm with ONNX Runtime %q: %w; the downloaded all-minilm-l6-v2-go module may contain a Git LFS pointer instead of the real model.onnx, so fetch the LFS model asset before running local-minilm", runtimePath, err)
-		}
-		return nil, fmt.Errorf("initialize local-minilm with ONNX Runtime %q: %w", runtimePath, err)
-	}
-	p.model = model
-	return p.model, nil
-}
 
 var lexicalIdentifierRE = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|"[^"\n]*"|'[^'\n]*'|` + "`[^`\n]*`" + `|[{}()[\].,;:+\-*/%=&|!<>^~?]`)
 
@@ -435,18 +328,8 @@ func (p *OllamaProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]
 		return []Vector{}, nil
 	}
 	texts := make([]string, 0, len(inputs))
-	isJina := strings.Contains(p.Model, "jina-code-embeddings")
 	for _, input := range inputs {
-		text := input.Text
-		if isJina {
-			switch input.OwnerType {
-			case "query", "":
-				text = "Find the most relevant code snippet given the following query:\n" + text
-			case "symbol":
-				text = "Candidate code snippet:\n" + text
-			}
-		}
-		texts = append(texts, text)
+		texts = append(texts, embeddingInputText(p.Model, input))
 	}
 	vectors, err := p.embedTexts(ctx, texts)
 	if err != nil {
@@ -555,7 +438,7 @@ func (p *OpenAIProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]
 	}
 	texts := make([]string, 0, len(inputs))
 	for _, input := range inputs {
-		texts = append(texts, input.Text)
+		texts = append(texts, embeddingInputText(p.Model, input))
 	}
 	vectors, err := p.embedTexts(ctx, texts)
 	if err != nil {
@@ -571,11 +454,11 @@ func (p *OpenAIProvider) Embed(ctx context.Context, inputs []EmbeddingInput) ([]
 }
 
 func (p *OpenAIProvider) HealthCheck(ctx context.Context) (HealthResult, error) {
-	texts := []string{
-		"Why is the sky blue?",
-		"What causes the sky to look blue during the day?",
+	inputs := []EmbeddingInput{
+		{OwnerType: "query", Text: "Why is the sky blue?"},
+		{OwnerType: "query", Text: "What causes the sky to look blue during the day?"},
 	}
-	vectors, err := p.embedTexts(ctx, texts)
+	vectors, err := p.Embed(ctx, inputs)
 	if err != nil {
 		return HealthResult{}, err
 	}
@@ -601,7 +484,7 @@ func (p *OpenAIProvider) embedTexts(ctx context.Context, texts []string) ([]Vect
 	opts := []option.RequestOption{
 		option.WithBaseURL(openAIBaseURL(p.Endpoint)),
 		option.WithAPIKey(DefaultOpenAIAPIKey),
-		option.WithRequestTimeout(30 * time.Second),
+		option.WithRequestTimeout(60 * time.Second),
 	}
 	if p.Client != nil {
 		opts = append(opts, option.WithHTTPClient(p.Client))
@@ -636,19 +519,49 @@ func openAIBaseURL(endpoint string) string {
 	return endpoint
 }
 
+func embeddingInputText(model string, input EmbeddingInput) string {
+	text := input.Text
+	if !strings.Contains(model, "jina-code-embeddings") {
+		return text
+	}
+	switch input.OwnerType {
+	case "query", "":
+		return "Find the most relevant code snippet given the following query:\n" + text
+	case "symbol":
+		return "Candidate code snippet:\n" + text
+	default:
+		return text
+	}
+}
+
 func NewEmbeddingProvider(cfg EmbeddingConfig) (Provider, error) {
 	cfg = normalizeEmbeddingConfig(cfg)
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
 	switch cfg.Provider {
 	case "none":
 		return NoopProvider{}, nil
 	case "openai":
-		return &OpenAIProvider{Endpoint: cfg.Endpoint, Model: cfg.Model, Dimension: cfg.Dimension, HealthThreshold: cfg.HealthThreshold}, nil
+		return &OpenAIProvider{
+			Endpoint:        cfg.Endpoint,
+			Model:           cfg.Model,
+			Dimension:       cfg.Dimension,
+			HealthThreshold: cfg.HealthThreshold,
+			Client:          &http.Client{Timeout: timeout},
+		}, nil
 	case "ollama":
-		return &OllamaProvider{Endpoint: cfg.Endpoint, Model: cfg.Model, Dimension: cfg.Dimension, HealthThreshold: cfg.HealthThreshold}, nil
+		return &OllamaProvider{
+			Endpoint:        cfg.Endpoint,
+			Model:           cfg.Model,
+			Dimension:       cfg.Dimension,
+			HealthThreshold: cfg.HealthThreshold,
+			Client:          &http.Client{Timeout: timeout},
+		}, nil
 	case "local-lexical":
 		return LexicalProvider{Model: cfg.Model, Dimension: cfg.Dimension}, nil
-	case "local-minilm":
-		return &MiniLMProvider{Model: cfg.Model, Dimension: cfg.Dimension, RuntimePath: cfg.RuntimePath, HealthThreshold: cfg.HealthThreshold}, nil
+
 	case "local-deterministic-test":
 		return DeterministicProvider{Model: cfg.Model, Dimension: cfg.Dimension}, nil
 	default:
@@ -701,23 +614,19 @@ func normalizeEmbeddingConfig(cfg EmbeddingConfig) EmbeddingConfig {
 		}
 		cfg.HealthThreshold = 0
 	}
-	if cfg.Provider == "local-minilm" {
-		cfg.Endpoint = ""
-		if cfg.Model == "" {
-			cfg.Model = DefaultMiniLMModel
-		}
-		if cfg.Dimension <= 0 {
-			cfg.Dimension = DefaultMiniLMDimension
-		}
-		if cfg.HealthThreshold <= 0 || cfg.HealthThreshold == DefaultEmbeddingHealthThreshold {
-			cfg.HealthThreshold = DefaultMiniLMHealthThreshold
-		}
-	}
+
 	if cfg.Provider == "local-deterministic-test" && cfg.Dimension <= 0 {
 		cfg.Dimension = 8
 	}
 	if cfg.TimeoutSeconds <= 0 {
 		cfg.TimeoutSeconds = 60
+	}
+	if cfg.MaxTokens <= 0 {
+		if strings.Contains(strings.ToLower(cfg.Model), "gemma-300m") || strings.Contains(strings.ToLower(cfg.Model), "gemma") {
+			cfg.MaxTokens = 2048
+		} else {
+			cfg.MaxTokens = 4000
+		}
 	}
 	return cfg
 }

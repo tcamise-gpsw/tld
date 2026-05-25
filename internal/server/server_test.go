@@ -349,6 +349,48 @@ func TestServerServesPrecompressedStaticAssets(t *testing.T) {
 	}
 }
 
+func TestPopulateScoreGateAllowsLexicallyAnchoredJinaMatches(t *testing.T) {
+	tests := []struct {
+		name             string
+		finalScore       float64
+		lexicalPathScore float64
+		want             bool
+	}{
+		{
+			name:             "legacy high score passes",
+			finalScore:       0.35,
+			lexicalPathScore: 0,
+			want:             true,
+		},
+		{
+			name:             "jina lexical match passes",
+			finalScore:       0.284,
+			lexicalPathScore: 0.40,
+			want:             true,
+		},
+		{
+			name:             "jina semantic-only weak match stays hidden",
+			finalScore:       0.265,
+			lexicalPathScore: 0,
+			want:             false,
+		},
+		{
+			name:             "lexical match still needs evidence",
+			finalScore:       0.249,
+			lexicalPathScore: 0.40,
+			want:             false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := passesPopulateScoreGate(tt.finalScore, tt.lexicalPathScore)
+			if got != tt.want {
+				t.Fatalf("passesPopulateScoreGate(%v, %v) = %v, want %v", tt.finalScore, tt.lexicalPathScore, got, tt.want)
+			}
+		})
+	}
+}
+
 func insertWatchRepository(t *testing.T, db interface {
 	Exec(string, ...any) (sql.Result, error)
 }) int64 {

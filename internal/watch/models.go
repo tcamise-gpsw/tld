@@ -189,6 +189,7 @@ type EmbeddingConfig struct {
 	RuntimePath     string  `json:"runtime_path,omitempty" yaml:"runtime_path"`
 	HealthThreshold float64 `json:"health_threshold,omitempty" yaml:"health_threshold"`
 	TimeoutSeconds  int     `json:"timeout_seconds,omitempty" yaml:"timeout_seconds"`
+	MaxTokens       int     `json:"max_tokens,omitempty" yaml:"max_tokens"`
 }
 
 type Thresholds struct {

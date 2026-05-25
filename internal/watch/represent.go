@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	defaultEmbeddingBatchSize     = 256
-	maxEmbeddingInputApproxTokens = 8000
+	defaultEmbeddingBatchSize     = 16
+	maxEmbeddingInputApproxTokens = 4000
 	maxEmbeddingInputChars        = maxEmbeddingInputApproxTokens * 4
 )
 
@@ -157,7 +157,7 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		embeddingSymbols := embeddingCandidateSymbols(filtered.VisibleSymbols, maxEmbeddingSymbolsPerRun)
 		embeddingStarted := time.Now()
 		logInfo(ctx, req.Logger, "watch.representation.embeddings.started", "repository_id", repositoryID, "symbols", len(embeddingSymbols))
-		stats, vectors, err := r.cacheEmbeddings(ctx, modelID, provider, repo.RepoRoot, embeddingSymbols, identityKeys, req.Progress, time.Duration(req.Embedding.TimeoutSeconds)*time.Second)
+		stats, vectors, err := r.cacheEmbeddings(ctx, modelID, provider, repo.RepoRoot, embeddingSymbols, identityKeys, req.Progress, time.Duration(req.Embedding.TimeoutSeconds)*time.Second, req.Embedding.MaxTokens)
 		if err != nil {
 			logError(ctx, req.Logger, "watch.representation.embeddings.failed", err, "elapsed", logElapsed(embeddingStarted), "repository_id", repositoryID)
 			return RepresentResult{}, err
@@ -413,7 +413,7 @@ func progressFinish(progress ProgressSink) {
 	}
 }
 
-func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provider Provider, repoRoot string, symbols []Symbol, identityKeys map[string]string, progress ProgressSink, timeout time.Duration) (embeddingCacheStats, map[int64]Vector, error) {
+func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provider Provider, repoRoot string, symbols []Symbol, identityKeys map[string]string, progress ProgressSink, timeout time.Duration, maxTokens int) (embeddingCacheStats, map[int64]Vector, error) {
 	stats := embeddingCacheStats{}
 	vectorsBySymbol := map[int64]Vector{}
 	model := provider.ModelID()
@@ -425,7 +425,7 @@ func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provid
 	progressStart(progress, "Preparing symbol embeddings", len(symbols))
 	for _, sym := range symbols {
 		ownerKey := symbolOwnerKey(sym, identityKeys)
-		input := EmbeddingInput{OwnerType: "symbol", OwnerKey: ownerKey, Text: symbolEmbeddingText(repoRoot, sym)}
+		input := EmbeddingInput{OwnerType: "symbol", OwnerKey: ownerKey, Text: symbolEmbeddingText(repoRoot, sym, maxTokens)}
 		if data, ok, err := r.Store.Embedding(ctx, modelID, input.OwnerType, input.OwnerKey, inputHash(input)); err != nil {
 			progressFinish(progress)
 			return stats, vectorsBySymbol, err
@@ -491,12 +491,12 @@ func embeddingCandidateSymbols(symbols map[int64]Symbol, limit int) []Symbol {
 	return out
 }
 
-func symbolEmbeddingText(repoRoot string, sym Symbol) string {
+func symbolEmbeddingText(repoRoot string, sym Symbol, maxTokens int) string {
 	body := symbolCodeBody(repoRoot, sym)
 	if strings.TrimSpace(body) == "" {
 		body = sym.QualifiedName + "\n" + sym.Kind + "\n" + sym.FilePath
 	}
-	return shrinkEmbeddingText(outdentCode(body))
+	return shrinkEmbeddingText(outdentCode(body), maxTokens)
 }
 
 func symbolCodeBody(repoRoot string, sym Symbol) string {
@@ -574,22 +574,26 @@ func trimIndentWidth(line string, maxWidth int) string {
 	return ""
 }
 
-func shrinkEmbeddingText(text string) string {
+func shrinkEmbeddingText(text string, maxTokens int) string {
 	text = strings.TrimSpace(text)
-	if approximateTokenCount(text) <= maxEmbeddingInputApproxTokens {
+	if maxTokens <= 0 {
+		maxTokens = maxEmbeddingInputApproxTokens
+	}
+	if approximateTokenCount(text) <= maxTokens {
 		return text
 	}
 	text = dropLowSignalCodeLines(text)
-	if approximateTokenCount(text) <= maxEmbeddingInputApproxTokens {
+	if approximateTokenCount(text) <= maxTokens {
 		return text
 	}
-	if len(text) <= maxEmbeddingInputChars {
+	maxChars := maxTokens * 4
+	if len(text) <= maxChars {
 		return text
 	}
 	marker := "\n\n/* ... middle omitted for embedding context ... */\n\n"
-	keep := maxEmbeddingInputChars - len(marker)
+	keep := maxChars - len(marker)
 	if keep <= 0 {
-		return text[:maxEmbeddingInputChars]
+		return text[:maxChars]
 	}
 	head := keep * 2 / 3
 	tail := keep - head

@@ -95,6 +95,7 @@ type WatchEmbeddingConfig struct {
 	Dimension       int     `yaml:"dimension"`
 	RuntimePath     string  `yaml:"runtime_path"`
 	HealthThreshold float64 `yaml:"health_threshold"`
+	MaxTokens       int     `yaml:"max_tokens"`
 }
 
 type WatchThresholdConfig struct {

@@ -7,7 +7,7 @@ import (
 	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
-func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int, runtimePath ...string) EmbeddingConfig {
+func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int, maxTokens int, runtimePath ...string) EmbeddingConfig {
 	embedding := EmbeddingConfig{}
 	if cfg != nil {
 		embedding.Provider = cfg.Watch.Embedding.Provider
@@ -16,6 +16,7 @@ func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model str
 		embedding.Dimension = cfg.Watch.Embedding.Dimension
 		embedding.RuntimePath = cfg.Watch.Embedding.RuntimePath
 		embedding.HealthThreshold = cfg.Watch.Embedding.HealthThreshold
+		embedding.MaxTokens = cfg.Watch.Embedding.MaxTokens
 	}
 	if provider != "" {
 		embedding.Provider = provider
@@ -28,6 +29,9 @@ func ResolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model str
 	}
 	if dimension > 0 {
 		embedding.Dimension = dimension
+	}
+	if maxTokens > 0 {
+		embedding.MaxTokens = maxTokens
 	}
 	if len(runtimePath) > 0 && runtimePath[0] != "" {
 		embedding.RuntimePath = runtimePath[0]

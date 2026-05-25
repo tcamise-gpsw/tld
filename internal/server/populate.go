@@ -188,15 +188,33 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			similarity := watch.CosineSimilarity(queryVector, symbolVector)
 
 			var kindPtr, descPtr, techPtr, urlPtr, logoPtr, repoPtr, branchPtr, filePtr, langPtr *string
-			if kind.Valid { kindPtr = &kind.String }
-			if description.Valid { descPtr = &description.String }
-			if technology.Valid { techPtr = &technology.String }
-			if url.Valid { urlPtr = &url.String }
-			if logoURL.Valid { logoPtr = &logoURL.String }
-			if repo.Valid { repoPtr = &repo.String }
-			if branch.Valid { branchPtr = &branch.String }
-			if filePath.Valid { filePtr = &filePath.String }
-			if language.Valid { langPtr = &language.String }
+			if kind.Valid {
+				kindPtr = &kind.String
+			}
+			if description.Valid {
+				descPtr = &description.String
+			}
+			if technology.Valid {
+				techPtr = &technology.String
+			}
+			if url.Valid {
+				urlPtr = &url.String
+			}
+			if logoURL.Valid {
+				logoPtr = &logoURL.String
+			}
+			if repo.Valid {
+				repoPtr = &repo.String
+			}
+			if branch.Valid {
+				branchPtr = &branch.String
+			}
+			if filePath.Valid {
+				filePtr = &filePath.String
+			}
+			if language.Valid {
+				langPtr = &language.String
+			}
 
 			elRes := populateElementResult{
 				ID:                   id,
@@ -280,8 +298,8 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 					FROM elements
 					WHERE file_path = ? AND kind = 'file'
 					LIMIT 1`, fp).Scan(
-						&fileEl.ID, &fileEl.Name, &fKind, &fDescription, &fTechnology, &fURL, &fLogoURL, &fTechRaw, &fTagRaw, &fRepo, &fBranch, &fFilePath, &fLanguage, &fCreatedAt, &fUpdatedAt,
-					)
+					&fileEl.ID, &fileEl.Name, &fKind, &fDescription, &fTechnology, &fURL, &fLogoURL, &fTechRaw, &fTagRaw, &fRepo, &fBranch, &fFilePath, &fLanguage, &fCreatedAt, &fUpdatedAt,
+				)
 				if err == nil {
 					// Check if this promoted file element is already placed in the view
 					var placedCount int
@@ -292,15 +310,33 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 						continue
 					}
 
-					if fKind.Valid { fileEl.Kind = &fKind.String }
-					if fDescription.Valid { fileEl.Description = &fDescription.String }
-					if fTechnology.Valid { fileEl.Technology = &fTechnology.String }
-					if fURL.Valid { fileEl.URL = &fURL.String }
-					if fLogoURL.Valid { fileEl.LogoURL = &fLogoURL.String }
-					if fRepo.Valid { fileEl.Repo = &fRepo.String }
-					if fBranch.Valid { fileEl.Branch = &fBranch.String }
-					if fFilePath.Valid { fileEl.FilePath = &fFilePath.String }
-					if fLanguage.Valid { fileEl.Language = &fLanguage.String }
+					if fKind.Valid {
+						fileEl.Kind = &fKind.String
+					}
+					if fDescription.Valid {
+						fileEl.Description = &fDescription.String
+					}
+					if fTechnology.Valid {
+						fileEl.Technology = &fTechnology.String
+					}
+					if fURL.Valid {
+						fileEl.URL = &fURL.String
+					}
+					if fLogoURL.Valid {
+						fileEl.LogoURL = &fLogoURL.String
+					}
+					if fRepo.Valid {
+						fileEl.Repo = &fRepo.String
+					}
+					if fBranch.Valid {
+						fileEl.Branch = &fBranch.String
+					}
+					if fFilePath.Valid {
+						fileEl.FilePath = &fFilePath.String
+					}
+					if fLanguage.Valid {
+						fileEl.Language = &fLanguage.String
+					}
 					fileEl.TechnologyConnectors = json.RawMessage(fTechRaw)
 					fileEl.Tags = json.RawMessage(fTagRaw)
 					fileEl.CreatedAt = fCreatedAt
@@ -447,8 +483,7 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			cand.finalScore = finalScore
 			cand.element.SimilarityScore = finalScore
 
-			// Gate: minimum final score threshold
-			if finalScore >= 0.35 {
+			if passesPopulateScoreGate(finalScore, lexicalPathScore) {
 				scoredCandidates = append(scoredCandidates, cand)
 			}
 		}
@@ -485,6 +520,13 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 
 		writeJSON(w, map[string]any{"results": results})
 	})
+}
+
+func passesPopulateScoreGate(finalScore, lexicalPathScore float64) bool {
+	if finalScore >= 0.35 {
+		return true
+	}
+	return finalScore >= 0.25 && lexicalPathScore >= 0.30
 }
 
 func bytesToVector(data []byte) watch.Vector {

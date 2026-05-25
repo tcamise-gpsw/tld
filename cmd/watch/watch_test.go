@@ -675,12 +675,12 @@ func TestResolveEmbeddingConfigPrecedence(t *testing.T) {
 		t.Fatalf("LoadGlobalConfig: %v", err)
 	}
 
-	resolved := resolveEmbeddingConfig(cfg, "none", "", "", 0)
+	resolved := resolveEmbeddingConfig(cfg, "none", "", "", 0, 0)
 	if resolved.Provider != "none" {
 		t.Fatalf("flag provider should win over env/config, got %+v", resolved)
 	}
 
-	resolved = resolveEmbeddingConfig(cfg, "", "", "", 0)
+	resolved = resolveEmbeddingConfig(cfg, "", "", "", 0, 0)
 	if resolved.Provider != "local-deterministic-test" || resolved.Model != "env-model" || resolved.Dimension != 7 {
 		t.Fatalf("env should win over config, got %+v", resolved)
 	}
