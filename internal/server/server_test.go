@@ -525,6 +525,75 @@ func TestPopulateLexicalScoreIgnoresContextHints(t *testing.T) {
 	}
 }
 
+func TestPopulatePenalizesSparseFolderMatches(t *testing.T) {
+	folderKind := "folder"
+	fileKind := "file"
+	folderPath := "src/billing"
+	filePath := "src/billing/BillingHandler.ts"
+	query := populateQuery{Base: "billing api", ViewName: "Architecture"}
+	children := []populateChildCandidate{
+		{name: "BillingHandler", kind: "file", filePath: "src/billing/BillingHandler.ts", hasEmbedding: true, embeddingScore: 0.80},
+		{name: "BillingRoutes", kind: "file", filePath: "src/billing/BillingRoutes.ts", hasEmbedding: true, embeddingScore: 0.80},
+		{name: "Currency", kind: "file", filePath: "src/shared/Currency.ts"},
+		{name: "Invoice", kind: "file", filePath: "src/accounting/Invoice.ts"},
+		{name: "Tax", kind: "file", filePath: "src/shared/Tax.ts"},
+		{name: "Discount", kind: "file", filePath: "src/promotions/Discount.ts"},
+		{name: "Address", kind: "file", filePath: "src/customers/Address.ts"},
+		{name: "Clock", kind: "file", filePath: "src/platform/Clock.ts"},
+	}
+	candidates := []populateCandidate{
+		{
+			element:        populateElementResult{ID: 1, Name: "billing", Kind: &folderKind, FilePath: &folderPath},
+			children:       children,
+			embeddingScore: 0.50,
+			hasEmbedding:   true,
+		},
+		{
+			element:        populateElementResult{ID: 2, Name: "BillingHandler", Kind: &fileKind, FilePath: &filePath},
+			embeddingScore: 0.50,
+			hasEmbedding:   true,
+		},
+	}
+
+	scored := scorePopulateCandidates(query, candidates, nil)
+	if scored[0].finalScore >= scored[1].finalScore {
+		t.Fatalf("sparse folder score %.3f should be below concrete file %.3f; folder reason: %s", scored[0].finalScore, scored[1].finalScore, scored[0].element.MatchReason)
+	}
+}
+
+func TestPopulateRewardsBroadFolderMatches(t *testing.T) {
+	folderKind := "folder"
+	fileKind := "file"
+	folderPath := "src/billing/api"
+	filePath := "src/billing/BillingHandler.ts"
+	query := populateQuery{Base: "billing api", ViewName: "Architecture"}
+	children := []populateChildCandidate{
+		{name: "BillingHandler", kind: "file", filePath: "src/billing/api/BillingHandler.ts", hasEmbedding: true, embeddingScore: 0.80},
+		{name: "BillingRoutes", kind: "file", filePath: "src/billing/api/BillingRoutes.ts", hasEmbedding: true, embeddingScore: 0.80},
+		{name: "BillingController", kind: "file", filePath: "src/billing/api/BillingController.ts", hasEmbedding: true, embeddingScore: 0.80},
+		{name: "BillingRequest", kind: "file", filePath: "src/billing/api/BillingRequest.ts", hasEmbedding: true, embeddingScore: 0.80},
+		{name: "BillingResponse", kind: "file", filePath: "src/billing/api/BillingResponse.ts", hasEmbedding: true, embeddingScore: 0.80},
+	}
+	candidates := []populateCandidate{
+		{
+			element:        populateElementResult{ID: 1, Name: "billing api", Kind: &folderKind, FilePath: &folderPath},
+			children:       children,
+			embeddingScore: 0.50,
+			hasEmbedding:   true,
+		},
+		{
+			element:        populateElementResult{ID: 2, Name: "BillingHandler", Kind: &fileKind, FilePath: &filePath},
+			embeddingScore: 0.50,
+			hasEmbedding:   true,
+		},
+	}
+
+	scored := scorePopulateCandidates(query, candidates, nil)
+	if scored[0].finalScore <= scored[1].finalScore {
+		t.Fatalf("broadly matching folder score %.3f should beat concrete file %.3f; folder reason: %s", scored[0].finalScore, scored[1].finalScore, scored[0].element.MatchReason)
+	}
+}
+
 type populateResultForTest struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`

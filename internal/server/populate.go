@@ -240,6 +240,7 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 				if cand.hasEmbedding {
 					cand.embeddingScore = math.Max(0, watch.CosineSimilarity(enrichedVector, bytesToVector(cand.vectorBytes)))
 				}
+				rescorePopulateChildEmbeddings(cand, enrichedVector)
 			}
 			for i := 0; i < reRankSize; i++ {
 				cand := &scoredCandidates[i]
@@ -251,9 +252,8 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 				if connectedIDs[cand.element.ID] {
 					connectivityScore = 1.0
 				}
-				aggregationBonus := math.Min(1.0, math.Log1p(float64(cand.childCount))/3.0)
-				abstractionScore := abstractionPriority(kind)
-				cand.finalScore = cand.lexicalPathScore*0.20 + cand.embeddingScore*0.40 + cand.archConfidence*0.14 + connectivityScore*0.10 + aggregationBonus*0.08 + abstractionScore*0.08
+				scorePopulateChildSupport(cand, popQuery)
+				cand.finalScore = calculatePopulateFinalScore(*cand, kind, connectivityScore)
 				cand.element.SimilarityScore = cand.finalScore
 				cand.element.MatchReason = populateMatchReason(*cand)
 			}
@@ -305,13 +305,27 @@ type populateCandidate struct {
 	element          populateElementResult
 	ownerType        string
 	ownerKey         string
+	children         []populateChildCandidate
 	embeddingScore   float64
 	hasEmbedding     bool
 	archConfidence   float64
 	childCount       int
+	childMatchCount  int
+	childCoverage    float64
+	childSupport     float64
 	lexicalPathScore float64
 	finalScore       float64
 	vectorBytes      []byte
+}
+
+type populateChildCandidate struct {
+	name           string
+	kind           string
+	filePath       string
+	tags           string
+	hasEmbedding   bool
+	embeddingScore float64
+	vectorBytes    []byte
 }
 
 func buildPopulateQuery(ctx context.Context, db *sql.DB, viewID int64, userQuery string) (populateQuery, error) {
@@ -438,10 +452,11 @@ func containsString(values []string, needle string) bool {
 }
 
 func loadPopulateCandidates(ctx context.Context, db *sql.DB, repoID, viewID, modelID int64, queryVector watch.Vector, includeFiles bool) ([]populateCandidate, error) {
-	kinds := []string{"'architecture-component'", "'repository-section'", "'folder'", "'cluster'", "'dependency-group'", "'fact-summary'", "'repository'"}
-	if includeFiles {
-		kinds = append(kinds, "'file'")
+	kinds := []string{
+		"'architecture-component'", "'repository-section'", "'folder'", "'cluster'", "'dependency-group'", "'fact-summary'", "'repository'",
+		"'file'", "'function'", "'method'", "'interface'", "'struct'", "'type'", "'class'", "'constructor'", "'route'", "'service'",
 	}
+	_ = includeFiles
 	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT el.id, el.name, el.kind, el.description, el.technology, el.url, el.logo_url, el.technology_connectors, el.tags, el.repo, el.branch, el.file_path, el.language, el.created_at, el.updated_at,
 		       m.owner_type, m.owner_key,
@@ -493,7 +508,83 @@ func loadPopulateCandidates(ctx context.Context, db *sql.DB, repoID, viewID, mod
 		}
 		out = append(out, cand)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := hydratePopulateCandidateChildren(ctx, db, modelID, queryVector, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func hydratePopulateCandidateChildren(ctx context.Context, db *sql.DB, modelID int64, queryVector watch.Vector, candidates []populateCandidate) error {
+	parentIndexes := map[int64]int{}
+	for i := range candidates {
+		if !supportsPopulateChildren(candidates[i].kind()) {
+			continue
+		}
+		parentIndexes[candidates[i].element.ID] = i
+	}
+	if len(parentIndexes) == 0 {
+		return nil
+	}
+	parentIDs := make([]int64, 0, len(parentIndexes))
+	for id := range parentIndexes {
+		parentIDs = append(parentIDs, id)
+	}
+	sort.Slice(parentIDs, func(i, j int) bool { return parentIDs[i] < parentIDs[j] })
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT parent_id, name, kind, file_path, tags, vector
+		FROM (
+			SELECT child_view.owner_element_id AS parent_id,
+			       child.name AS name,
+			       COALESCE(child.kind, '') AS kind,
+			       COALESCE(child.file_path, '') AS file_path,
+			       child.tags AS tags,
+			       pe.vector AS vector,
+			       ROW_NUMBER() OVER (PARTITION BY child_view.owner_element_id ORDER BY placement.id) AS child_rank
+			FROM views child_view
+			JOIN placements placement ON placement.view_id = child_view.id
+			JOIN elements child ON child.id = placement.element_id
+			LEFT JOIN watch_materialization child_mat ON child_mat.resource_type = 'element' AND child_mat.resource_id = child.id
+			LEFT JOIN watch_embeddings pe ON pe.model_id = ? AND pe.owner_type = 'populate_resource' AND pe.owner_key = child_mat.owner_type || ':' || child_mat.owner_key
+			WHERE child_view.owner_element_id IN (%s)
+		)
+		WHERE child_rank <= 80
+		ORDER BY parent_id, child_rank`, formatIDs(parentIDs)), modelID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var parentID int64
+		var child populateChildCandidate
+		var vectorBytes []byte
+		if err := rows.Scan(&parentID, &child.name, &child.kind, &child.filePath, &child.tags, &vectorBytes); err != nil {
+			return err
+		}
+		if len(vectorBytes) > 0 {
+			child.hasEmbedding = true
+			child.vectorBytes = vectorBytes
+			if len(queryVector) > 0 {
+				child.embeddingScore = math.Max(0, watch.CosineSimilarity(queryVector, bytesToVector(vectorBytes)))
+			}
+		}
+		idx, ok := parentIndexes[parentID]
+		if !ok {
+			continue
+		}
+		candidates[idx].children = append(candidates[idx].children, child)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range candidates {
+		if len(candidates[i].children) > candidates[i].childCount {
+			candidates[i].childCount = len(candidates[i].children)
+		}
+	}
+	return rows.Err()
 }
 
 func nullStringPtr(value sql.NullString) *string {
@@ -515,26 +606,109 @@ func scorePopulateCandidates(query populateQuery, candidates []populateCandidate
 			kind = *cand.element.Kind
 		}
 		cand.lexicalPathScore = calculateLexicalPathScore(query.Base, query.ViewName, cand.element.Name, filePath+" "+kind+" "+string(cand.element.Tags))
+		scorePopulateChildSupport(cand, query)
 		connectivityScore := 0.0
 		if connectedIDs[cand.element.ID] {
 			connectivityScore = 1.0
 		}
-		aggregationBonus := math.Min(1.0, math.Log1p(float64(cand.childCount))/3.0)
-		abstractionScore := abstractionPriority(kind)
-		cand.finalScore = cand.lexicalPathScore*0.20 + cand.embeddingScore*0.40 + cand.archConfidence*0.14 + connectivityScore*0.10 + aggregationBonus*0.08 + abstractionScore*0.08
+		cand.finalScore = calculatePopulateFinalScore(*cand, kind, connectivityScore)
 		cand.element.SimilarityScore = cand.finalScore
 		cand.element.MatchReason = populateMatchReason(*cand)
 	}
 	return candidates
 }
 
+func (cand populateCandidate) kind() string {
+	if cand.element.Kind == nil {
+		return ""
+	}
+	return *cand.element.Kind
+}
+
+func scorePopulateChildSupport(cand *populateCandidate, query populateQuery) {
+	if cand == nil {
+		return
+	}
+	cand.childMatchCount = 0
+	cand.childCoverage = 0
+	cand.childSupport = 0
+	if !supportsPopulateChildren(cand.kind()) || len(cand.children) == 0 {
+		return
+	}
+	total := 0.0
+	weightedCoverage := 0.0
+	matches := 0
+	for _, child := range cand.children {
+		childLexical := calculateLexicalPathScore(query.Base, query.ViewName, child.name, child.filePath+" "+child.kind+" "+child.tags)
+		childEmbedding := 0.0
+		if child.hasEmbedding {
+			childEmbedding = child.embeddingScore
+		}
+		childScore := childLexical*0.35 + childEmbedding*0.65
+		total += childScore
+		if childScore >= 0.45 {
+			matches++
+		}
+		weightedCoverage += clamp01((childScore - 0.25) / 0.45)
+	}
+	count := float64(len(cand.children))
+	cand.childMatchCount = matches
+	cand.childCoverage = weightedCoverage / count
+	cand.childSupport = clamp01(cand.childCoverage*0.70 + (total/count)*0.30)
+}
+
+func rescorePopulateChildEmbeddings(cand *populateCandidate, queryVector watch.Vector) {
+	if cand == nil || len(queryVector) == 0 {
+		return
+	}
+	for i := range cand.children {
+		if !cand.children[i].hasEmbedding || len(cand.children[i].vectorBytes) == 0 {
+			continue
+		}
+		cand.children[i].embeddingScore = math.Max(0, watch.CosineSimilarity(queryVector, bytesToVector(cand.children[i].vectorBytes)))
+	}
+}
+
+func supportsPopulateChildren(kind string) bool {
+	switch kind {
+	case "architecture-component", "repository-section", "folder", "cluster", "dependency-group", "fact-summary", "repository":
+		return true
+	default:
+		return false
+	}
+}
+
+func calculatePopulateFinalScore(cand populateCandidate, kind string, connectivityScore float64) float64 {
+	abstractionScore := abstractionPriority(kind)
+	score := cand.lexicalPathScore*0.20 + cand.embeddingScore*0.40 + cand.archConfidence*0.14 + connectivityScore*0.10 + cand.childSupport*0.12 + abstractionScore*0.04
+	if supportsPopulateChildren(kind) {
+		score *= containerEvidenceScale(cand)
+	}
+	return score
+}
+
+func containerEvidenceScale(cand populateCandidate) float64 {
+	if len(cand.children) == 0 {
+		return 0.55
+	}
+	return 0.45 + cand.childSupport*0.55
+}
+
+func clamp01(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
 func filterPopulateCandidates(candidates []populateCandidate, includeFiles bool) []populateCandidate {
+	_ = includeFiles
 	out := []populateCandidate{}
 	for _, cand := range candidates {
 		if cand.finalScore >= 0.18 || cand.lexicalPathScore >= 0.40 || (cand.hasEmbedding && cand.embeddingScore >= 0.55) {
-			if !includeFiles && cand.element.Kind != nil && *cand.element.Kind == "file" {
-				continue
-			}
 			out = append(out, cand)
 		}
 	}
@@ -551,6 +725,10 @@ func abstractionPriority(kind string) float64 {
 		return 0.75
 	case "file":
 		return 0.25
+	case "function", "method", "constructor", "route":
+		return 0.20
+	case "interface", "struct", "type", "class", "service":
+		return 0.35
 	default:
 		return 0.4
 	}
@@ -568,7 +746,11 @@ func populateMatchReason(cand populateCandidate) string {
 		parts = append(parts, fmt.Sprintf("architecture %.2f", cand.archConfidence))
 	}
 	if cand.childCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d children", cand.childCount))
+		if len(cand.children) > 0 {
+			parts = append(parts, fmt.Sprintf("children %.2f (%d/%d)", cand.childSupport, cand.childMatchCount, len(cand.children)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d children", cand.childCount))
+		}
 	}
 	return strings.Join(parts, ", ")
 }
