@@ -391,6 +391,125 @@ func TestPopulateScoreGateAllowsLexicallyAnchoredJinaMatches(t *testing.T) {
 	}
 }
 
+func TestPopulateQueryEnrichmentAddsArchitectureHints(t *testing.T) {
+	tests := []struct {
+		query string
+		want  []string
+	}{
+		{query: "frontend", want: []string{"web app", "ui", "client"}},
+		{query: "backend", want: []string{"backend service", "api service", "server"}},
+		{query: "cli", want: []string{"cli", "command"}},
+		{query: "websocket", want: []string{"real time service", "websocket"}},
+		{query: "panel", want: []string{"panel"}},
+		{query: "watch", want: []string{"watch service", "scanner"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			sqliteStore, _ := newTestServer(t, uuid.New(), nil)
+			if _, err := sqliteStore.DB().Exec(`
+				INSERT INTO views(id, name, created_at, updated_at)
+				VALUES (20, ?, 'now', 'now')`, tt.query); err != nil {
+				t.Fatal(err)
+			}
+			got, err := buildPopulateQuery(context.Background(), sqliteStore.DB(), 20, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got.Enriched, tt.query) {
+				t.Fatalf("enriched query %q should preserve user term %q", got.Enriched, tt.query)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(got.Enriched, want) {
+					t.Fatalf("enriched query %q missing hint %q", got.Enriched, want)
+				}
+			}
+		})
+	}
+}
+
+func TestPopulatePrefersHighAbstractionCandidates(t *testing.T) {
+	sqliteStore, routes := newTestServer(t, uuid.New(), nil)
+	repoID := insertWatchRepository(t, sqliteStore.DB())
+	if _, err := sqliteStore.DB().Exec(`
+		INSERT INTO views(id, name, created_at, updated_at)
+		VALUES (20, 'frontend', 'now', 'now');
+		INSERT INTO elements(id, name, kind, tags, technology_connectors, file_path, created_at, updated_at)
+		VALUES
+			(100, 'frontend', 'folder', '["role:ui"]', '[]', 'frontend', 'now', 'now'),
+			(101, 'index.tsx', 'file', '["role:ui"]', '[]', 'frontend/src/index.tsx', 'now', 'now'),
+			(102, 'Frontend App', 'architecture-component', '["role:ui"]', '[]', 'frontend', 'now', 'now');
+		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, created_at, updated_at)
+		VALUES
+			(?, 'folder', 'folder:frontend', 'element', 100, 'now', 'now'),
+			(?, 'file', 'file:frontend/src/index.tsx', 'element', 101, 'now', 'now'),
+			(?, 'architecture-component', 'component:frontend', 'element', 102, 'now', 'now')`,
+		repoID, repoID, repoID); err != nil {
+		t.Fatal(err)
+	}
+
+	results := requestPopulateResults(t, routes, "/api/views/20/populate?q=frontend&limit=10")
+	if len(results) == 0 {
+		t.Fatal("expected populate results")
+	}
+	for _, result := range results {
+		if result.Kind != "file" {
+			return
+		}
+	}
+	t.Fatalf("expected at least one high-abstraction result, got %+v", results)
+}
+
+func TestPopulateFallsBackToFilesAndExcludesPlaced(t *testing.T) {
+	sqliteStore, routes := newTestServer(t, uuid.New(), nil)
+	repoID := insertWatchRepository(t, sqliteStore.DB())
+	if _, err := sqliteStore.DB().Exec(`
+		INSERT INTO views(id, name, created_at, updated_at)
+		VALUES (20, 'websocket', 'now', 'now');
+		INSERT INTO elements(id, name, kind, tags, technology_connectors, file_path, created_at, updated_at)
+		VALUES
+			(100, 'websocket.go', 'file', '["role:watch"]', '[]', 'internal/watch/websocket.go', 'now', 'now'),
+			(101, 'placed-websocket.go', 'file', '["role:watch"]', '[]', 'internal/watch/placed-websocket.go', 'now', 'now');
+		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
+		VALUES (20, 101, 0, 0, 'now', 'now');
+		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, created_at, updated_at)
+		VALUES
+			(?, 'file', 'file:internal/watch/websocket.go', 'element', 100, 'now', 'now'),
+			(?, 'file', 'file:internal/watch/placed-websocket.go', 'element', 101, 'now', 'now')`,
+		repoID, repoID); err != nil {
+		t.Fatal(err)
+	}
+
+	results := requestPopulateResults(t, routes, "/api/views/20/populate?q=websocket&limit=10")
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want only unplaced file fallback", results)
+	}
+	if results[0].ID != 100 || results[0].Kind != "file" {
+		t.Fatalf("result = %+v, want unplaced file 100", results[0])
+	}
+}
+
+type populateResultForTest struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+func requestPopulateResults(t *testing.T, routes http.Handler, path string) []populateResultForTest {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Results []populateResultForTest `json:"results"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return body.Results
+}
+
 func insertWatchRepository(t *testing.T, db interface {
 	Exec(string, ...any) (sql.Result, error)
 }) int64 {

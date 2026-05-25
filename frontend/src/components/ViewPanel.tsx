@@ -61,7 +61,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
   // Populate similarity states
   const [populateQuery, setPopulateQuery] = useState('')
   const [populateLimit, setPopulateLimit] = useState(5)
-  const [populateResults, setPopulateResults] = useState<Array<LibraryElement & { similarity_score: number }>>([])
+  const [populateResults, setPopulateResults] = useState<Array<LibraryElement & { similarity_score: number; match_kind?: string; match_reason?: string }>>([])
   const [selectedPopulateIds, setSelectedPopulateIds] = useState<number[]>([])
   const [loadingPopulate, setLoadingPopulate] = useState(false)
   const [searchedPopulate, setSearchedPopulate] = useState(false)
@@ -81,7 +81,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
       if (isOpen) {
         api.workspace.views.populate.getQuery(view.id)
           .then((q) => {
-            setPopulateQuery(q)
+            setPopulateQuery(q.enriched_query || q.query)
           })
           .catch(() => {
             setPopulateQuery(view.name)
@@ -221,7 +221,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
                   Populate Elements
                 </Text>
                 <Text fontSize="xs" color="gray.400">
-                  Run similarity search to find matching elements from your codebase and place them inside the view.
+                  Find high-level scanned resources from your codebase and place them inside the view.
                 </Text>
 
                 <FormControl>
@@ -230,7 +230,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
                     size="sm"
                     value={populateQuery}
                     onChange={(e) => setPopulateQuery(e.target.value)}
-                    placeholder="Enter query..."
+                    placeholder="Describe the architecture component..."
                   />
                 </FormControl>
 
@@ -283,9 +283,14 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
                             }
                           }}
                         >
-                          <Text fontSize="xs" fontWeight="medium" color="white" isTruncated maxW="160px">
-                            {result.name}
-                          </Text>
+                          <VStack align="start" spacing={0} maxW="160px">
+                            <Text fontSize="xs" fontWeight="medium" color="white" isTruncated maxW="160px">
+                              {result.name}
+                            </Text>
+                            <Text fontSize="10px" color="gray.500" isTruncated maxW="160px">
+                              {[result.kind, result.file_path].filter(Boolean).join(' · ')}
+                            </Text>
+                          </VStack>
                         </Checkbox>
                         <HStack spacing={1.5}>
                           {result.technology && (
@@ -294,7 +299,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
                             </Text>
                           )}
                           <Text fontSize="10px" fontWeight="bold" color="blue.300">
-                            {Math.round(result.similarity_score * 100)}%
+                            {Math.round(result.similarity_score * 100)}
                           </Text>
                         </HStack>
                       </HStack>

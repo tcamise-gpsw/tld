@@ -21,14 +21,14 @@ import (
 )
 
 const (
-	DefaultEmbeddingProvider        = "openai"
-	DefaultOpenAIEndpoint           = "http://127.0.0.1:8000/v1/embeddings"
-	DefaultOpenAIModel              = "embeddinggemma-300m-4bit"
-	DefaultOpenAIAPIKey             = "tldcli"
-	DefaultOllamaEndpoint           = "http://localhost:11434"
-	DefaultOllamaModel              = "jina/jina-embeddings-v2-base-en"
-	DefaultLexicalModel             = "lexical-code-fingerprint-v1"
-	DefaultLexicalDimension         = 512
+	DefaultEmbeddingProvider = "openai"
+	DefaultOpenAIEndpoint    = "http://127.0.0.1:8000/v1/embeddings"
+	DefaultOpenAIModel       = "embeddinggemma-300m-4bit"
+	DefaultOpenAIAPIKey      = "tldcli"
+	DefaultOllamaEndpoint    = "http://localhost:11434"
+	DefaultOllamaModel       = "jina/jina-embeddings-v2-base-en"
+	DefaultLexicalModel      = "lexical-code-fingerprint-v1"
+	DefaultLexicalDimension  = 512
 
 	DefaultEmbeddingHealthThreshold = 0.70
 	RenameEmbeddingThreshold        = 0.78
@@ -137,8 +137,6 @@ func (p LexicalProvider) Embed(_ context.Context, inputs []EmbeddingInput) ([]Ve
 	}
 	return out, nil
 }
-
-
 
 var lexicalIdentifierRE = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|"[^"\n]*"|'[^'\n]*'|` + "`[^`\n]*`" + `|[{}()[\].,;:+\-*/%=&|!<>^~?]`)
 
@@ -551,6 +549,8 @@ func embeddingInputText(model string, input EmbeddingInput) string {
 		return "Find the most relevant code snippet given the following query:\n" + text
 	case "symbol":
 		return "Candidate code snippet:\n" + text
+	case "populate_resource":
+		return "Candidate architecture resource or code module:\n" + text
 	default:
 		return text
 	}

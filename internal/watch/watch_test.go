@@ -4099,6 +4099,53 @@ func TestEmbeddingCacheChunksProviderCallsAndReportsProgress(t *testing.T) {
 	}
 }
 
+func TestPopulateResourceEmbeddingsAreCachedSeparately(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	store := NewStore(db)
+	provider := &countingProvider{}
+	model := provider.ModelID()
+	modelID, err := store.EnsureEmbeddingModel(context.Background(), EmbeddingConfig{Provider: model.Provider, Model: model.Model, Dimension: model.Dimension}, model.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.Exec(`
+		INSERT INTO watch_repositories(remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at)
+		VALUES ('local', ?, 'repo', 'main', '', 'clean', '', 'now', 'now')`, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO elements(id, name, kind, description, tags, technology_connectors, file_path, created_at, updated_at)
+		VALUES (100, 'Watch', 'folder', 'watch service', '["role:watch"]', '[]', 'internal/watch', 'now', 'now');
+		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, created_at, updated_at)
+		VALUES (?, 'folder', 'folder:internal/watch', 'element', 100, 'now', 'now')`, repoID); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := NewRepresenter(store).cachePopulateResourceEmbeddings(context.Background(), modelID, provider, repoID, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Created != 1 {
+		t.Fatalf("expected one populate resource embedding, got %+v", stats)
+	}
+	if provider.calls != 1 || !strings.Contains(provider.texts[0], "Architecture resource") || !strings.Contains(provider.texts[0], "Watch") {
+		t.Fatalf("provider calls=%d texts=%v, want populate resource document", provider.calls, provider.texts)
+	}
+	stats, err = NewRepresenter(store).cachePopulateResourceEmbeddings(context.Background(), modelID, provider, repoID, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.CacheHits != 1 || provider.calls != 1 {
+		t.Fatalf("expected cache hit without provider call, stats=%+v calls=%d", stats, provider.calls)
+	}
+}
+
 func TestSymbolEmbeddingTextUsesOutdentedCodeBody(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, repo, "a.go", `package main

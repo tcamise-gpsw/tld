@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
@@ -34,6 +35,8 @@ type populateElementResult struct {
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
 	SimilarityScore      float64         `json:"similarity_score"`
+	MatchKind            string          `json:"match_kind,omitempty"`
+	MatchReason          string          `json:"match_reason,omitempty"`
 }
 
 func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore) {
@@ -42,8 +45,7 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 		if !ok {
 			return
 		}
-		var name string
-		err := sqliteStore.DB().QueryRowContext(r.Context(), "SELECT name FROM views WHERE id = ?", viewID).Scan(&name)
+		query, err := buildPopulateQuery(r.Context(), sqliteStore.DB(), viewID, "")
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeJSONError(w, http.StatusNotFound, "view not found")
@@ -52,7 +54,7 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			}
 			return
 		}
-		writeJSON(w, map[string]string{"query": name})
+		writeJSON(w, map[string]string{"query": query.Base, "enriched_query": query.Enriched})
 	})
 
 	mux.HandleFunc("GET /api/views/{id}/populate", func(w http.ResponseWriter, r *http.Request) {
@@ -78,9 +80,16 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			limit = 50
 		}
 
-		// 1. Get default repository and model
+		popQuery, err := buildPopulateQuery(r.Context(), sqliteStore.DB(), viewID, q)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// 1. Get default repository. Populate should still produce lexical
+		// candidates if no embedding model has been registered yet.
 		var repoID int64
-		err := sqliteStore.DB().QueryRowContext(r.Context(), "SELECT id FROM watch_repositories ORDER BY updated_at DESC, id DESC LIMIT 1").Scan(&repoID)
+		err = sqliteStore.DB().QueryRowContext(r.Context(), "SELECT id FROM watch_repositories ORDER BY updated_at DESC, id DESC LIMIT 1").Scan(&repoID)
 		if err != nil {
 			writeJSON(w, map[string]any{"results": []any{}})
 			return
@@ -89,287 +98,15 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 		var modelID int64
 		var modelProvider, modelName, modelConfigHash string
 		var modelDimension int
-		err = sqliteStore.DB().QueryRowContext(r.Context(), "SELECT id, provider, model, dimension, config_hash FROM watch_embedding_models ORDER BY created_at DESC, id DESC LIMIT 1").Scan(
+		hasModel := true
+		err = sqliteStore.DB().QueryRowContext(r.Context(), "SELECT id, provider, model, dimension, config_hash FROM watch_embedding_models WHERE provider <> 'none' ORDER BY created_at DESC, id DESC LIMIT 1").Scan(
 			&modelID, &modelProvider, &modelName, &modelDimension, &modelConfigHash,
 		)
-		if err != nil {
-			writeJSON(w, map[string]any{"results": []any{}})
+		if errors.Is(err, sql.ErrNoRows) {
+			hasModel = false
+		} else if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to load embedding model: "+err.Error())
 			return
-		}
-
-		if modelProvider == "none" {
-			writeJSON(w, map[string]any{"results": []any{}})
-			return
-		}
-
-		// Load view name
-		var viewName string
-		err = sqliteStore.DB().QueryRowContext(r.Context(), "SELECT name FROM views WHERE id = ?", viewID).Scan(&viewName)
-		if err != nil {
-			viewName = ""
-		}
-
-		// 2. Load global workspace configuration
-		cfg, err := workspace.LoadGlobalConfig()
-		if err != nil {
-			cfg = workspace.DefaultConfig()
-		}
-
-		embCfg := watch.EmbeddingConfig{
-			Provider:        modelProvider,
-			Endpoint:        cfg.Watch.Embedding.Endpoint,
-			Model:           modelName,
-			Dimension:       modelDimension,
-			RuntimePath:     cfg.Watch.Embedding.RuntimePath,
-			HealthThreshold: cfg.Watch.Embedding.HealthThreshold,
-		}
-
-		provider, err := watch.NewEmbeddingProvider(embCfg)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to initialize embedding provider: "+err.Error())
-			return
-		}
-		if closer, ok := provider.(watch.ClosableProvider); ok {
-			defer func() { _ = closer.Close() }()
-		}
-
-		// 3. Generate query vector
-		vectors, err := provider.Embed(r.Context(), []watch.EmbeddingInput{{OwnerType: "query", Text: q}})
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to embed query: "+err.Error())
-			return
-		}
-		if len(vectors) != 1 {
-			writeJSONError(w, http.StatusInternalServerError, "embedding provider returned invalid vector count")
-			return
-		}
-		queryVector := vectors[0]
-
-		// 4. Query all symbol embeddings for elements not already placed in the view
-		rows, err := sqliteStore.DB().QueryContext(r.Context(), `
-			SELECT el.id, el.name, el.kind, el.description, el.technology, el.url, el.logo_url, el.technology_connectors, el.tags, el.repo, el.branch, el.file_path, el.language, el.created_at, el.updated_at,
-			       e.vector
-			FROM watch_embeddings e
-			JOIN watch_materialization m ON m.owner_type = 'symbol' AND m.owner_key = e.owner_key AND m.repository_id = ?
-			JOIN elements el ON el.id = m.resource_id
-			WHERE e.model_id = ? AND e.owner_type = 'symbol'
-			  AND el.id NOT IN (SELECT element_id FROM placements WHERE view_id = ?)`, repoID, modelID, viewID)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to query symbol embeddings: "+err.Error())
-			return
-		}
-		defer func() { _ = rows.Close() }()
-
-		type symbolHit struct {
-			elementID  int64
-			similarity float64
-			elResult   populateElementResult
-			filePath   string
-		}
-
-		var hits []symbolHit
-
-		for rows.Next() {
-			var id int64
-			var name string
-			var kind, description, technology, url, logoURL, repo, branch, filePath, language sql.NullString
-			var techRaw, tagRaw, createdAt, updatedAt string
-			var vectorBytes []byte
-
-			if err := rows.Scan(
-				&id, &name, &kind, &description, &technology, &url, &logoURL, &techRaw, &tagRaw, &repo, &branch, &filePath, &language, &createdAt, &updatedAt,
-				&vectorBytes,
-			); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "failed to scan embedding row: "+err.Error())
-				return
-			}
-
-			symbolVector := bytesToVector(vectorBytes)
-			similarity := watch.CosineSimilarity(queryVector, symbolVector)
-
-			var kindPtr, descPtr, techPtr, urlPtr, logoPtr, repoPtr, branchPtr, filePtr, langPtr *string
-			if kind.Valid {
-				kindPtr = &kind.String
-			}
-			if description.Valid {
-				descPtr = &description.String
-			}
-			if technology.Valid {
-				techPtr = &technology.String
-			}
-			if url.Valid {
-				urlPtr = &url.String
-			}
-			if logoURL.Valid {
-				logoPtr = &logoURL.String
-			}
-			if repo.Valid {
-				repoPtr = &repo.String
-			}
-			if branch.Valid {
-				branchPtr = &branch.String
-			}
-			if filePath.Valid {
-				filePtr = &filePath.String
-			}
-			if language.Valid {
-				langPtr = &language.String
-			}
-
-			elRes := populateElementResult{
-				ID:                   id,
-				Name:                 name,
-				Kind:                 kindPtr,
-				Description:          descPtr,
-				Technology:           techPtr,
-				URL:                  urlPtr,
-				LogoURL:              logoPtr,
-				TechnologyConnectors: json.RawMessage(techRaw),
-				Tags:                 json.RawMessage(tagRaw),
-				Repo:                 repoPtr,
-				Branch:               branchPtr,
-				FilePath:             filePtr,
-				Language:             langPtr,
-				CreatedAt:            createdAt,
-				UpdatedAt:            updatedAt,
-				SimilarityScore:      similarity,
-			}
-
-			var fp string
-			if filePath.Valid {
-				fp = filePath.String
-			}
-
-			hits = append(hits, symbolHit{
-				elementID:  id,
-				similarity: similarity,
-				elResult:   elRes,
-				filePath:   fp,
-			})
-		}
-
-		if err := rows.Err(); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "rows iteration error: "+err.Error())
-			return
-		}
-
-		// Group symbol hits by file path
-		hitsByFile := make(map[string][]symbolHit)
-		for _, hit := range hits {
-			if hit.filePath != "" {
-				hitsByFile[hit.filePath] = append(hitsByFile[hit.filePath], hit)
-			}
-		}
-
-		type candidate struct {
-			element          populateElementResult
-			similarity       float64
-			hitCount         int
-			lexicalPathScore float64
-			finalScore       float64
-		}
-
-		var candidates []candidate
-		processedFiles := make(map[string]bool)
-
-		for _, hit := range hits {
-			fp := hit.filePath
-			if fp == "" {
-				candidates = append(candidates, candidate{
-					element:    hit.elResult,
-					similarity: hit.similarity,
-					hitCount:   1,
-				})
-				continue
-			}
-
-			if processedFiles[fp] {
-				continue
-			}
-
-			fileHits := hitsByFile[fp]
-			if len(fileHits) > 1 {
-				// Try to promote to file-level suggestion
-				var fileEl populateElementResult
-				var fKind, fDescription, fTechnology, fURL, fLogoURL, fRepo, fBranch, fFilePath, fLanguage sql.NullString
-				var fTechRaw, fTagRaw, fCreatedAt, fUpdatedAt string
-				err := sqliteStore.DB().QueryRowContext(r.Context(), `
-					SELECT id, name, kind, description, technology, url, logo_url, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at
-					FROM elements
-					WHERE file_path = ? AND kind = 'file'
-					LIMIT 1`, fp).Scan(
-					&fileEl.ID, &fileEl.Name, &fKind, &fDescription, &fTechnology, &fURL, &fLogoURL, &fTechRaw, &fTagRaw, &fRepo, &fBranch, &fFilePath, &fLanguage, &fCreatedAt, &fUpdatedAt,
-				)
-				if err == nil {
-					// Check if this promoted file element is already placed in the view
-					var placedCount int
-					errP := sqliteStore.DB().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM placements WHERE view_id = ? AND element_id = ?`, viewID, fileEl.ID).Scan(&placedCount)
-					if errP == nil && placedCount > 0 {
-						// Already placed, skip suggesting
-						processedFiles[fp] = true
-						continue
-					}
-
-					if fKind.Valid {
-						fileEl.Kind = &fKind.String
-					}
-					if fDescription.Valid {
-						fileEl.Description = &fDescription.String
-					}
-					if fTechnology.Valid {
-						fileEl.Technology = &fTechnology.String
-					}
-					if fURL.Valid {
-						fileEl.URL = &fURL.String
-					}
-					if fLogoURL.Valid {
-						fileEl.LogoURL = &fLogoURL.String
-					}
-					if fRepo.Valid {
-						fileEl.Repo = &fRepo.String
-					}
-					if fBranch.Valid {
-						fileEl.Branch = &fBranch.String
-					}
-					if fFilePath.Valid {
-						fileEl.FilePath = &fFilePath.String
-					}
-					if fLanguage.Valid {
-						fileEl.Language = &fLanguage.String
-					}
-					fileEl.TechnologyConnectors = json.RawMessage(fTechRaw)
-					fileEl.Tags = json.RawMessage(fTagRaw)
-					fileEl.CreatedAt = fCreatedAt
-					fileEl.UpdatedAt = fUpdatedAt
-
-					// Max similarity
-					maxSim := -1.0
-					for _, fh := range fileHits {
-						if fh.similarity > maxSim {
-							maxSim = fh.similarity
-						}
-					}
-					fileEl.SimilarityScore = maxSim
-
-					candidates = append(candidates, candidate{
-						element:    fileEl,
-						similarity: maxSim,
-						hitCount:   len(fileHits),
-					})
-					processedFiles[fp] = true
-					continue
-				}
-			}
-
-			// Fallback to symbol-level suggestions for each hit in this file
-			for _, fh := range fileHits {
-				candidates = append(candidates, candidate{
-					element:    fh.elResult,
-					similarity: fh.similarity,
-					hitCount:   1,
-				})
-			}
-			processedFiles[fp] = true
 		}
 
 		// Load placed elements in target view
@@ -426,88 +163,60 @@ func registerPopulateHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore
 			}
 		}
 
-		candidateIDs := make([]int64, 0, len(candidates))
-		for _, cand := range candidates {
-			candidateIDs = append(candidateIDs, cand.element.ID)
-		}
-
-		archConf := make(map[int64]float64)
-		if len(candidateIDs) > 0 {
-			_ = queryIDChunks(candidateIDs, 450, func(ids []int64) error {
-				idsStr := formatIDs(ids)
-				query := fmt.Sprintf(`
-					SELECT target_resource_id, MAX(confidence)
-					FROM watch_architecture_links
-					WHERE target_resource_type = 'element' AND target_resource_id IN (%s)
-					GROUP BY target_resource_id`, idsStr)
-				rowsAC, err := sqliteStore.DB().QueryContext(r.Context(), query)
-				if err != nil {
-					return err
-				}
-				defer func() { _ = rowsAC.Close() }()
-				for rowsAC.Next() {
-					var id int64
-					var confidence float64
-					if err := rowsAC.Scan(&id, &confidence); err == nil {
-						archConf[id] = confidence
-					}
-				}
-				return rowsAC.Err()
-			})
-		}
-
-		var scoredCandidates []candidate
-		for _, cand := range candidates {
-			semanticScore := math.Max(0.0, cand.similarity)
-			acConfidence := archConf[cand.element.ID]
-
-			connectivityScore := 0.0
-			if connectedIDs[cand.element.ID] {
-				connectivityScore = 1.0
+		queryVector := watch.Vector(nil)
+		if hasModel {
+			cfg, err := workspace.LoadGlobalConfig()
+			if err != nil {
+				cfg = workspace.DefaultConfig()
 			}
-
-			filePathStr := ""
-			if cand.element.FilePath != nil {
-				filePathStr = *cand.element.FilePath
+			embCfg := watch.EmbeddingConfig{
+				Provider:        modelProvider,
+				Endpoint:        cfg.Watch.Embedding.Endpoint,
+				Model:           modelName,
+				Dimension:       modelDimension,
+				RuntimePath:     cfg.Watch.Embedding.RuntimePath,
+				HealthThreshold: cfg.Watch.Embedding.HealthThreshold,
 			}
-			lexicalPathScore := calculateLexicalPathScore(q, viewName, cand.element.Name, filePathStr)
-
-			aggregationBonus := 0.0
-			if cand.hitCount > 1 {
-				aggregationBonus = math.Min(1.0, math.Log1p(float64(cand.hitCount-1)))
+			provider, err := watch.NewEmbeddingProvider(embCfg)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "failed to initialize embedding provider: "+err.Error())
+				return
 			}
-
-			finalScore := semanticScore*0.45 + acConfidence*0.25 + connectivityScore*0.15 + lexicalPathScore*0.10 + aggregationBonus*0.05
-
-			cand.lexicalPathScore = lexicalPathScore
-			cand.finalScore = finalScore
-			cand.element.SimilarityScore = finalScore
-
-			if passesPopulateScoreGate(finalScore, lexicalPathScore) {
-				scoredCandidates = append(scoredCandidates, cand)
+			if closer, ok := provider.(watch.ClosableProvider); ok {
+				defer func() { _ = closer.Close() }()
+			}
+			vectors, err := provider.Embed(r.Context(), []watch.EmbeddingInput{{OwnerType: "query", Text: popQuery.Enriched}})
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "failed to embed query: "+err.Error())
+				return
+			}
+			if len(vectors) == 1 {
+				queryVector = vectors[0]
 			}
 		}
 
-		// Sort by score descending
+		candidates, err := loadPopulateCandidates(r.Context(), sqliteStore.DB(), repoID, viewID, modelID, queryVector, false)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to load populate candidates: "+err.Error())
+			return
+		}
+		scoredCandidates := scorePopulateCandidates(popQuery, candidates, connectedIDs)
+		scoredCandidates = filterPopulateCandidates(scoredCandidates, false)
+		if len(scoredCandidates) == 0 {
+			fallback, err := loadPopulateCandidates(r.Context(), sqliteStore.DB(), repoID, viewID, modelID, queryVector, true)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "failed to load fallback populate candidates: "+err.Error())
+				return
+			}
+			scoredCandidates = filterPopulateCandidates(scorePopulateCandidates(popQuery, fallback, connectedIDs), true)
+		}
+
 		sort.Slice(scoredCandidates, func(i, j int) bool {
+			if scoredCandidates[i].finalScore == scoredCandidates[j].finalScore {
+				return scoredCandidates[i].element.ID < scoredCandidates[j].element.ID
+			}
 			return scoredCandidates[i].finalScore > scoredCandidates[j].finalScore
 		})
-
-		// Gate: ambiguity suppression
-		if len(scoredCandidates) >= 2 {
-			top := scoredCandidates[0]
-			second := scoredCandidates[1]
-			if top.finalScore-second.finalScore <= 0.02 && top.lexicalPathScore < 0.30 && second.lexicalPathScore < 0.30 {
-				thresholdScore := top.finalScore - 0.02
-				var filtered []candidate
-				for _, c := range scoredCandidates {
-					if c.finalScore <= thresholdScore || c.lexicalPathScore >= 0.30 {
-						filtered = append(filtered, c)
-					}
-				}
-				scoredCandidates = filtered
-			}
-		}
 
 		if len(scoredCandidates) > limit {
 			scoredCandidates = scoredCandidates[:limit]
@@ -532,6 +241,268 @@ func passesPopulateScoreGate(finalScore, lexicalPathScore float64) bool {
 	return lexicalPathScore >= 0.50 && finalScore >= 0.15
 }
 
+type populateQuery struct {
+	Base     string
+	Enriched string
+	Tokens   map[string]bool
+	Hints    []string
+	ViewName string
+}
+
+type populateCandidate struct {
+	element          populateElementResult
+	ownerType        string
+	ownerKey         string
+	embeddingScore   float64
+	hasEmbedding     bool
+	archConfidence   float64
+	childCount       int
+	lexicalPathScore float64
+	finalScore       float64
+}
+
+func buildPopulateQuery(ctx context.Context, db *sql.DB, viewID int64, userQuery string) (populateQuery, error) {
+	var viewName string
+	var ownerElementID sql.NullInt64
+	var viewDescription sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT name, owner_element_id, description FROM views WHERE id = ?`, viewID).Scan(&viewName, &ownerElementID, &viewDescription); err != nil {
+		return populateQuery{}, err
+	}
+	base := strings.TrimSpace(userQuery)
+	if base == "" {
+		base = strings.TrimSpace(viewName)
+	}
+	parts := []string{base, viewName}
+	if viewDescription.Valid {
+		parts = append(parts, viewDescription.String)
+	}
+	if ownerElementID.Valid {
+		var name string
+		var kind, description, filePath sql.NullString
+		if err := db.QueryRowContext(ctx, `SELECT name, kind, description, file_path FROM elements WHERE id = ?`, ownerElementID.Int64).Scan(&name, &kind, &description, &filePath); err == nil {
+			parts = append(parts, name)
+			if kind.Valid {
+				parts = append(parts, kind.String)
+			}
+			if description.Valid {
+				parts = append(parts, description.String)
+			}
+			if filePath.Valid {
+				parts = append(parts, filePath.String)
+			}
+		}
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT e.name, COALESCE(e.kind, ''), COALESCE(e.file_path, '')
+		FROM placements p
+		JOIN elements e ON e.id = p.element_id
+		WHERE p.view_id = ?
+		ORDER BY p.id
+		LIMIT 12`, viewID)
+	if err == nil {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var name, kind, filePath string
+			if rows.Scan(&name, &kind, &filePath) == nil {
+				parts = append(parts, name, kind, filePath)
+			}
+		}
+	}
+	hints := populateRoleHints(parts...)
+	if len(hints) == 0 {
+		hints = []string{"service", "module", "subsystem", "application"}
+	}
+	enriched := fmt.Sprintf("Find code and architecture resources that implement the high-level architecture component: %s. Relevant aliases/roles: %s. Prefer services, apps, folders, modules, and major subsystems over individual functions.", base, strings.Join(hints, ", "))
+	tokens := getTokens(strings.Join(append([]string{base, viewName}, hints...), " "))
+	return populateQuery{Base: base, Enriched: enriched, Tokens: tokens, Hints: hints, ViewName: viewName}, nil
+}
+
+func populateRoleHints(values ...string) []string {
+	source := strings.ToLower(strings.Join(values, " "))
+	hints := []string{}
+	add := func(items ...string) {
+		for _, item := range items {
+			item = strings.TrimSpace(item)
+			if item != "" && !containsString(hints, item) {
+				hints = append(hints, item)
+			}
+		}
+	}
+	if strings.Contains(source, "frontend") || strings.Contains(source, "front-end") || strings.Contains(source, "ui") || strings.Contains(source, "web") || strings.Contains(source, "react") || strings.Contains(source, "panel") {
+		add("web app", "frontend", "ui", "client", "react", "panel")
+	}
+	if strings.Contains(source, "backend") || strings.Contains(source, "server") || strings.Contains(source, "api") || strings.Contains(source, "rpc") {
+		add("backend service", "api service", "server", "rpc", "handler")
+	}
+	if strings.Contains(source, "cli") || strings.Contains(source, "command") || strings.Contains(source, "cobra") {
+		add("cli", "command", "terminal", "cobra")
+	}
+	if strings.Contains(source, "websocket") || strings.Contains(source, "real time") || strings.Contains(source, "realtime") || strings.Contains(source, "ws") {
+		add("real time service", "websocket", "event stream", "live updates")
+	}
+	if strings.Contains(source, "watch") || strings.Contains(source, "scanner") || strings.Contains(source, "scan") {
+		add("watch service", "scanner", "repository analysis", "file watcher")
+	}
+	if strings.Contains(source, "job") || strings.Contains(source, "worker") || strings.Contains(source, "scheduler") {
+		add("scheduler", "worker", "background job")
+	}
+	for _, value := range values {
+		for token := range getTokens(value) {
+			if len(token) >= 3 {
+				add(token)
+			}
+		}
+	}
+	if len(hints) > 12 {
+		hints = hints[:12]
+	}
+	return hints
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func loadPopulateCandidates(ctx context.Context, db *sql.DB, repoID, viewID, modelID int64, queryVector watch.Vector, includeFiles bool) ([]populateCandidate, error) {
+	kinds := []string{"'architecture-component'", "'repository-section'", "'folder'", "'cluster'", "'dependency-group'", "'fact-summary'", "'repository'"}
+	if includeFiles {
+		kinds = append(kinds, "'file'")
+	}
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT el.id, el.name, el.kind, el.description, el.technology, el.url, el.logo_url, el.technology_connectors, el.tags, el.repo, el.branch, el.file_path, el.language, el.created_at, el.updated_at,
+		       m.owner_type, m.owner_key,
+		       COALESCE((SELECT MAX(confidence) FROM watch_architecture_links al WHERE al.target_resource_type = 'element' AND al.target_resource_id = el.id), 0),
+		       COALESCE((SELECT COUNT(*) FROM placements cp JOIN views cv ON cv.id = cp.view_id WHERE cv.owner_element_id = el.id), 0),
+		       pe.vector
+		FROM watch_materialization m
+		JOIN elements el ON el.id = m.resource_id
+		LEFT JOIN watch_embeddings pe ON pe.model_id = ? AND pe.owner_type = 'populate_resource' AND pe.owner_key = m.owner_type || ':' || m.owner_key
+		WHERE m.repository_id = ?
+		  AND m.resource_type = 'element'
+		  AND COALESCE(el.kind, '') IN (%s)
+		  AND el.id NOT IN (SELECT element_id FROM placements WHERE view_id = ?)
+		ORDER BY el.kind, el.name`, strings.Join(kinds, ",")), modelID, repoID, viewID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []populateCandidate{}
+	for rows.Next() {
+		var cand populateCandidate
+		var kind, description, technology, url, logoURL, repo, branch, filePath, language sql.NullString
+		var techRaw, tagRaw, createdAt, updatedAt string
+		var vectorBytes []byte
+		if err := rows.Scan(
+			&cand.element.ID, &cand.element.Name, &kind, &description, &technology, &url, &logoURL, &techRaw, &tagRaw, &repo, &branch, &filePath, &language, &createdAt, &updatedAt,
+			&cand.ownerType, &cand.ownerKey, &cand.archConfidence, &cand.childCount, &vectorBytes,
+		); err != nil {
+			return nil, err
+		}
+		cand.element.Kind = nullStringPtr(kind)
+		cand.element.Description = nullStringPtr(description)
+		cand.element.Technology = nullStringPtr(technology)
+		cand.element.URL = nullStringPtr(url)
+		cand.element.LogoURL = nullStringPtr(logoURL)
+		cand.element.Repo = nullStringPtr(repo)
+		cand.element.Branch = nullStringPtr(branch)
+		cand.element.FilePath = nullStringPtr(filePath)
+		cand.element.Language = nullStringPtr(language)
+		cand.element.TechnologyConnectors = json.RawMessage(techRaw)
+		cand.element.Tags = json.RawMessage(tagRaw)
+		cand.element.CreatedAt = createdAt
+		cand.element.UpdatedAt = updatedAt
+		cand.element.MatchKind = cand.ownerType
+		if len(queryVector) > 0 && len(vectorBytes) > 0 {
+			cand.embeddingScore = math.Max(0, watch.CosineSimilarity(queryVector, bytesToVector(vectorBytes)))
+			cand.hasEmbedding = true
+		}
+		out = append(out, cand)
+	}
+	return out, rows.Err()
+}
+
+func nullStringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+func scorePopulateCandidates(query populateQuery, candidates []populateCandidate, connectedIDs map[int64]bool) []populateCandidate {
+	for i := range candidates {
+		cand := &candidates[i]
+		filePath := ""
+		if cand.element.FilePath != nil {
+			filePath = *cand.element.FilePath
+		}
+		kind := ""
+		if cand.element.Kind != nil {
+			kind = *cand.element.Kind
+		}
+		cand.lexicalPathScore = calculateLexicalPathScore(query.Base+" "+strings.Join(query.Hints, " "), query.ViewName, cand.element.Name, filePath+" "+kind+" "+string(cand.element.Tags))
+		connectivityScore := 0.0
+		if connectedIDs[cand.element.ID] {
+			connectivityScore = 1.0
+		}
+		aggregationBonus := math.Min(1.0, math.Log1p(float64(cand.childCount))/3.0)
+		abstractionScore := abstractionPriority(kind)
+		cand.finalScore = cand.lexicalPathScore*0.34 + cand.embeddingScore*0.26 + cand.archConfidence*0.16 + connectivityScore*0.10 + aggregationBonus*0.08 + abstractionScore*0.06
+		cand.element.SimilarityScore = cand.finalScore
+		cand.element.MatchReason = populateMatchReason(*cand)
+	}
+	return candidates
+}
+
+func filterPopulateCandidates(candidates []populateCandidate, includeFiles bool) []populateCandidate {
+	out := []populateCandidate{}
+	for _, cand := range candidates {
+		if cand.finalScore >= 0.22 || cand.lexicalPathScore >= 0.35 || (cand.hasEmbedding && cand.embeddingScore >= 0.62) {
+			if !includeFiles && cand.element.Kind != nil && *cand.element.Kind == "file" {
+				continue
+			}
+			out = append(out, cand)
+		}
+	}
+	return out
+}
+
+func abstractionPriority(kind string) float64 {
+	switch kind {
+	case "architecture-component":
+		return 1.0
+	case "repository-section", "folder", "cluster":
+		return 0.85
+	case "dependency-group", "fact-summary", "repository":
+		return 0.75
+	case "file":
+		return 0.25
+	default:
+		return 0.4
+	}
+}
+
+func populateMatchReason(cand populateCandidate) string {
+	parts := []string{}
+	if cand.lexicalPathScore > 0 {
+		parts = append(parts, fmt.Sprintf("lexical %.2f", cand.lexicalPathScore))
+	}
+	if cand.hasEmbedding {
+		parts = append(parts, fmt.Sprintf("semantic %.2f", cand.embeddingScore))
+	}
+	if cand.archConfidence > 0 {
+		parts = append(parts, fmt.Sprintf("architecture %.2f", cand.archConfidence))
+	}
+	if cand.childCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d children", cand.childCount))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func bytesToVector(data []byte) watch.Vector {
 	if len(data)%4 != 0 {
 		return nil
@@ -552,19 +523,6 @@ func formatIDs(ids []int64) string {
 		sb.WriteString(strconv.FormatInt(id, 10))
 	}
 	return sb.String()
-}
-
-func queryIDChunks(ids []int64, size int, fn func([]int64) error) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	for start := 0; start < len(ids); start += size {
-		end := min(start+size, len(ids))
-		if err := fn(ids[start:end]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func getTokens(s string) map[string]bool {

@@ -233,6 +233,17 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		logError(ctx, req.Logger, "watch.representation.materialize.failed", err, "elapsed", logElapsed(materializeStarted), "repository_id", repositoryID)
 		return result, err
 	}
+	if model.Provider != "none" {
+		resourceStats, err := r.cachePopulateResourceEmbeddings(ctx, modelID, provider, repo.ID, req.Progress, time.Duration(req.Embedding.TimeoutSeconds)*time.Second)
+		if err != nil {
+			progressFinish(req.Progress)
+			runErr = err
+			logError(ctx, req.Logger, "watch.representation.populate_resource_embeddings.failed", err, "repository_id", repositoryID)
+			return result, err
+		}
+		result.EmbeddingCacheHits += resourceStats.CacheHits
+		result.EmbeddingsCreated += resourceStats.Created
+	}
 	progressAdvance(req.Progress, "Resources materialized")
 	progressFinish(req.Progress)
 	result.ElementsCreated = stats.ElementsCreated
@@ -481,6 +492,203 @@ func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provid
 	}
 	progressFinish(progress)
 	return stats, vectorsBySymbol, nil
+}
+
+func (r *Representer) cachePopulateResourceEmbeddings(ctx context.Context, modelID int64, provider Provider, repositoryID int64, progress ProgressSink, timeout time.Duration) (embeddingCacheStats, error) {
+	stats := embeddingCacheStats{}
+	model := provider.ModelID()
+	if model.Provider == "none" {
+		return stats, nil
+	}
+	inputs, err := r.populateResourceEmbeddingInputs(ctx, repositoryID)
+	if err != nil {
+		return stats, err
+	}
+	if len(inputs) == 0 {
+		return stats, nil
+	}
+	missing := make([]EmbeddingInput, 0, len(inputs))
+	progressStart(progress, "Preparing populate resource embeddings", len(inputs))
+	for _, input := range inputs {
+		if _, ok, err := r.Store.Embedding(ctx, modelID, input.OwnerType, input.OwnerKey, inputHash(input)); err != nil {
+			progressFinish(progress)
+			return stats, err
+		} else if ok {
+			stats.CacheHits++
+		} else {
+			missing = append(missing, input)
+		}
+		progressAdvance(progress, input.OwnerKey)
+	}
+	progressFinish(progress)
+	if len(missing) == 0 {
+		return stats, nil
+	}
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	progressStart(progress, "Embedding populate resources", len(missing))
+	for start := 0; start < len(missing); start += defaultEmbeddingBatchSize {
+		if err := ctx.Err(); err != nil {
+			progressFinish(progress)
+			return stats, err
+		}
+		end := min(start+defaultEmbeddingBatchSize, len(missing))
+		chunk := missing[start:end]
+		embedCtx, cancel := context.WithTimeout(ctx, timeout)
+		vectors, err := provider.Embed(embedCtx, chunk)
+		cancel()
+		if err != nil {
+			progressFinish(progress)
+			return stats, err
+		}
+		if len(vectors) != len(chunk) {
+			progressFinish(progress)
+			return stats, fmt.Errorf("embedding provider returned %d vectors for %d populate resources", len(vectors), len(chunk))
+		}
+		for i, input := range chunk {
+			if err := r.Store.SaveEmbedding(ctx, modelID, input.OwnerType, input.OwnerKey, inputHash(input), vectorBytes(vectors[i])); err != nil {
+				progressFinish(progress)
+				return stats, err
+			}
+			stats.Created++
+			progressAdvance(progress, input.OwnerKey)
+		}
+	}
+	progressFinish(progress)
+	return stats, nil
+}
+
+func (r *Representer) populateResourceEmbeddingInputs(ctx context.Context, repositoryID int64) ([]EmbeddingInput, error) {
+	rows, err := r.Store.db.QueryContext(ctx, `
+		SELECT m.owner_type, m.owner_key, el.name, COALESCE(el.kind, ''), COALESCE(el.description, ''), COALESCE(el.technology, ''), COALESCE(el.file_path, ''), COALESCE(el.language, ''), el.tags
+		FROM watch_materialization m
+		JOIN elements el ON el.id = m.resource_id
+		WHERE m.repository_id = ?
+		  AND m.resource_type = 'element'
+		  AND COALESCE(el.kind, '') IN ('architecture-component', 'repository-section', 'folder', 'cluster', 'dependency-group', 'fact-summary', 'repository', 'file')
+		ORDER BY m.owner_type, m.owner_key`, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	type resourceRow struct {
+		ownerType, ownerKey, name, kind, description, technology, filePath, language, tags string
+	}
+	resources := []resourceRow{}
+	for rows.Next() {
+		var resource resourceRow
+		if err := rows.Scan(&resource.ownerType, &resource.ownerKey, &resource.name, &resource.kind, &resource.description, &resource.technology, &resource.filePath, &resource.language, &resource.tags); err != nil {
+			return nil, err
+		}
+		resources = append(resources, resource)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	inputs := []EmbeddingInput{}
+	for _, resource := range resources {
+		text, err := r.populateResourceEmbeddingText(ctx, repositoryID, resource.ownerType, resource.ownerKey, resource.name, resource.kind, resource.description, resource.technology, resource.filePath, resource.language, resource.tags)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, EmbeddingInput{
+			OwnerType: "populate_resource",
+			OwnerKey:  resource.ownerType + ":" + resource.ownerKey,
+			Text:      text,
+		})
+	}
+	return inputs, nil
+}
+
+func (r *Representer) populateResourceEmbeddingText(ctx context.Context, repositoryID int64, ownerType, ownerKey, name, kind, description, technology, filePath, language, tags string) (string, error) {
+	parts := []string{
+		"Architecture resource",
+		"name: " + name,
+		"kind: " + kind,
+		"owner: " + ownerType + " " + ownerKey,
+	}
+	for _, value := range []string{
+		"description: " + description,
+		"technology: " + technology,
+		"path: " + filePath,
+		"language: " + language,
+		"tags: " + tags,
+	} {
+		if strings.TrimSpace(strings.TrimPrefix(value, strings.Split(value, ":")[0]+":")) != "" {
+			parts = append(parts, value)
+		}
+	}
+	children, err := r.populateResourceChildSummary(ctx, ownerType, ownerKey)
+	if err != nil {
+		return "", err
+	}
+	if children != "" {
+		parts = append(parts, "representative children: "+children)
+	}
+	refs, err := r.populateResourceReferenceSummary(ctx, repositoryID, filePath)
+	if err != nil {
+		return "", err
+	}
+	if refs != "" {
+		parts = append(parts, "nearby references: "+refs)
+	}
+	return shrinkEmbeddingText(strings.Join(parts, "\n"), maxEmbeddingInputApproxTokens), nil
+}
+
+func (r *Representer) populateResourceChildSummary(ctx context.Context, ownerType, ownerKey string) (string, error) {
+	rows, err := r.Store.db.QueryContext(ctx, `
+		SELECT child.name
+		FROM watch_materialization parent
+		JOIN views v ON v.owner_element_id = parent.resource_id
+		JOIN placements p ON p.view_id = v.id
+		JOIN elements child ON child.id = p.element_id
+		WHERE parent.owner_type = ? AND parent.owner_key = ? AND parent.resource_type = 'element'
+		ORDER BY p.id
+		LIMIT 16`, ownerType, ownerKey)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	values := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return "", err
+		}
+		values = append(values, name)
+	}
+	return strings.Join(compactStrings(values), ", "), rows.Err()
+}
+
+func (r *Representer) populateResourceReferenceSummary(ctx context.Context, repositoryID int64, filePath string) (string, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return "", nil
+	}
+	rows, err := r.Store.db.QueryContext(ctx, `
+		SELECT DISTINCT target.name
+		FROM watch_symbols source
+		JOIN watch_references ref ON ref.source_symbol_id = source.id
+		JOIN watch_symbols target ON target.id = ref.target_symbol_id
+		WHERE source.repository_id = ? AND source.file_id IN (SELECT id FROM watch_files WHERE repository_id = ? AND path = ?)
+		ORDER BY target.name
+		LIMIT 12`, repositoryID, repositoryID, filePath)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	values := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return "", err
+		}
+		values = append(values, name)
+	}
+	return strings.Join(compactStrings(values), ", "), rows.Err()
 }
 
 func embeddingCandidateSymbols(symbols map[int64]Symbol, limit int) []Symbol {
