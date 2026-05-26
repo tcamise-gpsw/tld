@@ -215,3 +215,79 @@ func TestDensityProjectionPromotedSpecialElementPullsConnectorsAndEndpoints(t *t
 		t.Fatal("expected connector 888 to be pulled into connectors projection")
 	}
 }
+
+func TestDensityProjectionDependencyGroup(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	ctx := context.Background()
+
+	// Seed one regular element (id 301, kind "component") and one dependency-group element (id 302, kind "dependency-group")
+	// and a connector (id 401) between them.
+	if _, err := sqliteStore.DB().Exec(`
+		INSERT INTO views(id, name, created_at, updated_at)
+		VALUES (5, 'Test View 5', 'now', 'now');
+		INSERT INTO elements(id, name, kind, tags, technology_connectors, created_at, updated_at)
+		VALUES
+			(301, 'Regular Component', 'component', '[]', '[]', 'now', 'now'),
+			(302, 'Dep Group', 'dependency-group', '[]', '[]', 'now', 'now');
+		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
+		VALUES
+			(5, 301, 100, 100, 'now', 'now'),
+			(5, 302, 200, 200, 'now', 'now');
+		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, direction, style, created_at, updated_at)
+		VALUES
+			(401, 5, 301, 302, 'depends', 'forward', 'bezier', 'now', 'now');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Check at density level 2 (max density) - both elements and connector should be visible
+	if err := sqliteStore.SetViewDensityLevel(ctx, 5, 2); err != nil {
+		t.Fatal(err)
+	}
+	content, err := sqliteStore.ProjectedViewContent(ctx, 5, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 301) {
+		t.Fatal("expected regular element 301 to be visible at density 2")
+	}
+	if !containsPlacement(content.Placements, 302) {
+		t.Fatal("expected dependency-group element 302 to be visible at density 2")
+	}
+	if !containsConnector(content.Connectors, 401) {
+		t.Fatal("expected connector 401 to be visible at density 2")
+	}
+
+	// 2. Check at density level 1 - dependency-group element and connector should be pruned
+	if err := sqliteStore.SetViewDensityLevel(ctx, 5, 1); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 5, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 301) {
+		t.Fatal("expected regular element 301 to be visible at density 1")
+	}
+	if containsPlacement(content.Placements, 302) {
+		t.Fatal("expected dependency-group element 302 to be pruned at density 1")
+	}
+	if containsConnector(content.Connectors, 401) {
+		t.Fatal("expected connector 401 to be pruned at density 1")
+	}
+
+	// 3. Check that positive visibility override (+1) does NOT force dependency-group element to be shown at density level 1
+	if _, err := sqliteStore.SetVisibilityOverride(ctx, 5, "element", 302, 1); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 5, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPlacement(content.Placements, 302) {
+		t.Fatal("expected dependency-group element 302 to remain pruned at density 1 even with positive override")
+	}
+	if containsConnector(content.Connectors, 401) {
+		t.Fatal("expected connector 401 to remain pruned at density 1 even with positive override")
+	}
+}

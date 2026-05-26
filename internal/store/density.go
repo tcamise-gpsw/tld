@@ -548,6 +548,13 @@ func projectViewContent(placements []app.PlacedElement, connectors []app.Connect
 		}
 	}
 
+	elementKinds := make(map[int64]string)
+	for _, placement := range placements {
+		if placement.Kind != nil {
+			elementKinds[placement.ElementID] = *placement.Kind
+		}
+	}
+
 	degree := make(map[int64]int)
 	for _, connector := range connectors {
 		degree[connector.SourceElementID]++
@@ -556,6 +563,10 @@ func projectViewContent(placements []app.PlacedElement, connectors []app.Connect
 
 	rankedElements := make([]rankedElement, 0, len(placements))
 	for _, placement := range placements {
+		// Prune dependency-group type elements at any density level below 2
+		if level < 2 && placement.Kind != nil && *placement.Kind == "dependency-group" {
+			continue
+		}
 		delta := elementDeltas[placement.ElementID]
 		rankedElements = append(rankedElements, rankedElement{
 			item:  placement,
@@ -587,6 +598,10 @@ func projectViewContent(placements []app.PlacedElement, connectors []app.Connect
 
 	rankedConnectors := make([]rankedConnector, 0, len(connectors))
 	for _, connector := range connectors {
+		// Prune connectors connected to dependency-group elements at any density level below 2
+		if level < 2 && (elementKinds[connector.SourceElementID] == "dependency-group" || elementKinds[connector.TargetElementID] == "dependency-group") {
+			continue
+		}
 		delta := connectorDeltas[connector.ID]
 		rankedConnectors = append(rankedConnectors, rankedConnector{
 			item:  connector,
@@ -642,6 +657,9 @@ func projectViewContent(placements []app.PlacedElement, connectors []app.Connect
 }
 
 func baseElementScore(placement app.PlacedElement, degree int, signals densitySignals) float64 {
+	if placement.Kind != nil && *placement.Kind == "dependency-group" {
+		return -1000.0
+	}
 	score := float64(degree) * 12
 	key := densitySignalKey{resourceType: "element", resourceID: placement.ElementID}
 	score += signals.filterScore[key] * 30
