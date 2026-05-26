@@ -1,6 +1,5 @@
 
 
-
 <p align="center">
   <a href="https://tldiagram.com">
     <img src="./frontend/logo/tld.svg" alt="Logo" width="200">
@@ -17,7 +16,7 @@
 </p>
 
 <p align="center">
-<img width="640" height="441" alt="editor" src="https://github.com/user-attachments/assets/fd097ab7-eeb6-409f-aaed-db03a9c6ace5" />
+<img width="1280" height="882" alt="editor" src="https://github.com/user-attachments/assets/4ee283b0-ee45-4a04-86e4-f477c26e9977" />
 </p>
 
 
@@ -44,8 +43,9 @@ Here are some examples that were generated using the agent skill.
 - **Diagrams as Code**: (Preview) A git/terraform like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
 - **Automated Codebase Analysis**: (Preview) Built-in tree-sitter integration to automatically discover architecture components in Go, Java, Python, C++, and TypeScript (more soon™ (hopefully)).
 
-<p align="center">
-<img width="640" height="360" alt="explore" src="https://github.com/user-attachments/assets/a69b3b05-b8da-49a8-828c-4fdd2b8d8ade" />
+<p align="center"><img width="1280" height="720" alt="explore" src="https://github.com/user-attachments/assets/0b194071-d411-449a-87bd-2d4883e9c354" />
+
+
 </p>
 
 ## Quick Start
