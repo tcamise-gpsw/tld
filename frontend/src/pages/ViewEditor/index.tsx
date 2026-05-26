@@ -471,8 +471,8 @@ function ViewEditorInner({
   const closeProxyConnectorPanelRef = useRef(proxyConnectorPanel.onClose)
   closeProxyConnectorPanelRef.current = proxyConnectorPanel.onClose
 
-  const openViewDetailsRef = useRef(viewDetails.onOpen)
-  openViewDetailsRef.current = viewDetails.onOpen
+  const openViewDetailsRef = useRef(viewDetails.onToggle)
+  openViewDetailsRef.current = viewDetails.onToggle
 
   const openCodePreviewRef = useRef(codePreview.onOpen)
   openCodePreviewRef.current = codePreview.onOpen
@@ -2171,6 +2171,22 @@ function ViewEditorInner({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [drawingMode, handleUndo, handleRedo, setDrawingTool])
 
+  // ── V shortcut to open View Details ────────────────────────────────────────
+  useEffect(() => {
+    if (drawingMode) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
+      if (e.ctrlKey || e.altKey || e.metaKey) return
+      if (e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        openViewDetailsRef.current()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [drawingMode])
+
   // ── Overscroll prevention ──────────────────────────────────────────────────
   useEffect(() => {
     const html = document.documentElement
@@ -2209,12 +2225,6 @@ function ViewEditorInner({
       root.style.removeProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR)
     }
   }, [])
-
-  useEffect(() => {
-    setHeader({
-      node: <ViewHeaderButton name={viewName ?? undefined} onOpen={openViewDetailsRef.current} />,
-    })
-  }, [viewName, setHeader])
 
   useEffect(() => () => setHeader(null), [setHeader])
   // ── Share ──────────────────────────────────────────────────────────────────
@@ -2806,6 +2816,8 @@ function ViewEditorInner({
               onRemoveTag={(tag) => { void handleBulkTagChange(tag, 'remove') }}
               onRemoveFromView={() => { void handleBulkRemoveFromView() }}
             />
+
+            <ViewHeaderButton name={viewName ?? undefined} isOpen={viewDetails.isOpen} onToggle={viewDetails.onToggle} />
 
             <ViewFloatingMenu
               handleAddElementAtCenter={handleAddElementAtCenter}

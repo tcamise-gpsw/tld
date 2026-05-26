@@ -29,7 +29,7 @@ export default function Settings({ extraNavItems = [] }: SettingsProps) {
 
 
   return (
-    <Flex direction="column" h="100%">
+    <Flex direction="column" h="100%" position="relative">
       <Flex flex={1} overflow="hidden" direction={{ base: 'column', md: 'row' }}>
         {/* Sidebar (hidden on small screens) */}
         <VStack
@@ -87,6 +87,19 @@ export default function Settings({ extraNavItems = [] }: SettingsProps) {
           <Outlet />
         </Box>
       </Flex>
+
+      <Box
+        position="absolute"
+        bottom={4}
+        right={6}
+        pointerEvents="none"
+        userSelect="none"
+        zIndex={10}
+      >
+        <Text fontSize="10px" color="gray.600" fontFamily="mono">
+          v2.2.0-alpha.1
+        </Text>
+      </Box>
     </Flex>
   )
 }

@@ -273,14 +273,26 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
                 boxShadow="0 18px 48px rgba(0,0,0,0.45)"
                 borderRadius="20px"
                 overflow="hidden"
+                position="relative"
               >
                 <PopoverArrow bg="rgba(var(--bg-main-rgb), 0.95)" />
-                <PopoverBody p={4}>
+                <PopoverBody p={4} pb={7}>
                   <Flex direction="column" gap={5}>
                     <AppearanceSettings compact />
                     <ExperimentalSettings compact />
                   </Flex>
                 </PopoverBody>
+                <Box
+                  position="absolute"
+                  bottom={2}
+                  right={4}
+                  pointerEvents="none"
+                  userSelect="none"
+                >
+                  <Text fontSize="9px" color="gray.600" fontFamily="mono">
+                    v2.2.0-alpha.1
+                  </Text>
+                </Box>
               </PopoverContent>
             </Portal>
           </Popover>
