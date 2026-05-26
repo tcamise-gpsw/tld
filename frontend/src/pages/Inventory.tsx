@@ -109,6 +109,7 @@ export default function Inventory() {
   const [sortKey, setSortKey] = useState<'name' | 'updatedAt' | 'usage' | 'type'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [tagSearch, setTagSearch] = useState('')
+  const [tagColorMap, setTagColorMap] = useState<Record<string, { color: string }>>({})
   const [tagDeleteConfirm, setTagDeleteConfirm] = useState<{ tag: string; count: number } | null>(null)
   const [deletingTag, setDeletingTag] = useState<string | null>(null)
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
@@ -127,7 +128,7 @@ export default function Inventory() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [allElements, gridData, dependencies, tagColors] = await Promise.all([
+      const [allElements, gridData, dependencies, fetchedTagColors] = await Promise.all([
         api.elements.list({ limit: 0 }),
         api.workspace.views.gridData(),
         api.dependencies.list(),
@@ -150,7 +151,7 @@ export default function Inventory() {
         })
       })
       const nextConnectors = dependencies.connectors.map(dependencyConnectorToConnector)
-      const tagSet = new Set<string>(Object.keys(tagColors))
+      const tagSet = new Set<string>(Object.keys(fetchedTagColors))
       allElements.forEach((element) => element.tags.forEach((tag) => tagSet.add(tag)))
       flatViews.forEach((view) => (view.tags ?? []).forEach((tag) => tagSet.add(tag)))
       nextConnectors.forEach((connector) => (connector.tags ?? []).forEach((tag) => tagSet.add(tag)))
@@ -160,6 +161,7 @@ export default function Inventory() {
       setCountsByView(nextCounts)
       setPlacementByViewElement(nextPlacementLookup)
       setAvailableTags(Array.from(tagSet).sort((a, b) => a.localeCompare(b)))
+      setTagColorMap(fetchedTagColors as Record<string, { color: string }>)
     } finally {
       setLoading(false)
     }
@@ -1064,8 +1066,6 @@ export default function Inventory() {
                   {paginatedRows.map((row) => {
                     const isSelected = selectedKeys.has(row.key)
                     const isHighlighted = selectedRow?.key === row.key && selectedKeys.size === 0
-                    const visibleTags = row.tags.slice(0, 3)
-                    const hiddenTagCount = row.tags.length - visibleTags.length
                     return (
                       <Flex
                         data-testid="inventory-row"
@@ -1111,32 +1111,14 @@ export default function Inventory() {
                             <Text fontSize="11px" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
                           </Box>
                         </HStack>
-                        <HStack w="200px" spacing={1} flexWrap="nowrap" overflow="hidden">
-                          {visibleTags.map((tag) => (
-                            <Tag
-                              key={tag}
-                              size="sm"
-                              bg="whiteAlpha.100"
-                              color="gray.300"
-                              fontSize="10px"
-                              px={1.5}
-                              py={0.5}
-                              borderRadius="full"
-                              border="1px solid"
-                              borderColor="whiteAlpha.100"
-                              cursor="pointer"
-                              _hover={{ bg: 'rgba(66,153,225,0.15)', borderColor: 'rgba(66,153,225,0.3)', color: 'blue.300' }}
-                              onClick={(e) => { e.stopPropagation(); toggleTagFilter(tag) }}
-                              transition="all 0.1s"
-                            >
-                              {tag}
-                            </Tag>
-                          ))}
-                          {hiddenTagCount > 0 && (
-                            <Tag size="sm" bg="whiteAlpha.50" color="gray.500" fontSize="10px" px={1.5} borderRadius="full">+{hiddenTagCount}</Tag>
-                          )}
-                          {row.tags.length === 0 && <Text fontSize="xs" color="gray.700">—</Text>}
-                        </HStack>
+                        <Box w="200px" minW="200px" flexShrink={0}>
+                          <InventoryTagList
+                            tags={row.tags}
+                            tagColorMap={tagColorMap}
+                            activeTags={tagsFilter}
+                            onTagClick={toggleTagFilter}
+                          />
+                        </Box>
                         <Text w="160px" fontSize="xs" color="gray.400" noOfLines={1}>{row.usageLabel || '—'}</Text>
                         <Text w="90px" fontSize="xs" color="gray.500">{formatUpdated(row.updatedAt)}</Text>
                       </Flex>
@@ -1436,6 +1418,165 @@ function InventoryRowIcon({ row }: { row: InventoryRow }) {
         <polyline points="7.5,5 10,7 7.5,9" fill="none" />
       </Box>
     </Flex>
+  )
+}
+
+// ─── Tag palette & helpers ────────────────────────────────────────────────────
+
+const TAG_PALETTE = [
+  '#68D391', '#63B3ED', '#FC8181', '#F6AD55', '#B794F4',
+  '#76E4F7', '#F687B3', '#ECC94B', '#4FD1C5', '#667EEA',
+]
+
+function resolveTagColor(tag: string, tagColorMap: Record<string, { color: string }>): string {
+  if (tagColorMap[tag]?.color) return tagColorMap[tag].color
+  let h = 0
+  for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) >>> 0
+  return TAG_PALETTE[h % TAG_PALETTE.length]
+}
+
+function TagPill({
+  tag,
+  tagColorMap,
+  isActive,
+  maxTagW,
+  onTagClick,
+}: {
+  tag: string
+  tagColorMap: Record<string, { color: string }>
+  isActive?: boolean
+  maxTagW?: string
+  onTagClick: (tag: string) => void
+}) {
+  const color = resolveTagColor(tag, tagColorMap)
+  return (
+    <Tag
+      size="sm"
+      bg={isActive ? `color-mix(in srgb, ${color} 28%, transparent)` : `color-mix(in srgb, ${color} 12%, transparent)`}
+      color={color}
+      fontSize="10px"
+      px={1.5}
+      py="2px"
+      borderRadius="md"
+      border="1px solid"
+      borderColor={isActive ? `color-mix(in srgb, ${color} 55%, transparent)` : `color-mix(in srgb, ${color} 28%, transparent)`}
+      minW={0}
+      maxW={maxTagW}
+      flexShrink={1}
+      cursor="pointer"
+      _hover={{
+        bg: `color-mix(in srgb, ${color} 22%, transparent)`,
+        borderColor: `color-mix(in srgb, ${color} 50%, transparent)`,
+      }}
+      onClick={(e) => { e.stopPropagation(); onTagClick(tag) }}
+      transition="background 0.1s, border-color 0.1s"
+      title={tag}
+    >
+      <TagLabel noOfLines={1}>{tag}</TagLabel>
+    </Tag>
+  )
+}
+
+function OverflowBadge({
+  tags,
+  tagColorMap,
+  onTagClick,
+}: {
+  tags: string[]
+  tagColorMap: Record<string, { color: string }>
+  onTagClick: (tag: string) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const open = () => { if (timerRef.current) clearTimeout(timerRef.current); setIsOpen(true) }
+  const close = () => { timerRef.current = setTimeout(() => setIsOpen(false), 150) }
+
+  return (
+    <Popover isOpen={isOpen} placement="top" isLazy gutter={6} closeOnBlur={false}>
+      <PopoverTrigger>
+        <Tag
+          size="sm"
+          bg="whiteAlpha.50"
+          color="gray.500"
+          fontSize="10px"
+          px={1.5}
+          py="2px"
+          borderRadius="md"
+          border="1px solid"
+          borderColor="whiteAlpha.100"
+          flexShrink={0}
+          cursor="default"
+          fontWeight="medium"
+          onMouseEnter={open}
+          onMouseLeave={close}
+          _hover={{ bg: 'whiteAlpha.100', color: 'gray.300' }}
+          transition="all 0.1s"
+        >
+          +{tags.length}
+        </Tag>
+      </PopoverTrigger>
+      <PopoverContent
+        bg="rgb(var(--bg-main-rgb))"
+        borderColor="whiteAlpha.200"
+        boxShadow="0 4px 20px rgba(0,0,0,0.5)"
+        w="auto"
+        maxW="260px"
+        _focus={{ outline: 'none' }}
+        onMouseEnter={open}
+        onMouseLeave={close}
+      >
+        <PopoverArrow bg="rgb(var(--bg-main-rgb))" borderColor="whiteAlpha.200" />
+        <PopoverBody px={2.5} py={2.5}>
+          <Flex flexWrap="wrap" gap={1}>
+            {tags.map((tag) => (
+              <TagPill key={tag} tag={tag} tagColorMap={tagColorMap} onTagClick={onTagClick} />
+            ))}
+          </Flex>
+        </PopoverBody>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function InventoryTagList({
+  tags,
+  tagColorMap,
+  activeTags,
+  onTagClick,
+}: {
+  tags: string[]
+  tagColorMap: Record<string, { color: string }>
+  activeTags: string[]
+  onTagClick: (tag: string) => void
+}) {
+  if (tags.length === 0) return <Text fontSize="xs" color="gray.700">—</Text>
+
+  const MAX_VISIBLE = 3
+  const visibleTags = tags.slice(0, MAX_VISIBLE)
+  const overflowTags = tags.slice(MAX_VISIBLE)
+  const hasOverflow = overflowTags.length > 0
+  const perTagMaxW = visibleTags.length === 1
+    ? '160px'
+    : visibleTags.length === 2
+      ? (hasOverflow ? '72px' : '84px')
+      : (hasOverflow ? '48px' : '56px')
+
+  return (
+    <HStack spacing={1} w="full" overflow="hidden" flexWrap="nowrap" align="center">
+      {visibleTags.map((tag) => (
+        <TagPill
+          key={tag}
+          tag={tag}
+          tagColorMap={tagColorMap}
+          isActive={activeTags.includes(tag)}
+          maxTagW={perTagMaxW}
+          onTagClick={onTagClick}
+        />
+      ))}
+      {hasOverflow && (
+        <OverflowBadge tags={overflowTags} tagColorMap={tagColorMap} onTagClick={onTagClick} />
+      )}
+    </HStack>
   )
 }
 

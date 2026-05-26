@@ -656,7 +656,7 @@ export const api = {
           }),
         delete: (name: string): Promise<void> =>
           rpc(async () => {
-            const res = await fetch(apiUrl(`/api/tags/${encodeURIComponent(name)}`), { method: 'DELETE' })
+            const res = await fetch(apiUrl(`/tags/${encodeURIComponent(name)}`), { method: 'DELETE' })
             if (!res.ok && res.status !== 204) throw await responseError(res, `Failed to delete tag`)
           }),
       },
