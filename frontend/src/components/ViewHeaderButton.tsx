@@ -68,6 +68,8 @@ export default function ViewHeaderButton({ name, isOpen, onToggle }: ViewHeaderB
       <HStack spacing={1.5} opacity={0.6} userSelect="none" pointerEvents="none">
         <KbdHint ml={0}>V</KbdHint>
         <Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Details</Text>
+        <HStack spacing={1.5}><KbdHint ml={0}>W</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom Out</Text></HStack>
+        <HStack spacing={1.5}><KbdHint ml={0}>S</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom In</Text></HStack>
       </HStack>
     </VStack>
   )

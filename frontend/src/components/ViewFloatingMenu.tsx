@@ -154,7 +154,7 @@ function ViewFloatingMenu({
         <HStack spacing={1.5}><KbdHint ml={0}>C</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Create</Text></HStack>
         <HStack spacing={1.5}><KbdHint ml={0}>F</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Fit</Text></HStack>
         <HStack spacing={1.5}><KbdHint ml={0}>/</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Search</Text></HStack>
-        <HStack spacing={1.5}><KbdHint ml={0}>+/-</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom</Text></HStack>
+        <HStack spacing={1.5}><KbdHint ml={0}>+/-</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Magnify</Text></HStack>
       </HStack>
 
       <HStack
