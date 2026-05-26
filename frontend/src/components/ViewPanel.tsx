@@ -95,6 +95,7 @@ function ViewPanel({
   const [deleteManagedFile, setDeleteManagedFile] = useState(true)
   const [markdownAction, setMarkdownAction] = useState<'create' | 'link' | 'unlink' | null>(null)
   const [markdownOpen, setMarkdownOpen] = useState(!!markdown)
+  const [populateOpen, setPopulateOpen] = useState(false)
 
   useEffect(() => {
     if (view) {
@@ -285,21 +286,20 @@ function ViewPanel({
                 <HStack
                   cursor="pointer"
                   onClick={() => setMarkdownOpen(v => !v)}
-                  color={markdownOpen ? 'blue.400' : 'whiteAlpha.700'}
-                  _hover={{ color: 'blue.300' }}
-                  transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+                  justify="space-between"
                   userSelect="none"
-                  spacing={2}
+                  _hover={{ color: 'whiteAlpha.900' }}
+                  transition="color 0.15s"
                 >
+                  <Text fontWeight="semibold" fontSize="sm" color="whiteAlpha.800">
+                    Markdown Notes
+                  </Text>
                   <Icon
                     as={markdownOpen ? ChevronDownIcon : ChevronRightIcon}
                     boxSize={3.5}
                     strokeWidth={3.5}
-                    transition="transform 0.25s cubic-bezier(0.25, 1, 0.5, 1)"
+                    color="whiteAlpha.500"
                   />
-                  <Text fontWeight="bold" fontSize="sm">
-                    Markdown Notes
-                  </Text>
                 </HStack>
 
                 <Collapse in={markdownOpen} animateOpacity>
@@ -420,9 +420,27 @@ function ViewPanel({
             <>
               <Divider borderColor="whiteAlpha.100" my={2} />
               <VStack align="stretch" spacing={3}>
-                <Text fontWeight="bold" fontSize="sm" color="gray.200">
-                  Populate Elements
-                </Text>
+                <HStack
+                  cursor="pointer"
+                  onClick={() => setPopulateOpen(v => !v)}
+                  justify="space-between"
+                  userSelect="none"
+                  _hover={{ color: 'whiteAlpha.900' }}
+                  transition="color 0.15s"
+                >
+                  <Text fontWeight="semibold" fontSize="sm" color="whiteAlpha.800">
+                    Populate Elements
+                  </Text>
+                  <Icon
+                    as={populateOpen ? ChevronDownIcon : ChevronRightIcon}
+                    boxSize={3.5}
+                    strokeWidth={3.5}
+                    color="whiteAlpha.500"
+                  />
+                </HStack>
+
+                <Collapse in={populateOpen} animateOpacity>
+                  <VStack align="stretch" spacing={3}>
                 <Text fontSize="xs" color="gray.400">
                   Find high-level scanned resources from your codebase and place them inside the view.
                   Requires "tld analyze" with a configured embedding model provider.
@@ -516,6 +534,8 @@ function ViewPanel({
                     No similar elements found.
                   </Text>
                 )}
+                  </VStack>
+                </Collapse>
               </VStack>
             </>
           )}
