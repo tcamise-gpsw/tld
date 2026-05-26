@@ -332,7 +332,7 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
             ref={graphRef}
             onMouseDown={onCanvasMouseDown}
             onTouchStart={onCanvasTouchStart}
-            style={{ cursor: 'grab' }}
+            style={{ cursor: selectedRow?.objectType === 'connector' ? 'default' : 'grab' }}
             sx={{ touchAction: 'none' }}
           >
             {!isSelected ? (
@@ -358,7 +358,7 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
                     justifyContent: 'center',
                     position: 'relative',
                     zIndex: 1,
-                    padding: '40px',
+                    padding: selectedRow.objectType === 'connector' ? '0' : '40px',
                   }}
                 >
                   {selectedRow.objectType === 'element' && (

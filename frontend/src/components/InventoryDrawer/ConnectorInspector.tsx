@@ -162,7 +162,7 @@ export function ConnectorInspector({ data, cardShadow: _cardShadow, onSelectRow 
         branch: sourceEl.branch,
         file_path: sourceEl.file_path,
         language: sourceEl.language,
-        has_view: sourceEl.has_view,
+        has_view: false,
         view_label: sourceEl.view_label,
         links: [],
         parentLinks: [],
@@ -211,7 +211,7 @@ export function ConnectorInspector({ data, cardShadow: _cardShadow, onSelectRow 
         branch: targetEl.branch,
         file_path: targetEl.file_path,
         language: targetEl.language,
-        has_view: targetEl.has_view,
+        has_view: false,
         view_label: targetEl.view_label,
         links: [],
         parentLinks: [],
@@ -273,8 +273,14 @@ export function ConnectorInspector({ data, cardShadow: _cardShadow, onSelectRow 
         <Box
           position="absolute"
           inset={0}
+          sx={{
+            '[data-testid="vieweditor-node-zoom-in"], [data-testid="vieweditor-node-zoom-out"]': { display: 'none' },
+            '.react-flow__handle': { visibility: 'hidden', pointerEvents: 'none' },
+            '.react-flow__pane': { cursor: 'default !important' },
+          }}
         >
           <ReactFlow
+            key={data.connector.id}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
@@ -282,15 +288,20 @@ export function ConnectorInspector({ data, cardShadow: _cardShadow, onSelectRow 
             connectionMode={ConnectionMode.Loose}
             nodesDraggable={false}
             nodesConnectable={false}
-            elementsSelectable={false}
+            elementsSelectable={true}
+            selectNodesOnDrag={false}
             zoomOnScroll={false}
             zoomOnPinch={false}
             zoomOnDoubleClick={false}
             panOnDrag={false}
             panOnScroll={false}
             fitView
-            fitViewOptions={{ padding: 0.22, includeHiddenNodes: true }}
+            fitViewOptions={{ padding: 0.22 }}
             proOptions={{ hideAttribution: true }}
+            onNodeClick={(_e, node) => {
+              onSelectRow(`element:${node.id}`)
+            }}
+            style={{ background: 'transparent' }}
           />
         </Box>
 
