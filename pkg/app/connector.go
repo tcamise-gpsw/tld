@@ -1,6 +1,10 @@
 package app
 
-import "context"
+import (
+	"context"
+	"database/sql"
+	"errors"
+)
 
 func (s *Store) Connectors(ctx context.Context, viewID int64) ([]Connector, error) {
 	var rows []connectorModel
@@ -35,6 +39,32 @@ func (s *Store) AllConnectors(ctx context.Context) ([]Connector, error) {
 }
 
 func (s *Store) CreateConnector(ctx context.Context, input Connector) (Connector, error) {
+	labelVal := ""
+	if input.Label != nil {
+		labelVal = *input.Label
+	}
+	relVal := ""
+	if input.Relationship != nil {
+		relVal = *input.Relationship
+	}
+
+	var existingID int64
+	err := s.bun.NewSelect().
+		Table("connectors").
+		Column("id").
+		Where("view_id = ?", input.ViewID).
+		Where("((source_element_id = ? AND target_element_id = ?) OR (source_element_id = ? AND target_element_id = ?))", input.SourceElementID, input.TargetElementID, input.TargetElementID, input.SourceElementID).
+		Where("COALESCE(label, '') = ?", labelVal).
+		Where("COALESCE(relationship, '') = ?", relVal).
+		Limit(1).
+		Scan(ctx, &existingID)
+	if err == nil {
+		return s.ConnectorByID(ctx, existingID)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Connector{}, err
+	}
+
 	if err := s.ensureTagColors(ctx, input.Tags); err != nil {
 		return Connector{}, err
 	}
@@ -55,7 +85,7 @@ func (s *Store) CreateConnector(ctx context.Context, input Connector) (Connector
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
+	_, err = s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return Connector{}, err
 	}
