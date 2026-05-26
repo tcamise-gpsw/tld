@@ -42,6 +42,7 @@ func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID, da
 	registerDensityHandlers(mux, sqliteStore)
 	registerMergeHandlers(mux, sqliteStore)
 	registerPopulateHandlers(mux, sqliteStore)
+	registerTagHandlers(mux, apiStore, workspaceID)
 
 	mux.HandleFunc("GET /api/ready", func(w http.ResponseWriter, r *http.Request) {
 		views, elements, connectors, err := apiStore.GetWorkspaceResourceCounts(r.Context(), workspaceID)

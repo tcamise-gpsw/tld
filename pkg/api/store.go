@@ -123,6 +123,7 @@ type Store interface {
 	// Tags
 	Tags(ctx context.Context, workspaceID uuid.UUID) (map[string]*diagv1.Tag, error)
 	UpdateTag(ctx context.Context, workspaceID uuid.UUID, name, color string, description *string) error
+	DeleteTag(ctx context.Context, workspaceID uuid.UUID, name string) error
 
 	// ApplyPlan atomically applies a CLI workspace plan (create/update elements, views, connectors).
 	ApplyPlan(ctx context.Context, workspaceID uuid.UUID, req *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error)

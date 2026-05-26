@@ -497,6 +497,19 @@ export default function Inventory() {
     return counts
   }, [selectedRows])
 
+  const handleDeleteTag = async (tag: string, count: number) => {
+    const msg = count > 0
+      ? `Delete tag "${tag}"? It will be removed from ${count} item(s).`
+      : `Delete tag "${tag}"?`
+    if (!window.confirm(msg)) return
+    try {
+      await api.workspace.orgs.tagColors.delete(tag)
+      void refresh()
+    } catch (err) {
+      console.error('Failed to delete tag', err)
+    }
+  }
+
   return (
     <ViewEditorContext.Provider value={editorContext}>
       <Box data-testid="inventory-page" h="100%" bg="var(--bg-canvas)" display="flex" flexDir="column" overflow="hidden">
@@ -648,6 +661,7 @@ export default function Inventory() {
                       <Flex
                         key={tag}
                         data-testid={`inventory-tag-filter-${tag}`}
+                        role="group"
                         align="center"
                         px={2}
                         py={1}
@@ -668,7 +682,22 @@ export default function Inventory() {
                           transition="background 0.1s"
                         />
                         <Text fontSize="xs" color={isActive ? 'blue.300' : 'gray.400'} flex={1} isTruncated>{tag}</Text>
-                        <Text fontSize="10px" color={count === 0 ? 'gray.700' : isActive ? 'blue.400' : 'gray.600'} fontWeight="bold" ml={1}>{count}</Text>
+                        <Text fontSize="10px" color={count === 0 ? 'gray.700' : isActive ? 'blue.400' : 'gray.600'} fontWeight="bold" ml={1} _groupHover={{ display: 'none' }}>{count}</Text>
+                        <Tooltip label={`Delete tag "${tag}"`} placement="right" openDelay={400}>
+                          <IconButton
+                            aria-label={`Delete tag ${tag}`}
+                            icon={<DeleteIcon boxSize="9px" />}
+                            size="xs"
+                            variant="ghost"
+                            color="red.400"
+                            display="none"
+                            _groupHover={{ display: 'flex' }}
+                            onClick={(e) => { e.stopPropagation(); void handleDeleteTag(tag, count) }}
+                            h="16px"
+                            minW="16px"
+                            ml={1}
+                          />
+                        </Tooltip>
                       </Flex>
                     )
                   })}

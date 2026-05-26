@@ -654,6 +654,11 @@ export const api = {
           rpc(async () => {
             await orgClient.updateTag({ tag: name, color, description: description ?? undefined })
           }),
+        delete: (name: string): Promise<void> =>
+          rpc(async () => {
+            const res = await fetch(apiUrl(`/api/tags/${encodeURIComponent(name)}`), { method: 'DELETE' })
+            if (!res.ok && res.status !== 204) throw await responseError(res, `Failed to delete tag`)
+          }),
       },
     },
 

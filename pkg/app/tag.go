@@ -166,6 +166,36 @@ func (s *Store) UpdateTag(ctx context.Context, name, color string, description *
 	return err
 }
 
+// DeleteTag removes a tag from the tags table and strips it from all elements, views, and connectors.
+func (s *Store) DeleteTag(ctx context.Context, name string) error {
+	stripSQL := `(SELECT COALESCE(json_group_array(value), '[]') FROM json_each(tags) WHERE value != ?)`
+	hasTagSQL := `EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)`
+
+	if _, err := s.bun.DB.ExecContext(ctx,
+		"UPDATE elements SET tags = "+stripSQL+" WHERE "+hasTagSQL,
+		name, name,
+	); err != nil {
+		return err
+	}
+	if _, err := s.bun.DB.ExecContext(ctx,
+		"UPDATE views SET tags = "+stripSQL+" WHERE "+hasTagSQL,
+		name, name,
+	); err != nil {
+		return err
+	}
+	if _, err := s.bun.DB.ExecContext(ctx,
+		"UPDATE connectors SET tags = "+stripSQL+" WHERE "+hasTagSQL,
+		name, name,
+	); err != nil {
+		return err
+	}
+	_, err := s.bun.NewDelete().
+		Model((*tagModel)(nil)).
+		Where("name = ?", name).
+		Exec(ctx)
+	return err
+}
+
 func (s *Store) pickUnusedColor(ctx context.Context, usedColors []string) string {
 	return tagcolors.PickUnusedColor(usedColors)
 }

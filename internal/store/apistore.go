@@ -528,6 +528,10 @@ func (a *APIAdapter) UpdateTag(ctx context.Context, _ uuid.UUID, name, color str
 	return a.Store.UpdateTag(ctx, name, color, description)
 }
 
+func (a *APIAdapter) DeleteTag(ctx context.Context, _ uuid.UUID, name string) error {
+	return a.Store.DeleteTag(ctx, name)
+}
+
 func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
 	if req.GetDryRun() {
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("dry_run is not supported by the local sqlite adapter"))
