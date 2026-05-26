@@ -2042,7 +2042,7 @@ function ViewEditorInner({
       duration: 0,
       padding: VIEW_EDITOR_INITIAL_FIT_PADDING,
       minZoom: computedMinZoom,
-      maxZoom: 4,
+      maxZoom: 1,
     })
     if (ok) {
       if (contextFitNodes.length > 0) fittedContextForViewRef.current = viewIdRef.current
