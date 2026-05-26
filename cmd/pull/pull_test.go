@@ -103,3 +103,82 @@ func getMapKeys(m map[string]any) []string {
 	}
 	return keys
 }
+
+func TestPullLocalTarget(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := t.TempDir()
+
+	// Set TLD_CONFIG_DIR and TLD_DATA_DIR to use our temp dirs
+	t.Setenv("TLD_CONFIG_DIR", dir)
+	t.Setenv("TLD_DATA_DIR", dataDir)
+
+	cmd.MustInitWorkspace(t, dir)
+
+	// 1. Add some elements to YAML workspace
+	cmd.MustRunCmd(t, dir, "add", "API Service", "--ref", "api", "--kind", "service")
+	cmd.MustRunCmd(t, dir, "add", "Database", "--ref", "db", "--kind", "database")
+	cmd.MustRunCmd(t, dir, "connect", "--from", "api", "--to", "db", "--label", "queries")
+
+	// 2. Apply to local sqlite target
+	cmd.MustRunCmd(t, dir, "apply", "--force", "--target", "local", "--data-dir", dataDir)
+
+	// 3. Remove YAML files to simulate missing local state
+	elementsPath := filepath.Join(dir, "elements.yaml")
+	connectorsPath := filepath.Join(dir, "connectors.yaml")
+	if err := os.Remove(elementsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(connectorsPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Run pull --target local --data-dir dataDir
+	stdout, _, err := cmd.RunCmd(t, dir, "pull", "--force", "--target", "local", "--data-dir", dataDir)
+	if err != nil {
+		t.Fatalf("pull local: %v\nstdout: %s", err, stdout)
+	}
+
+	// 5. Verify YAML files were materialized/restored correctly
+	if _, err := os.Stat(elementsPath); os.IsNotExist(err) {
+		t.Fatalf("elements.yaml was not materialized by pull")
+	}
+	if _, err := os.Stat(connectorsPath); os.IsNotExist(err) {
+		t.Fatalf("connectors.yaml was not materialized by pull")
+	}
+
+	// Verify content of elements.yaml
+	elemData, err := os.ReadFile(elementsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var elemResult map[string]any
+	if err := yaml.Unmarshal(elemData, &elemResult); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := elemResult["api"]; !ok {
+		t.Errorf("elements.yaml missing 'api'. Keys: %v", getMapKeys(elemResult))
+	}
+	if _, ok := elemResult["db"]; !ok {
+		t.Errorf("elements.yaml missing 'db'. Keys: %v", getMapKeys(elemResult))
+	}
+
+	// Verify content of connectors.yaml
+	connData, err := os.ReadFile(connectorsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var connResult []map[string]any
+	if err := yaml.Unmarshal(connData, &connResult); err != nil {
+		t.Fatal(err)
+	}
+	foundConnector := false
+	for _, conn := range connResult {
+		if conn["source"] == "api" && conn["target"] == "db" && conn["label"] == "queries" {
+			foundConnector = true
+			break
+		}
+	}
+	if !foundConnector {
+		t.Errorf("connectors.yaml missing expected connector")
+	}
+}

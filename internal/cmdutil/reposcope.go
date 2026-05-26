@@ -239,10 +239,26 @@ func GetWorkingDir() string {
 }
 
 func SamePath(a, b string) bool {
+	evalA, err := filepath.EvalSymlinks(a)
+	if err == nil {
+		a = evalA
+	}
+	evalB, err := filepath.EvalSymlinks(b)
+	if err == nil {
+		b = evalB
+	}
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func PathWithin(path, root string) bool {
+	evalPath, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		path = evalPath
+	}
+	evalRoot, err := filepath.EvalSymlinks(root)
+	if err == nil {
+		root = evalRoot
+	}
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false

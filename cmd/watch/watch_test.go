@@ -78,8 +78,9 @@ func TestConfirmLSPProceedWarnsAndContinuesForNonInteractiveInput(t *testing.T) 
 	got := out.String()
 	for _, want := range []string{
 		"Reference resolution quality will be lower",
-		"gopls: no installed LSP server found",
-		"Remediation: install the missing language server",
+		"Go (gopls): not found in PATH",
+		"Error: no installed LSP server found",
+		"Remediation: install the missing language server(s) or ensure they are on your PATH",
 		"Non-interactive input detected; continuing without confirmation",
 	} {
 		if !strings.Contains(got, want) {
@@ -674,12 +675,12 @@ func TestResolveEmbeddingConfigPrecedence(t *testing.T) {
 		t.Fatalf("LoadGlobalConfig: %v", err)
 	}
 
-	resolved := resolveEmbeddingConfig(cfg, "none", "", "", 0)
+	resolved := resolveEmbeddingConfig(cfg, "none", "", "", 0, 0)
 	if resolved.Provider != "none" {
 		t.Fatalf("flag provider should win over env/config, got %+v", resolved)
 	}
 
-	resolved = resolveEmbeddingConfig(cfg, "", "", "", 0)
+	resolved = resolveEmbeddingConfig(cfg, "", "", "", 0, 0)
 	if resolved.Provider != "local-deterministic-test" || resolved.Model != "env-model" || resolved.Dimension != 7 {
 		t.Fatalf("env should win over config, got %+v", resolved)
 	}

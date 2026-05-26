@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	defaultEmbeddingBatchSize     = 256
-	maxEmbeddingInputApproxTokens = 8000
+	defaultEmbeddingBatchSize     = 16
+	maxEmbeddingInputApproxTokens = 4000
 	maxEmbeddingInputChars        = maxEmbeddingInputApproxTokens * 4
 )
 
@@ -71,6 +71,9 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		progressFinish(req.Progress)
 		logError(ctx, req.Logger, "watch.representation.prepare.failed", err, "elapsed", logElapsed(prepareStarted), "repository_id", repositoryID)
 		return RepresentResult{}, err
+	}
+	if closer, ok := provider.(ClosableProvider); ok {
+		defer func() { _ = closer.Close() }()
 	}
 	progressAdvance(req.Progress, "Embedding provider configured")
 	model := provider.ModelID()
@@ -154,7 +157,7 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		embeddingSymbols := embeddingCandidateSymbols(filtered.VisibleSymbols, maxEmbeddingSymbolsPerRun)
 		embeddingStarted := time.Now()
 		logInfo(ctx, req.Logger, "watch.representation.embeddings.started", "repository_id", repositoryID, "symbols", len(embeddingSymbols))
-		stats, vectors, err := r.cacheEmbeddings(ctx, modelID, provider, repo.RepoRoot, embeddingSymbols, identityKeys, req.Progress, time.Duration(req.Embedding.TimeoutSeconds)*time.Second)
+		stats, vectors, err := r.cacheEmbeddings(ctx, modelID, provider, repo.RepoRoot, embeddingSymbols, identityKeys, req.Progress, time.Duration(req.Embedding.TimeoutSeconds)*time.Second, req.Embedding.MaxTokens)
 		if err != nil {
 			logError(ctx, req.Logger, "watch.representation.embeddings.failed", err, "elapsed", logElapsed(embeddingStarted), "repository_id", repositoryID)
 			return RepresentResult{}, err
@@ -229,6 +232,17 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		runErr = err
 		logError(ctx, req.Logger, "watch.representation.materialize.failed", err, "elapsed", logElapsed(materializeStarted), "repository_id", repositoryID)
 		return result, err
+	}
+	if model.Provider != "none" {
+		resourceStats, err := r.cachePopulateResourceEmbeddings(ctx, modelID, provider, repo.ID, req.Progress, time.Duration(req.Embedding.TimeoutSeconds)*time.Second)
+		if err != nil {
+			progressFinish(req.Progress)
+			runErr = err
+			logError(ctx, req.Logger, "watch.representation.populate_resource_embeddings.failed", err, "repository_id", repositoryID)
+			return result, err
+		}
+		result.EmbeddingCacheHits += resourceStats.CacheHits
+		result.EmbeddingsCreated += resourceStats.Created
 	}
 	progressAdvance(req.Progress, "Resources materialized")
 	progressFinish(req.Progress)
@@ -410,7 +424,7 @@ func progressFinish(progress ProgressSink) {
 	}
 }
 
-func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provider Provider, repoRoot string, symbols []Symbol, identityKeys map[string]string, progress ProgressSink, timeout time.Duration) (embeddingCacheStats, map[int64]Vector, error) {
+func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provider Provider, repoRoot string, symbols []Symbol, identityKeys map[string]string, progress ProgressSink, timeout time.Duration, maxTokens int) (embeddingCacheStats, map[int64]Vector, error) {
 	stats := embeddingCacheStats{}
 	vectorsBySymbol := map[int64]Vector{}
 	model := provider.ModelID()
@@ -422,7 +436,7 @@ func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provid
 	progressStart(progress, "Preparing symbol embeddings", len(symbols))
 	for _, sym := range symbols {
 		ownerKey := symbolOwnerKey(sym, identityKeys)
-		input := EmbeddingInput{OwnerType: "symbol", OwnerKey: ownerKey, Text: symbolEmbeddingText(repoRoot, sym)}
+		input := EmbeddingInput{OwnerType: "symbol", OwnerKey: ownerKey, Text: symbolEmbeddingText(repoRoot, sym, maxTokens)}
 		if data, ok, err := r.Store.Embedding(ctx, modelID, input.OwnerType, input.OwnerKey, inputHash(input)); err != nil {
 			progressFinish(progress)
 			return stats, vectorsBySymbol, err
@@ -480,6 +494,204 @@ func (r *Representer) cacheEmbeddings(ctx context.Context, modelID int64, provid
 	return stats, vectorsBySymbol, nil
 }
 
+func (r *Representer) cachePopulateResourceEmbeddings(ctx context.Context, modelID int64, provider Provider, repositoryID int64, progress ProgressSink, timeout time.Duration) (embeddingCacheStats, error) {
+	stats := embeddingCacheStats{}
+	model := provider.ModelID()
+	if model.Provider == "none" {
+		return stats, nil
+	}
+	inputs, err := r.populateResourceEmbeddingInputs(ctx, repositoryID)
+	if err != nil {
+		return stats, err
+	}
+	if len(inputs) == 0 {
+		return stats, nil
+	}
+	missing := make([]EmbeddingInput, 0, len(inputs))
+	progressStart(progress, "Preparing populate resource embeddings", len(inputs))
+	for _, input := range inputs {
+		if _, ok, err := r.Store.Embedding(ctx, modelID, input.OwnerType, input.OwnerKey, inputHash(input)); err != nil {
+			progressFinish(progress)
+			return stats, err
+		} else if ok {
+			stats.CacheHits++
+		} else {
+			missing = append(missing, input)
+		}
+		progressAdvance(progress, input.OwnerKey)
+	}
+	progressFinish(progress)
+	if len(missing) == 0 {
+		return stats, nil
+	}
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	progressStart(progress, "Embedding populate resources", len(missing))
+	for start := 0; start < len(missing); start += defaultEmbeddingBatchSize {
+		if err := ctx.Err(); err != nil {
+			progressFinish(progress)
+			return stats, err
+		}
+		end := min(start+defaultEmbeddingBatchSize, len(missing))
+		chunk := missing[start:end]
+		embedCtx, cancel := context.WithTimeout(ctx, timeout)
+		vectors, err := provider.Embed(embedCtx, chunk)
+		cancel()
+		if err != nil {
+			progressFinish(progress)
+			return stats, err
+		}
+		if len(vectors) != len(chunk) {
+			progressFinish(progress)
+			return stats, fmt.Errorf("embedding provider returned %d vectors for %d populate resources", len(vectors), len(chunk))
+		}
+		for i, input := range chunk {
+			if err := r.Store.SaveEmbedding(ctx, modelID, input.OwnerType, input.OwnerKey, inputHash(input), vectorBytes(vectors[i])); err != nil {
+				progressFinish(progress)
+				return stats, err
+			}
+			stats.Created++
+			progressAdvance(progress, input.OwnerKey)
+		}
+	}
+	progressFinish(progress)
+	return stats, nil
+}
+
+func (r *Representer) populateResourceEmbeddingInputs(ctx context.Context, repositoryID int64) ([]EmbeddingInput, error) {
+	rows, err := r.Store.db.QueryContext(ctx, `
+		SELECT m.owner_type, m.owner_key, el.name, COALESCE(el.kind, ''), COALESCE(el.description, ''), COALESCE(el.technology, ''), COALESCE(el.file_path, ''), COALESCE(el.language, ''), el.tags
+		FROM watch_materialization m
+		JOIN elements el ON el.id = m.resource_id
+		WHERE m.repository_id = ?
+		  AND m.resource_type = 'element'
+		  AND COALESCE(el.kind, '') IN ('architecture-component', 'repository-section', 'folder', 'cluster', 'dependency-group', 'fact-summary', 'repository', 'file')
+		ORDER BY m.owner_type, m.owner_key`, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	type resourceRow struct {
+		ownerType, ownerKey, name, kind, description, technology, filePath, language, tags string
+	}
+	resources := []resourceRow{}
+	for rows.Next() {
+		var resource resourceRow
+		if err := rows.Scan(&resource.ownerType, &resource.ownerKey, &resource.name, &resource.kind, &resource.description, &resource.technology, &resource.filePath, &resource.language, &resource.tags); err != nil {
+			return nil, err
+		}
+		resources = append(resources, resource)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	inputs := []EmbeddingInput{}
+	for _, resource := range resources {
+		text, err := r.populateResourceEmbeddingText(ctx, repositoryID, resource.ownerType, resource.ownerKey, resource.name, resource.kind, resource.description, resource.technology, resource.filePath, resource.language, resource.tags)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, EmbeddingInput{
+			OwnerType: "populate_resource",
+			OwnerKey:  resource.ownerType + ":" + resource.ownerKey,
+			Text:      text,
+			Language:  resource.language,
+		})
+	}
+	return inputs, nil
+}
+
+func (r *Representer) populateResourceEmbeddingText(ctx context.Context, repositoryID int64, ownerType, ownerKey, name, kind, description, technology, filePath, language, tags string) (string, error) {
+	parts := []string{}
+	if strings.TrimSpace(name) != "" {
+		parts = append(parts, "name "+name)
+	}
+	if kind != "" {
+		parts = append(parts, "kind "+kind)
+	}
+	parts = append(parts, fmt.Sprintf("owner %s %s", ownerType, ownerKey))
+	if signals := embeddingSemanticSignals(name, kind, filePath, tags); len(signals) > 0 {
+		parts = append(parts, "signals "+strings.Join(signals, ", "))
+	}
+	for _, s := range []string{description, technology, filePath} {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	children, err := r.populateResourceChildSummary(ctx, ownerType, ownerKey)
+	if err != nil {
+		return "", err
+	}
+	if children != "" {
+		parts = append(parts, "children "+children)
+	}
+	refs, err := r.populateResourceReferenceSummary(ctx, repositoryID, filePath)
+	if err != nil {
+		return "", err
+	}
+	if refs != "" {
+		parts = append(parts, "refs "+refs)
+	}
+	return shrinkEmbeddingText(strings.Join(parts, " "), maxEmbeddingInputApproxTokens), nil
+}
+
+func (r *Representer) populateResourceChildSummary(ctx context.Context, ownerType, ownerKey string) (string, error) {
+	rows, err := r.Store.db.QueryContext(ctx, `
+		SELECT child.name
+		FROM watch_materialization parent
+		JOIN views v ON v.owner_element_id = parent.resource_id
+		JOIN placements p ON p.view_id = v.id
+		JOIN elements child ON child.id = p.element_id
+		WHERE parent.owner_type = ? AND parent.owner_key = ? AND parent.resource_type = 'element'
+		ORDER BY p.id
+		LIMIT 16`, ownerType, ownerKey)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	values := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return "", err
+		}
+		values = append(values, name)
+	}
+	return strings.Join(compactStrings(values), ", "), rows.Err()
+}
+
+func (r *Representer) populateResourceReferenceSummary(ctx context.Context, repositoryID int64, filePath string) (string, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return "", nil
+	}
+	rows, err := r.Store.db.QueryContext(ctx, `
+		SELECT DISTINCT target.name
+		FROM watch_symbols source
+		JOIN watch_references ref ON ref.source_symbol_id = source.id
+		JOIN watch_symbols target ON target.id = ref.target_symbol_id
+		WHERE source.repository_id = ? AND source.file_id IN (SELECT id FROM watch_files WHERE repository_id = ? AND path = ?)
+		ORDER BY target.name
+		LIMIT 12`, repositoryID, repositoryID, filePath)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	values := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return "", err
+		}
+		values = append(values, name)
+	}
+	return strings.Join(compactStrings(values), ", "), rows.Err()
+}
+
 func embeddingCandidateSymbols(symbols map[int64]Symbol, limit int) []Symbol {
 	out := sortedSymbols(symbols)
 	if limit > 0 && len(out) > limit {
@@ -488,12 +700,185 @@ func embeddingCandidateSymbols(symbols map[int64]Symbol, limit int) []Symbol {
 	return out
 }
 
-func symbolEmbeddingText(repoRoot string, sym Symbol) string {
+func symbolEmbeddingText(repoRoot string, sym Symbol, maxTokens int) string {
 	body := symbolCodeBody(repoRoot, sym)
-	if strings.TrimSpace(body) == "" {
-		body = sym.QualifiedName + "\n" + sym.Kind + "\n" + sym.FilePath
+	name := strings.TrimSpace(sym.QualifiedName)
+	if name == "" {
+		name = strings.TrimSpace(sym.Name)
 	}
-	return shrinkEmbeddingText(outdentCode(body))
+	parts := []string{}
+	if name != "" {
+		parts = append(parts, "symbol name "+name)
+	}
+	if strings.TrimSpace(sym.Kind) != "" {
+		parts = append(parts, "kind "+sym.Kind)
+	}
+	if strings.TrimSpace(sym.FilePath) != "" {
+		parts = append(parts, "path "+sym.FilePath)
+	}
+	if signals := embeddingSemanticSignals(name, sym.Kind, sym.FilePath, ""); len(signals) > 0 {
+		parts = append(parts, "signals "+strings.Join(signals, ", "))
+	}
+	if strings.TrimSpace(body) == "" {
+		return shrinkEmbeddingText(strings.Join(parts, "\n"), maxTokens)
+	}
+	parts = append(parts, "code\n"+outdentCode(body))
+	return shrinkEmbeddingText(strings.Join(parts, "\n"), maxTokens)
+}
+
+func embeddingSemanticSignals(name, kind, filePath, tagsJSON string) []string {
+	signals := []string{}
+	add := func(values ...string) {
+		for _, value := range values {
+			value = strings.TrimSpace(strings.ReplaceAll(value, ":", " "))
+			if value != "" && !containsEmbeddingSignal(signals, value) {
+				signals = append(signals, value)
+			}
+		}
+	}
+	if kind != "" {
+		add("granularity " + kind)
+	}
+	sourceParts := []string{name, kind, filePath}
+	for _, tag := range decodeEmbeddingTags(tagsJSON) {
+		sourceParts = append(sourceParts, strings.ReplaceAll(tag, ":", " "))
+	}
+	source := strings.ToLower(strings.Join(sourceParts, " "))
+	for _, rule := range embeddingSignalRules {
+		if hasEmbeddingSignalCue(source, rule.cues) {
+			add(rule.signals...)
+		}
+	}
+	return signals
+}
+
+type embeddingSignalRule struct {
+	cues    []string
+	signals []string
+}
+
+var embeddingSignalRules = []embeddingSignalRule{
+	{
+		cues:    []string{"api", "http", "rpc", "grpc", "rest", "graphql", "endpoint", "route", "handler", "controller", "websocket", "webhook"},
+		signals: []string{"responsibility interface boundary", "intent request handling", "intent service endpoint"},
+	},
+	{
+		cues:    []string{"cli", "cmd", "command", "terminal", "shell"},
+		signals: []string{"responsibility operator interface", "intent command workflow"},
+	},
+	{
+		cues:    []string{"ui", "frontend", "front end", "view", "page", "component", "canvas", "render", "screen", "layout", "style"},
+		signals: []string{"responsibility presentation", "intent user interaction", "intent rendering"},
+	},
+	{
+		cues:    []string{"store", "storage", "persist", "database", "db", "sql", "sqlite", "postgres", "mysql", "mongo", "redis", "cache", "migration", "schema", "repository", "dao"},
+		signals: []string{"responsibility data storage", "intent persistence", "intent data access"},
+	},
+	{
+		cues:    []string{"client", "adapter", "gateway", "connector", "provider", "sdk", "integration", "external", "third party"},
+		signals: []string{"responsibility external integration", "intent dependency boundary", "intent protocol adaptation"},
+	},
+	{
+		cues:    []string{"job", "worker", "queue", "scheduler", "cron", "event", "stream", "message", "consumer", "producer", "pubsub", "workflow", "state machine"},
+		signals: []string{"responsibility orchestration", "intent asynchronous processing", "intent event flow"},
+	},
+	{
+		cues:    []string{"parser", "analyzer", "compiler", "extractor", "mapper", "transformer", "serializer", "validator", "generator", "import", "export", "sync"},
+		signals: []string{"responsibility transformation", "intent data interpretation", "intent validation"},
+	},
+	{
+		cues:    []string{"service", "usecase", "use case", "domain", "entity", "aggregate", "policy", "rule", "manager", "coordinator"},
+		signals: []string{"responsibility domain logic", "intent business rule", "intent coordination"},
+	},
+	{
+		cues:    []string{"config", "setting", "option", "flag", "env", "environment", "yaml", "toml", "properties", "preference"},
+		signals: []string{"responsibility configuration", "intent runtime tuning", "intent environment setup"},
+	},
+	{
+		cues:    []string{"test", "spec", "mock", "fixture", "assert", "benchmark", "e2e", "integration test"},
+		signals: []string{"responsibility validation", "intent test coverage", "intent fixture setup"},
+	},
+	{
+		cues:    []string{"build", "release", "deploy", "docker", "container", "ci", "cd", "workflow", "pipeline", "package", "publish", "install"},
+		signals: []string{"responsibility delivery", "intent build automation", "intent deployment"},
+	},
+	{
+		cues:    []string{"log", "metric", "trace", "telemetry", "monitor", "health", "alert", "diagnostic"},
+		signals: []string{"responsibility observability", "intent operational insight", "intent health reporting"},
+	},
+	{
+		cues:    []string{"security", "permission", "token", "secret", "credential", "crypto", "certificate", "policy"},
+		signals: []string{"responsibility security boundary", "intent access protection", "intent sensitive data handling"},
+	},
+}
+
+func hasEmbeddingSignalCue(source string, cues []string) bool {
+	tokens := embeddingSignalTokens(source)
+	for _, cue := range cues {
+		cue = strings.ToLower(strings.TrimSpace(cue))
+		if cue == "" {
+			continue
+		}
+		if strings.Contains(cue, " ") {
+			if strings.Contains(source, cue) {
+				return true
+			}
+			continue
+		}
+		if len(cue) <= 3 {
+			if tokens[cue] {
+				return true
+			}
+			continue
+		}
+		for token := range tokens {
+			if token == cue || strings.Contains(token, cue) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func embeddingSignalTokens(source string) map[string]bool {
+	tokens := map[string]bool{}
+	var current strings.Builder
+	flush := func() {
+		if current.Len() > 0 {
+			tokens[current.String()] = true
+			current.Reset()
+		}
+	}
+	for _, r := range strings.ToLower(source) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			current.WriteRune(r)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return tokens
+}
+
+func containsEmbeddingSignal(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeEmbeddingTags(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var tags []string
+	if err := json.Unmarshal([]byte(raw), &tags); err != nil {
+		return nil
+	}
+	return tags
 }
 
 func symbolCodeBody(repoRoot string, sym Symbol) string {
@@ -571,22 +956,26 @@ func trimIndentWidth(line string, maxWidth int) string {
 	return ""
 }
 
-func shrinkEmbeddingText(text string) string {
+func shrinkEmbeddingText(text string, maxTokens int) string {
 	text = strings.TrimSpace(text)
-	if approximateTokenCount(text) <= maxEmbeddingInputApproxTokens {
+	if maxTokens <= 0 {
+		maxTokens = maxEmbeddingInputApproxTokens
+	}
+	if approximateTokenCount(text) <= maxTokens {
 		return text
 	}
 	text = dropLowSignalCodeLines(text)
-	if approximateTokenCount(text) <= maxEmbeddingInputApproxTokens {
+	if approximateTokenCount(text) <= maxTokens {
 		return text
 	}
-	if len(text) <= maxEmbeddingInputChars {
+	maxChars := maxTokens * 4
+	if len(text) <= maxChars {
 		return text
 	}
 	marker := "\n\n/* ... middle omitted for embedding context ... */\n\n"
-	keep := maxEmbeddingInputChars - len(marker)
+	keep := maxChars - len(marker)
 	if keep <= 0 {
-		return text[:maxEmbeddingInputChars]
+		return text[:maxChars]
 	}
 	head := keep * 2 / 3
 	tail := keep - head
@@ -1275,27 +1664,6 @@ func (m *materializer) materializeArchitecture(ctx context.Context, architecture
 }
 
 func (m *materializer) materializeRepositorySections(ctx context.Context, repoView int64, repoLanguage string) (int64, int64, error) {
-	architectureElem, err := m.upsertElement(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), elementInput{
-		Name:        "Architecture",
-		Kind:        "view",
-		Description: "Generated architecture view",
-		Technology:  "Architecture",
-		Repo:        repoIdentity(m.repo),
-		Branch:      nullStringValue(m.repo.Branch),
-		Language:    repoLanguage,
-		Tags:        []string{"view:architecture"},
-	})
-	if err != nil {
-		return 0, 0, err
-	}
-	if err := m.upsertPlacement(ctx, repoView, architectureElem, 0, 0); err != nil {
-		return 0, 0, err
-	}
-	architectureView, err := m.upsertView(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), architectureElem, m.repo.DisplayName+" Architecture", "Architecture")
-	if err != nil {
-		return 0, 0, err
-	}
-
 	structuralElem, err := m.upsertElement(ctx, "repository-section", fmt.Sprintf("repository-structural:%d", m.repo.ID), elementInput{
 		Name:        "Structural",
 		Kind:        "view",
@@ -1309,13 +1677,35 @@ func (m *materializer) materializeRepositorySections(ctx context.Context, repoVi
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := m.upsertPlacement(ctx, repoView, structuralElem, 260, 0); err != nil {
+	if err := m.upsertPlacement(ctx, repoView, structuralElem, 0, 0); err != nil {
 		return 0, 0, err
 	}
 	structuralView, err := m.upsertView(ctx, "repository-section", fmt.Sprintf("repository-structural:%d", m.repo.ID), structuralElem, m.repo.DisplayName+" Structural", "Structural")
 	if err != nil {
 		return 0, 0, err
 	}
+
+	architectureElem, err := m.upsertElement(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), elementInput{
+		Name:        "Architecture",
+		Kind:        "view",
+		Description: "Generated architecture view",
+		Technology:  "Architecture",
+		Repo:        repoIdentity(m.repo),
+		Branch:      nullStringValue(m.repo.Branch),
+		Language:    repoLanguage,
+		Tags:        []string{"view:architecture"},
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := m.upsertPlacement(ctx, structuralView, architectureElem, 0, 0); err != nil {
+		return 0, 0, err
+	}
+	architectureView, err := m.upsertView(ctx, "repository-section", fmt.Sprintf("repository-architecture:%d", m.repo.ID), architectureElem, m.repo.DisplayName+" Architecture", "Architecture")
+	if err != nil {
+		return 0, 0, err
+	}
+
 	return architectureView, structuralView, nil
 }
 

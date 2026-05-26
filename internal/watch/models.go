@@ -182,12 +182,15 @@ type LSPStatusSummary struct {
 }
 
 type EmbeddingConfig struct {
-	Provider        string  `json:"provider" yaml:"provider"`
-	Endpoint        string  `json:"endpoint,omitempty" yaml:"endpoint"`
-	Model           string  `json:"model" yaml:"model"`
-	Dimension       int     `json:"dimension" yaml:"dimension"`
-	HealthThreshold float64 `json:"health_threshold,omitempty" yaml:"health_threshold"`
-	TimeoutSeconds  int     `json:"timeout_seconds,omitempty" yaml:"timeout_seconds"`
+	Provider        string   `json:"provider" yaml:"provider"`
+	Endpoint        string   `json:"endpoint,omitempty" yaml:"endpoint"`
+	Endpoints       []string `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
+	Model           string   `json:"model" yaml:"model"`
+	Dimension       int      `json:"dimension" yaml:"dimension"`
+	RuntimePath     string   `json:"runtime_path,omitempty" yaml:"runtime_path"`
+	HealthThreshold float64  `json:"health_threshold,omitempty" yaml:"health_threshold"`
+	TimeoutSeconds  int      `json:"timeout_seconds,omitempty" yaml:"timeout_seconds"`
+	MaxTokens       int      `json:"max_tokens,omitempty" yaml:"max_tokens"`
 }
 
 type Thresholds struct {

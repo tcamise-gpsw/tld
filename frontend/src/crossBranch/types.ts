@@ -55,6 +55,7 @@ export interface ProxyEndpoint {
   commonAncestorViewName: string | null
   mergeAncestorElementId?: number | null
   contextPathElementIds?: number[]
+  branchPathElementIds?: number[]
 }
 
 export interface ProxyConnectorLeaf {

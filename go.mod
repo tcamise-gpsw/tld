@@ -15,7 +15,7 @@ require (
 	github.com/openai/openai-go v1.12.0
 	github.com/schollz/progressbar/v3 v3.19.0
 	github.com/speps/go-hashids/v2 v2.0.1
-	github.com/spf13/cobra v1.9.1
+	github.com/spf13/cobra v1.10.1
 	github.com/tetratelabs/wazero v1.11.0
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18
@@ -192,3 +192,5 @@ require (
 )
 
 tool github.com/go-task/task/v3/cmd/task
+
+replace github.com/sugarme/tokenizer => github.com/clems4ever/tokenizer v0.0.0-20250926133620-9ddc80533c43

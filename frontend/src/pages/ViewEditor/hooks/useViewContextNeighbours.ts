@@ -1,10 +1,22 @@
 import { useMemo } from 'react'
 import { type Edge as RFEdge, type Node as RFNode } from 'reactflow'
 import type { Connector, LibraryElement, PlacedElement } from '../../../types'
-import type { CrossBranchContextSettings, ProxyConnectorDetails, WorkspaceGraphSnapshot } from '../../../crossBranch/types'
+import type {
+  CrossBranchContextSettings,
+  ProxyConnectorDetails,
+  ProxyConnectorLeaf,
+  ProxyEndpoint,
+  WorkspaceGraphSnapshot,
+} from '../../../crossBranch/types'
 import { resolveViewProxyGraph } from '../../../crossBranch/resolve'
 import { placedElementToLibraryElement } from '../../../store/useStore'
 import { canonicalNodePairKey } from '../pairKey'
+import {
+  buildContextSummaryForest,
+  buildVisibleContextSummaryForest,
+  contextSummaryLeafId,
+  type VisibleContextSummaryForest,
+} from './contextSummaryTree'
 
 interface Props {
   snapshot: WorkspaceGraphSnapshot | null
@@ -27,11 +39,26 @@ export interface ContextNodePositionOverride {
   axisPosition: number
 }
 
-interface ContextBoundaryBounds {
+export interface ContextBoundaryBounds {
   left: number
   right: number
   top: number
   bottom: number
+}
+
+export interface ContextRootLayoutSeed {
+  nodeId: string
+  centerX: number
+  centerY: number
+}
+
+export interface ExternalContextGroup {
+  pairKey: string
+  source: string
+  target: string
+  contextNodeId: string
+  currentNodeId: string
+  connectors: ProxyConnectorLeaf[]
 }
 
 const CONTEXT_NODE_W = 200
@@ -72,17 +99,6 @@ function classifySide(angle: number): ContextSide {
   const dy = Math.sin(angle)
   if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? 'left' : 'right'
   return dy < 0 ? 'top' : 'bottom'
-}
-
-function isAncestorContextNode(
-  snapshot: WorkspaceGraphSnapshot,
-  ancestor: { anchorElementId: number },
-  descendant: { placementViewId: number | null },
-): boolean {
-  const ownedViewId = snapshot.childViewIdByOwnerElementId[ancestor.anchorElementId]
-  if (ownedViewId == null || descendant.placementViewId == null) return false
-  return descendant.placementViewId === ownedViewId ||
-    (snapshot.descendantsByViewId[ownedViewId]?.includes(descendant.placementViewId) ?? false)
 }
 
 function canonicalElementPairKey(leftId: number, rightId: number) {
@@ -192,6 +208,206 @@ function summarizeProxyConnectorLabel(connectors: ProxyConnectorDetails['connect
   return `${connectors.length} connectors`
 }
 
+function leafExternalEndpoint(leaf: ProxyConnectorLeaf): ProxyEndpoint | null {
+  if (leaf.source.externalToView) return leaf.source
+  if (leaf.target.externalToView) return leaf.target
+  return null
+}
+
+function leafInternalEndpoint(leaf: ProxyConnectorLeaf): ProxyEndpoint | null {
+  if (leaf.source.externalToView) return leaf.target
+  if (leaf.target.externalToView) return leaf.source
+  return null
+}
+
+function ownerViewsFromConnectorLeaves(connectors: ProxyConnectorLeaf[]) {
+  const ownerViews = new Map<number, string>()
+  connectors.forEach((leaf) => ownerViews.set(leaf.ownerViewId, leaf.ownerViewName))
+  return {
+    ownerViewIds: Array.from(ownerViews.keys()),
+    ownerViewNames: Array.from(ownerViews.values()),
+  }
+}
+
+function summaryConnectorDetails(
+  key: string,
+  sourceAnchorId: string,
+  targetAnchorId: string,
+  sourceAnchorName: string,
+  targetAnchorName: string,
+  connectors: ProxyConnectorLeaf[],
+): ProxyConnectorDetails {
+  const { ownerViewIds, ownerViewNames } = ownerViewsFromConnectorLeaves(connectors)
+  return {
+    key,
+    label: summarizeProxyConnectorLabel(connectors),
+    count: connectors.length,
+    sourceAnchorId,
+    targetAnchorId,
+    sourceAnchorName,
+    targetAnchorName,
+    ownerViewIds,
+    ownerViewNames,
+    connectors,
+  }
+}
+
+function visibleSummarySubtreeSpan(
+  nodeId: string,
+  forest: VisibleContextSummaryForest,
+  cache: Map<string, number>,
+): number {
+  const cached = cache.get(nodeId)
+  if (cached != null) return cached
+  const node = forest.nodesById[nodeId]
+  if (!node || node.visibleChildIds.length === 0) {
+    cache.set(nodeId, 1)
+    return 1
+  }
+  const span = Math.max(1, node.visibleChildIds.reduce((sum, childId) => sum + visibleSummarySubtreeSpan(childId, forest, cache), 0))
+  cache.set(nodeId, span)
+  return span
+}
+
+export function contextNodeFanoutBudget(settings: CrossBranchContextSettings): number {
+  const connectorBudget = settings.connectorBudget ?? 50
+  if (connectorBudget <= 10) return 1
+  if (connectorBudget <= 25) return 2
+  if (connectorBudget <= 50) return 3
+  if (connectorBudget <= 100) return 5
+  return 8
+}
+
+function compareExternalContextGroups(
+  left: ExternalContextGroup,
+  right: ExternalContextGroup,
+  forest: VisibleContextSummaryForest,
+) {
+  if (right.connectors.length !== left.connectors.length) {
+    return right.connectors.length - left.connectors.length
+  }
+
+  const depthDelta = (forest.nodesById[left.contextNodeId]?.depth ?? 0) - (forest.nodesById[right.contextNodeId]?.depth ?? 0)
+  if (depthDelta !== 0) return depthDelta
+
+  const leafDelta =
+    (forest.nodesById[right.contextNodeId]?.descendantLeafIds.length ?? 0) -
+    (forest.nodesById[left.contextNodeId]?.descendantLeafIds.length ?? 0)
+  if (leafDelta !== 0) return leafDelta
+
+  return left.pairKey.localeCompare(right.pairKey)
+}
+
+export function budgetExternalContextGroups(
+  groups: ExternalContextGroup[],
+  forest: VisibleContextSummaryForest,
+  settings: CrossBranchContextSettings,
+): ExternalContextGroup[] {
+  if (groups.length === 0) return []
+
+  const perNodeBudget = contextNodeFanoutBudget(settings)
+  const groupsByContextNodeId = new Map<string, ExternalContextGroup[]>()
+  groups.forEach((group) => {
+    const bucket = groupsByContextNodeId.get(group.contextNodeId)
+    if (bucket) bucket.push(group)
+    else groupsByContextNodeId.set(group.contextNodeId, [group])
+  })
+
+  return Array.from(groupsByContextNodeId.values())
+    .flatMap((bucket) => bucket
+      .slice()
+      .sort((left, right) => compareExternalContextGroups(left, right, forest))
+      .slice(0, perNodeBudget))
+    .sort((left, right) => compareExternalContextGroups(left, right, forest))
+}
+
+export function buildSummaryLayoutById(
+  forest: VisibleContextSummaryForest,
+  rootLayoutsBySide: Record<ContextSide, ContextRootLayoutSeed[]>,
+  bounds: ContextBoundaryBounds,
+): Map<string, { position: { x: number; y: number }; side: ContextSide }> {
+  const summaryLayoutById = new Map<string, { position: { x: number; y: number }; side: ContextSide }>()
+  const spanCache = new Map<string, number>()
+
+  ;(['top', 'bottom', 'left', 'right'] as const).forEach((side) => {
+    const sideRoots = [...rootLayoutsBySide[side]].sort((left, right) => {
+      const leftCoord = side === 'left' || side === 'right' ? left.centerY : left.centerX
+      const rightCoord = side === 'left' || side === 'right' ? right.centerY : right.centerX
+      return leftCoord - rightCoord
+    })
+    if (sideRoots.length === 0) return
+
+    const threshold = side === 'left' || side === 'right' ? SIDE_CLUSTER_THRESHOLD : TOP_BOTTOM_CLUSTER_THRESHOLD
+    const clusters: ContextRootLayoutSeed[][] = []
+    sideRoots.forEach((layout) => {
+      const coord = side === 'left' || side === 'right' ? layout.centerY : layout.centerX
+      const cluster = clusters[clusters.length - 1]
+      if (!cluster) {
+        clusters.push([layout])
+        return
+      }
+
+      const last = cluster[cluster.length - 1]
+      const lastCoord = side === 'left' || side === 'right' ? last.centerY : last.centerX
+      if (Math.abs(coord - lastCoord) <= threshold) cluster.push(layout)
+      else clusters.push([layout])
+    })
+
+    clusters.forEach((cluster) => {
+      const axisGap = side === 'left' || side === 'right' ? VERTICAL_STACK_SPACING : HORIZONTAL_STACK_SPACING
+      const depthSpacing = side === 'left' || side === 'right'
+        ? HORIZONTAL_STACK_SPACING + CHEVRON_H_CLEARANCE
+        : VERTICAL_STACK_SPACING + CHEVRON_V_CLEARANCE
+      const clusterAnchorCoord = cluster.reduce((sum, item) => sum + (side === 'left' || side === 'right' ? item.centerY : item.centerX), 0) / cluster.length
+      const rootStart = clusterAnchorCoord - ((cluster.length - 1) * axisGap) / 2
+
+      const assignNodeLayout = (nodeId: string, axisCenter: number, depth: number) => {
+        const node = forest.nodesById[nodeId]
+        if (!node) return
+
+        let x: number
+        let y: number
+        if (side === 'top') {
+          x = axisCenter - CONTEXT_NODE_HALF_W
+          y = bounds.top - VERTICAL_BOUNDARY_CLEARANCE - depth * depthSpacing - CONTEXT_NODE_HALF_H
+        } else if (side === 'bottom') {
+          x = axisCenter - CONTEXT_NODE_HALF_W
+          y = bounds.bottom + VERTICAL_BOUNDARY_CLEARANCE + depth * depthSpacing - CONTEXT_NODE_HALF_H
+        } else if (side === 'left') {
+          x = bounds.left - HORIZONTAL_BOUNDARY_CLEARANCE - depth * depthSpacing - CONTEXT_NODE_HALF_W
+          y = axisCenter - CONTEXT_NODE_HALF_H
+        } else {
+          x = bounds.right + HORIZONTAL_BOUNDARY_CLEARANCE + depth * depthSpacing - CONTEXT_NODE_HALF_W
+          y = axisCenter - CONTEXT_NODE_HALF_H
+        }
+        summaryLayoutById.set(nodeId, { position: { x, y }, side })
+
+        if (node.visibleChildIds.length === 0) return
+
+        const totalSpan = Math.max(1, node.visibleChildIds.reduce(
+          (sum, childId) => sum + visibleSummarySubtreeSpan(childId, forest, spanCache),
+          0,
+        ))
+        const childStart = axisCenter - ((totalSpan - 1) * axisGap) / 2
+
+        let nextUnit = 0
+        node.visibleChildIds.forEach((childId) => {
+          const childSpan = visibleSummarySubtreeSpan(childId, forest, spanCache)
+          const childAxisCenter = childStart + (nextUnit + (childSpan - 1) / 2) * axisGap
+          assignNodeLayout(childId, childAxisCenter, depth + 1)
+          nextUnit += childSpan
+        })
+      }
+
+      cluster.forEach(({ nodeId }, index) => {
+        assignNodeLayout(nodeId, rootStart + index * axisGap, 0)
+      })
+    })
+  })
+
+  return summaryLayoutById
+}
+
 export function useViewContextNeighbours({
   snapshot,
   settings,
@@ -216,8 +432,8 @@ export function useViewContextNeighbours({
       }
     }
 
-    const { proxyNodes, proxyConnectors, proxyConnectorDetailsByKey } = resolveViewProxyGraph(snapshot, viewId, viewElements, settings)
-    if (proxyNodes.length === 0 && proxyConnectors.length === 0) {
+    const { proxyConnectors, proxyConnectorDetailsByKey } = resolveViewProxyGraph(snapshot, viewId, viewElements, settings)
+    if (proxyConnectors.length === 0) {
       return {
         contextNodes: [] as RFNode[],
         contextConnectors: [] as RFEdge[],
@@ -238,6 +454,7 @@ export function useViewContextNeighbours({
       }
     }
     const visibleElementIds = new Set(viewElements.map((element) => element.element_id))
+    const currentElementsById = new Map(viewElements.map((element) => [element.element_id, element] as const))
     const directConnectorPairs = buildDirectConnectorPairSet(snapshot.connectorsByViewId[viewId] ?? [], visibleElementIds)
 
     let minX = Infinity
@@ -280,31 +497,38 @@ export function useViewContextNeighbours({
         live ? { ...element, position_x: live.x, position_y: live.y } : element,
       ] as const
     }))
-    const proxyNodeDetailsById = new Map(
-      proxyNodes.map((proxyNode) => {
-        const connectors = proxyConnectors
-          .filter((connector) => connector.sourceAnchorId === proxyNode.id || connector.targetAnchorId === proxyNode.id)
-          .flatMap((connector) => connector.details.connectors)
 
-        const ownerViews = new Map<number, string>()
-        connectors.forEach((leaf) => ownerViews.set(leaf.ownerViewId, leaf.ownerViewName))
+    const allConnectorLeaves = proxyConnectors.flatMap((connector) => connector.details.connectors)
+    const externalConnectorLeaves = allConnectorLeaves.filter((leaf) => leaf.source.externalToView || leaf.target.externalToView)
+    const internalOnlyProxyConnectors = proxyConnectors.filter((connector) => connector.details.connectors.every((leaf) => !leaf.source.externalToView && !leaf.target.externalToView))
 
-        const details: ProxyConnectorDetails = {
-          key: `node:${proxyNode.id}`,
-          label: summarizeProxyConnectorLabel(connectors),
-          count: connectors.length,
-          sourceAnchorId: proxyNode.id,
-          targetAnchorId: proxyNode.id,
-          sourceAnchorName: proxyNode.name,
-          targetAnchorName: 'Multiple connections',
-          ownerViewIds: Array.from(ownerViews.keys()),
-          ownerViewNames: Array.from(ownerViews.values()),
-          connectors,
-        }
+    const externalEndpoints = externalConnectorLeaves
+      .map((leaf) => leafExternalEndpoint(leaf))
+      .filter((endpoint): endpoint is ProxyEndpoint => endpoint != null)
 
-        return [proxyNode.id, details] as const
-      }),
-    )
+    const connectorLeavesBySummaryLeafId = new Map<string, ProxyConnectorLeaf[]>()
+    externalConnectorLeaves.forEach((leaf) => {
+      const external = leafExternalEndpoint(leaf)
+      if (!external) return
+      const leafId = contextSummaryLeafId(external)
+      const group = connectorLeavesBySummaryLeafId.get(leafId)
+      if (group) group.push(leaf)
+      else connectorLeavesBySummaryLeafId.set(leafId, [leaf])
+    })
+
+    const summaryForest = buildContextSummaryForest(externalEndpoints)
+    const visibleSummaryForest = buildVisibleContextSummaryForest(summaryForest, expandedAncestorGroups, settings)
+    const summaryNodeConnectorLeavesById = new Map<string, ProxyConnectorLeaf[]>()
+    Object.values(visibleSummaryForest.nodesById).forEach((node) => {
+      summaryNodeConnectorLeavesById.set(
+        node.id,
+        node.descendantLeafIds.flatMap((leafId) => connectorLeavesBySummaryLeafId.get(leafId) ?? []),
+      )
+    })
+
+    const currentNodeNameById = new Map<string, string>(viewElements.map((element) => [String(element.element_id), element.name]))
+    const summaryNodeNameById = new Map<string, string>()
+    const summaryNodeDetailsById = new Map<string, ProxyConnectorDetails>()
 
     const ContextBoundaryElement: RFNode = {
       id: 'context-boundary',
@@ -327,326 +551,204 @@ export function useViewContextNeighbours({
       },
     }
 
-    const provisionalContextLayouts = proxyNodes.map((contextNode) => {
-      const relatedAngles = proxyConnectors
-        .filter((connector) => connector.sourceAnchorId === contextNode.id || connector.targetAnchorId === contextNode.id)
-        .flatMap((connector) => {
-          const leafAngles = connector.details.connectors.map((leaf) => {
-            const external = leaf.source.externalToView ? leaf.source : leaf.target
-            if (external.anchorElementId !== contextNode.anchorElementId) return null
-            const internal = leaf.source.externalToView ? leaf.target : leaf.source
-
-            if (external.anchorViewId === viewId) {
-              const externalPos = currentViewPositions.get(external.anchorElementId)
-              const internalPos = currentViewPositions.get(internal.anchorElementId)
-              if (externalPos && internalPos) {
-                return Math.atan2(externalPos.position_y - internalPos.position_y, externalPos.position_x - internalPos.position_x)
-              }
-            }
-
-            if (external.commonAncestorViewId != null && external.currentBranchElementId != null) {
-              const commonAncestorPositions = snapshot.placementsByViewId[external.commonAncestorViewId] ?? []
-              const currentBranchPlacement = commonAncestorPositions.find((placement) => placement.element_id === external.currentBranchElementId)
-              const externalPlacement = commonAncestorPositions.find((placement) => placement.element_id === external.anchorElementId)
-              if (currentBranchPlacement && externalPlacement) {
-                return Math.atan2(
-                  externalPlacement.position_y - currentBranchPlacement.position_y,
-                  externalPlacement.position_x - currentBranchPlacement.position_x,
-                )
-              }
-            }
-
-            const internalPos = currentViewPositions.get(internal.anchorElementId)
-            if (internalPos) {
-              return Math.atan2(internalPos.position_y - centerY, internalPos.position_x - centerX) + Math.PI
-            }
-
-            return null
-          })
-
-          return leafAngles.filter((angle): angle is number => angle != null)
-        })
-
-      let angle = relatedAngles.length > 0 ? averageAngles(relatedAngles) : stableAngleFromId(contextNode.id)
-      const isDescendant = contextNode.placementViewId != null && (snapshot.descendantsByViewId[viewId]?.includes(contextNode.placementViewId) ?? false)
-
-      if (isDescendant) {
-        angle = -Math.PI / 2
-      }
-
-      const side = isDescendant ? 'top' : classifySide(angle)
-
-      const centerPosX = centerX + Math.cos(angle) * radiusX
-      const centerPosY = centerY + Math.sin(angle) * radiusY
-
-      return {
-        contextNode,
-        angle,
-        side,
-        centerX: centerPosX,
-        centerY: centerPosY,
-        position: {
-          x: centerPosX - CONTEXT_NODE_HALF_W,
-          y: centerPosY - CONTEXT_NODE_HALF_H,
-        },
-      }
-    })
-
-    const layoutsBySide: Record<ContextSide, typeof provisionalContextLayouts> = {
+    const rootLayoutsBySide: Record<ContextSide, ContextRootLayoutSeed[]> = {
       top: [],
       bottom: [],
       left: [],
       right: [],
     }
 
-    provisionalContextLayouts.forEach((layout) => {
-      layoutsBySide[layout.side].push(layout)
-    })
+    visibleSummaryForest.rootIds.forEach((rootId) => {
+      const rootNode = visibleSummaryForest.nodesById[rootId]
+      if (!rootNode) return
 
-    let clusterCounter = 0
-    const stackedLayouts = (['top', 'bottom', 'left', 'right'] as const).flatMap((side) => {
-      const sideLayouts = [...layoutsBySide[side]].sort((left, right) => {
-        const leftCoord = side === 'left' || side === 'right' ? left.centerY : left.centerX
-        const rightCoord = side === 'left' || side === 'right' ? right.centerY : right.centerX
-        return leftCoord - rightCoord
+      const relatedAngles = (summaryNodeConnectorLeavesById.get(rootId) ?? []).map((leaf) => {
+        const external = leafExternalEndpoint(leaf)
+        const internal = leafInternalEndpoint(leaf)
+        if (!external || !internal) return null
+
+        if (external.anchorViewId === viewId) {
+          const externalPos = currentViewPositions.get(external.anchorElementId)
+          const internalPos = currentViewPositions.get(internal.anchorElementId)
+          if (externalPos && internalPos) {
+            return Math.atan2(externalPos.position_y - internalPos.position_y, externalPos.position_x - internalPos.position_x)
+          }
+        }
+
+        if (external.commonAncestorViewId != null && external.currentBranchElementId != null) {
+          const commonAncestorPositions = snapshot.placementsByViewId[external.commonAncestorViewId] ?? []
+          const currentBranchPlacement = commonAncestorPositions.find((placement) => placement.element_id === external.currentBranchElementId)
+          const externalPlacement = commonAncestorPositions.find((placement) => placement.element_id === external.anchorElementId)
+          if (currentBranchPlacement && externalPlacement) {
+            return Math.atan2(
+              externalPlacement.position_y - currentBranchPlacement.position_y,
+              externalPlacement.position_x - currentBranchPlacement.position_x,
+            )
+          }
+        }
+
+        const internalPos = currentViewPositions.get(internal.anchorElementId)
+        if (internalPos) {
+          return Math.atan2(internalPos.position_y - centerY, internalPos.position_x - centerX) + Math.PI
+        }
+
+        return null
+      }).filter((angle): angle is number => angle != null)
+
+      let angle = relatedAngles.length > 0 ? averageAngles(relatedAngles) : stableAngleFromId(rootId)
+      const isDescendantRoot = rootNode.descendantLeafIds.some((leafId) => {
+        const placementViewId = summaryForest.leavesById[leafId]?.endpoint.placementViewId
+        return placementViewId != null && (snapshot.descendantsByViewId[viewId]?.includes(placementViewId) ?? false)
       })
-      if (sideLayouts.length === 0) return []
 
-      const threshold = side === 'left' || side === 'right' ? SIDE_CLUSTER_THRESHOLD : TOP_BOTTOM_CLUSTER_THRESHOLD
-      const clusters: typeof sideLayouts[] = []
-
-      for (const layout of sideLayouts) {
-        const coord = side === 'left' || side === 'right' ? layout.centerY : layout.centerX
-        const cluster = clusters[clusters.length - 1]
-        if (!cluster) {
-          clusters.push([layout])
-          continue
-        }
-        const last = cluster[cluster.length - 1]
-        const lastCoord = side === 'left' || side === 'right' ? last.centerY : last.centerX
-        if (Math.abs(coord - lastCoord) <= threshold) cluster.push(layout)
-        else clusters.push([layout])
-      }
-
-      return clusters.flatMap((cluster) => {
-        const clusterId = `${side}-${clusterCounter++}`
-        const ordered = [...cluster].sort((left, right) => {
-          if (left.contextNode.sortLevel !== right.contextNode.sortLevel) {
-            return left.contextNode.sortLevel - right.contextNode.sortLevel
-          }
-          return left.contextNode.name.localeCompare(right.contextNode.name)
-        })
-
-        const anchorX = cluster.reduce((sum, layout) => sum + layout.centerX, 0) / cluster.length
-        const anchorY = cluster.reduce((sum, layout) => sum + layout.centerY, 0) / cluster.length
-        const clusterExpanded = ordered.length > 1 && expandedAncestorGroups.has(ordered[0].contextNode.id)
-        // A cluster is collapsible only when the lowest-sortLevel node genuinely owns a view
-        // that contains at least one other node's placement view. Siblings that merely happen
-        // to be close in angle but are NOT in an ancestor-descendant view relationship
-        // are laid out along the boundary edge instead of stacking away from it.
-        const hasAncestorDescendant = ordered.length > 1 &&
-          ordered.slice(1).some((layout) => isAncestorContextNode(snapshot, ordered[0].contextNode, layout.contextNode))
-
-        if (side === 'top') {
-          if (!hasAncestorDescendant) {
-            const startX = anchorX - ((ordered.length - 1) * HORIZONTAL_STACK_SPACING) / 2
-            return ordered.map((layout, index) => ({
-              ...layout,
-              clusterId,
-              position: {
-                x: startX + index * HORIZONTAL_STACK_SPACING - CONTEXT_NODE_HALF_W,
-                y: boundaryTop - VERTICAL_BOUNDARY_CLEARANCE - CONTEXT_NODE_HALF_H,
-              },
-            }))
-          }
-          const startY = boundaryTop - VERTICAL_BOUNDARY_CLEARANCE - (ordered.length - 1) * VERTICAL_STACK_SPACING
-          return ordered.map((layout, index) => ({
-            ...layout,
-            clusterId,
-            position: {
-              x: anchorX - CONTEXT_NODE_HALF_W,
-              y: startY + index * VERTICAL_STACK_SPACING - CONTEXT_NODE_HALF_H,
-            },
-          }))
-        }
-
-        if (side === 'bottom') {
-          if (!hasAncestorDescendant) {
-            const startX = anchorX - ((ordered.length - 1) * HORIZONTAL_STACK_SPACING) / 2
-            return ordered.map((layout, index) => ({
-              ...layout,
-              clusterId,
-              position: {
-                x: startX + index * HORIZONTAL_STACK_SPACING - CONTEXT_NODE_HALF_W,
-                y: boundaryBottom + VERTICAL_BOUNDARY_CLEARANCE - CONTEXT_NODE_HALF_H,
-              },
-            }))
-          }
-          const startY = boundaryBottom + VERTICAL_BOUNDARY_CLEARANCE
-          return ordered.map((layout, index) => ({
-            ...layout,
-            clusterId,
-            position: {
-              x: anchorX - CONTEXT_NODE_HALF_W,
-              y: startY + index * VERTICAL_STACK_SPACING + (index > 0 && clusterExpanded ? CHEVRON_V_CLEARANCE : 0) - CONTEXT_NODE_HALF_H,
-            },
-          }))
-        }
-
-        if (side === 'left') {
-          if (!hasAncestorDescendant) {
-            const startY = anchorY - ((ordered.length - 1) * VERTICAL_STACK_SPACING) / 2
-            return ordered.map((layout, index) => ({
-              ...layout,
-              clusterId,
-              position: {
-                x: boundaryLeft - HORIZONTAL_BOUNDARY_CLEARANCE - CONTEXT_NODE_HALF_W,
-                y: startY + index * VERTICAL_STACK_SPACING - CONTEXT_NODE_HALF_H,
-              },
-            }))
-          }
-          const startX = boundaryLeft - HORIZONTAL_BOUNDARY_CLEARANCE - (ordered.length - 1) * HORIZONTAL_STACK_SPACING
-          return ordered.map((layout, index) => ({
-            ...layout,
-            clusterId,
-            position: {
-              x: startX + index * HORIZONTAL_STACK_SPACING - CONTEXT_NODE_HALF_W,
-              y: anchorY - CONTEXT_NODE_HALF_H,
-            },
-          }))
-        }
-
-        // right side
-        if (!hasAncestorDescendant) {
-          const startY = anchorY - ((ordered.length - 1) * VERTICAL_STACK_SPACING) / 2
-          return ordered.map((layout, index) => ({
-            ...layout,
-            clusterId,
-            position: {
-              x: boundaryRight + HORIZONTAL_BOUNDARY_CLEARANCE - CONTEXT_NODE_HALF_W,
-              y: startY + index * VERTICAL_STACK_SPACING - CONTEXT_NODE_HALF_H,
-            },
-          }))
-        }
-        const startX = boundaryRight + HORIZONTAL_BOUNDARY_CLEARANCE
-        return ordered.map((layout, index) => ({
-          ...layout,
-          clusterId,
-          position: {
-            x: startX + index * HORIZONTAL_STACK_SPACING + (index > 0 && clusterExpanded ? CHEVRON_H_CLEARANCE : 0) - CONTEXT_NODE_HALF_W,
-            y: anchorY - CONTEXT_NODE_HALF_H,
-          },
-        }))
+      if (isDescendantRoot) angle = -Math.PI / 2
+      const side = isDescendantRoot ? 'top' : classifySide(angle)
+      rootLayoutsBySide[side].push({
+        nodeId: rootId,
+        centerX: centerX + Math.cos(angle) * radiusX,
+        centerY: centerY + Math.sin(angle) * radiusY,
       })
     })
 
-    // Group nodes that the layout already places in the same spatial cluster.
-    // Within each cluster, the node with the lowest sortLevel (closest ancestor) is the anchor;
-    // all others are children that collapse behind it.
-    const clusterGroups = new Map<string, typeof stackedLayouts>()
-    for (const layout of stackedLayouts) {
-      const group = clusterGroups.get(layout.clusterId) ?? []
-      group.push(layout)
-      clusterGroups.set(layout.clusterId, group)
-    }
+    const summaryLayoutById = buildSummaryLayoutById(visibleSummaryForest, rootLayoutsBySide, boundaryBounds)
 
-    const childToAnchorId = new Map<string, string>()
-    const anchorGroupChildCount = new Map<string, number>()
-
-    for (const [, clusterLayouts] of clusterGroups) {
-      if (clusterLayouts.length < 2) continue
-      const [anchor, ...rest] = clusterLayouts
-      // Only collapse nodes whose placement view is actually inside the view tree rooted
-      // at the anchor element's child view. Siblings that merely cluster spatially are not collapsed.
-      const children = rest.filter((layout) =>
-        isAncestorContextNode(snapshot, anchor.contextNode, layout.contextNode),
-      )
-      if (children.length === 0) continue
-      anchorGroupChildCount.set(anchor.contextNode.id, children.length)
-      for (const child of children) {
-        childToAnchorId.set(child.contextNode.id, anchor.contextNode.id)
-      }
-    }
-
-    const contextNodes: RFNode[] = stackedLayouts
-      .filter(({ contextNode }) => {
-        const anchorId = childToAnchorId.get(contextNode.id)
-        if (anchorId == null) return true
-        return expandedAncestorGroups.has(anchorId)
-      })
-      .map(({ contextNode, position, side }) => {
+    const contextNodes = Object.values(visibleSummaryForest.nodesById).reduce<RFNode[]>((nodes, summaryNode) => {
+        const layout = summaryLayoutById.get(summaryNode.id)
+        if (!layout) return nodes
         const adjustedPosition = applyContextNodePositionOverride(
-          position,
-          side,
-          contextNodePositionOverrides[contextNode.id],
+          layout.position,
+          layout.side,
+          contextNodePositionOverrides[summaryNode.id],
           boundaryBounds,
         )
-        const placements = snapshot.placementsByElementId[contextNode.anchorElementId] ?? []
+        const placements = snapshot.placementsByElementId[summaryNode.elementId] ?? []
         const placementViews = new Map<number, string>()
         placements.forEach((placement) => {
           placementViews.set(placement.viewId, placement.viewName)
         })
         const primaryPlacement = placements[0]?.element
-        const isGroupAnchor = anchorGroupChildCount.has(contextNode.id)
-        const groupChildCount = anchorGroupChildCount.get(contextNode.id) ?? 0
-        const isGroupExpanded = expandedAncestorGroups.has(contextNode.id)
-        return {
-          id: contextNode.id,
+        const representativeLeaf = summaryForest.leavesById[summaryNode.directLeafIds[0] ?? summaryNode.descendantLeafIds[0] ?? '']
+        const representativeElement = primaryPlacement ?? currentElementsById.get(summaryNode.elementId) ?? null
+        const name = representativeElement?.name
+          ?? representativeLeaf?.endpoint.anchorElementName
+          ?? representativeLeaf?.endpoint.actualElementName
+          ?? `Element ${summaryNode.elementId}`
+        const connectors = summaryNodeConnectorLeavesById.get(summaryNode.id) ?? []
+        summaryNodeNameById.set(summaryNode.id, name)
+        if (connectors.length > 0) {
+          summaryNodeDetailsById.set(
+            summaryNode.id,
+            summaryConnectorDetails(
+              `node:${summaryNode.id}`,
+              summaryNode.id,
+              summaryNode.id,
+              name,
+              'Multiple connections',
+              connectors,
+            ),
+          )
+        }
+        const displayElement = representativeElement
+        const isGroupAnchor = summaryNode.childIds.length > 0 && (!summaryNode.isAutoExpanded || summaryNode.isExpanded)
+        nodes.push({
+          id: summaryNode.id,
           type: 'contextNeighborNode',
           position: adjustedPosition,
-          extent: buildContextNodeExtent(side, adjustedPosition, boundaryBounds),
+          extent: buildContextNodeExtent(layout.side, adjustedPosition, boundaryBounds),
           width: CONTEXT_NODE_W,
           height: CONTEXT_NODE_H,
           selectable: false,
           draggable: true,
           connectable: false,
-          zIndex: isGroupAnchor && isGroupExpanded ? 8 : 6,
+          zIndex: isGroupAnchor && summaryNode.visibleChildIds.length > 0 ? 8 : 6,
           data: {
-            element_id: contextNode.anchorElementId,
-            name: contextNode.name,
-            kind: contextNode.kind,
-            description: contextNode.description,
-            technology: contextNode.technology,
-            logo_url: contextNode.logoUrl,
-            technology_connectors: contextNode.technologyConnectors,
+            element_id: summaryNode.elementId,
+            name,
+            kind: displayElement?.kind ?? null,
+            description: displayElement?.description ?? null,
+            technology: displayElement?.technology ?? null,
+            logo_url: displayElement?.logo_url ?? null,
+            technology_connectors: displayElement?.technology_connectors ?? [],
             ownerViewIds: Array.from(placementViews.keys()),
             ownerViewNames: Array.from(placementViews.values()),
             currentViewId: viewId,
-            commonAncestorViewId: contextNode.commonAncestorViewId,
-            commonAncestorViewName: contextNode.commonAncestorViewName,
-            connectorCount: contextNode.connectorCount,
+            commonAncestorViewId: representativeLeaf?.endpoint.commonAncestorViewId ?? null,
+            commonAncestorViewName: representativeLeaf?.endpoint.commonAncestorViewName ?? null,
+            connectorCount: connectors.length,
             onNavigateToView: stableOnNavigateToView,
-            onSelectElement: primaryPlacement
-              ? () => onSelectContextElement(placedElementToLibraryElement(primaryPlacement))
+            onSelectElement: displayElement
+              ? () => onSelectContextElement(placedElementToLibraryElement(displayElement))
               : undefined,
-            onOpenRelationshipDetails: proxyNodeDetailsById.get(contextNode.id)
-              ? () => onSelectProxyDetails(proxyNodeDetailsById.get(contextNode.id) as ProxyConnectorDetails)
+            onOpenRelationshipDetails: summaryNodeDetailsById.get(summaryNode.id)
+              ? () => onSelectProxyDetails(summaryNodeDetailsById.get(summaryNode.id) as ProxyConnectorDetails)
               : undefined,
             isGroupAnchor,
-            groupChildCount,
-            isGroupExpanded,
-            onToggleGroup: isGroupAnchor ? () => onToggleAncestorGroup(contextNode.id) : undefined,
-            side,
+            groupChildCount: summaryNode.hiddenLeafCount,
+            isGroupExpanded: summaryNode.visibleChildIds.length > 0,
+            onToggleGroup: isGroupAnchor ? () => onToggleAncestorGroup(summaryNode.id) : undefined,
+            side: layout.side,
           },
-        }
+        })
+        return nodes
+      }, [])
+
+    const externalGroups = new Map<string, ExternalContextGroup>()
+    externalConnectorLeaves.forEach((leaf) => {
+      const external = leafExternalEndpoint(leaf)
+      const internal = leafInternalEndpoint(leaf)
+      if (!external || !internal) return
+      const leafId = contextSummaryLeafId(external)
+      const contextNodeId = visibleSummaryForest.leafToVisibleNodeId[leafId]
+      if (!contextNodeId) return
+      const currentNodeId = String(internal.anchorElementId)
+      const [source, target] = contextNodeId <= currentNodeId ? [contextNodeId, currentNodeId] : [currentNodeId, contextNodeId]
+      const pairKey = canonicalNodePairKey(source, target)
+      const group = externalGroups.get(pairKey)
+      if (group) group.connectors.push(leaf)
+      else externalGroups.set(pairKey, {
+        pairKey,
+        source,
+        target,
+        contextNodeId,
+        currentNodeId,
+        connectors: [leaf],
       })
+    })
+
+    const visibleExternalGroups = budgetExternalContextGroups(Array.from(externalGroups.values()), visibleSummaryForest, settings)
+
+    const externalContextEdges: RFEdge[] = visibleExternalGroups.map((group) => ({
+      id: `summary-proxy:${group.pairKey}`,
+      source: group.source,
+      target: group.target,
+      type: 'proxyConnectorEdge',
+      animated: false,
+      selectable: true,
+      updatable: false,
+      data: {
+        isProxy: true,
+        proxyKey: `summary:${group.pairKey}`,
+        details: summaryConnectorDetails(
+          `summary:${group.pairKey}`,
+          group.source,
+          group.target,
+          summaryNodeNameById.get(group.source) ?? currentNodeNameById.get(group.source) ?? group.source,
+          summaryNodeNameById.get(group.target) ?? currentNodeNameById.get(group.target) ?? group.target,
+          group.connectors,
+        ),
+      },
+      style: {
+        stroke: 'rgba(255, 255, 255, 0.2)',
+        strokeWidth: 2,
+      },
+    }))
 
     const seenCollapsedPairs = new Set<string>()
     const hiddenProxyCountsByPair: Record<string, number> = {}
     const hiddenProxyDetailsByPair: Record<string, ProxyConnectorDetails> = {}
-    const contextConnectors: RFEdge[] = proxyConnectors.flatMap((connector) => {
-      let sourceId = connector.sourceAnchorId
-      let targetId = connector.targetAnchorId
-
-      const sourceAnchor = childToAnchorId.get(sourceId)
-      if (sourceAnchor != null && !expandedAncestorGroups.has(sourceAnchor)) sourceId = sourceAnchor
-
-      const targetAnchor = childToAnchorId.get(targetId)
-      if (targetAnchor != null && !expandedAncestorGroups.has(targetAnchor)) targetId = targetAnchor
-
-      if (sourceId === targetId) return []
-
-      const pairKey = canonicalNodePairKey(sourceId, targetId)
+    const internalProxyEdges: RFEdge[] = internalOnlyProxyConnectors.flatMap((connector) => {
+      if (connector.sourceAnchorId === connector.targetAnchorId) return []
+      const pairKey = canonicalNodePairKey(connector.sourceAnchorId, connector.targetAnchorId)
       if (directConnectorPairs.has(pairKey)) {
         hiddenProxyCountsByPair[pairKey] = (hiddenProxyCountsByPair[pairKey] ?? 0) + connector.details.count
         hiddenProxyDetailsByPair[pairKey] = mergeHiddenProxyDetails(
@@ -654,8 +756,8 @@ export function useViewContextNeighbours({
           {
             ...connector.details,
             key: `hidden:${pairKey}`,
-            sourceAnchorId: sourceId,
-            targetAnchorId: targetId,
+            sourceAnchorId: connector.sourceAnchorId,
+            targetAnchorId: connector.targetAnchorId,
           },
         )
         return []
@@ -665,8 +767,8 @@ export function useViewContextNeighbours({
 
       return [{
         id: `proxy:${connector.key}`,
-        source: sourceId,
-        target: targetId,
+        source: connector.sourceAnchorId,
+        target: connector.targetAnchorId,
         type: 'proxyConnectorEdge',
         animated: false,
         selectable: true,
@@ -683,8 +785,10 @@ export function useViewContextNeighbours({
       }]
     })
 
+    const contextConnectors: RFEdge[] = [...externalContextEdges, ...internalProxyEdges]
+
     return {
-      contextNodes: [ContextBoundaryElement, ...contextNodes],
+      contextNodes: contextNodes.length > 0 ? [ContextBoundaryElement, ...contextNodes] : contextNodes,
       contextConnectors,
       proxyConnectorDetailsByKey,
       hiddenProxyCountsByPair,

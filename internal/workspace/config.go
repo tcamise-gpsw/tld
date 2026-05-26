@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ConfigDir returns the path to the global configuration directory.
@@ -95,11 +97,54 @@ type ServeConfig struct {
 }
 
 type WatchEmbeddingConfig struct {
-	Provider        string  `yaml:"provider"`
-	Endpoint        string  `yaml:"endpoint"`
-	Model           string  `yaml:"model"`
-	Dimension       int     `yaml:"dimension"`
-	HealthThreshold float64 `yaml:"health_threshold"`
+	Provider        string       `yaml:"provider"`
+	Endpoint        EndpointList `yaml:"endpoint"`
+	Model           string       `yaml:"model"`
+	Dimension       int          `yaml:"dimension"`
+	RuntimePath     string       `yaml:"runtime_path"`
+	HealthThreshold float64      `yaml:"health_threshold"`
+	MaxTokens       int          `yaml:"max_tokens"`
+}
+
+type EndpointList []string
+
+func (e EndpointList) String() string {
+	return strings.Join(e.Values(), ",")
+}
+
+func (e EndpointList) Values() []string {
+	out := make([]string, 0, len(e))
+	for _, value := range e {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, strings.TrimRight(part, "/"))
+			}
+		}
+	}
+	return out
+}
+
+func (e *EndpointList) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		return nil
+	}
+	var values []string
+	switch value.Kind {
+	case yaml.SequenceNode:
+		for _, item := range value.Content {
+			if item.Kind != yaml.ScalarNode {
+				return fmt.Errorf("endpoint entries must be strings")
+			}
+			values = append(values, item.Value)
+		}
+	case yaml.ScalarNode:
+		values = append(values, value.Value)
+	default:
+		return fmt.Errorf("endpoint must be a string or list of strings")
+	}
+	*e = EndpointList(values).Values()
+	return nil
 }
 
 type WatchThresholdConfig struct {
@@ -223,7 +268,7 @@ func DefaultConfig() *Config {
 			},
 			Embedding: WatchEmbeddingConfig{
 				Provider:        "local-lexical",
-				Endpoint:        "http://127.0.0.1:8000/v1/embeddings",
+				Endpoint:        EndpointList{"http://127.0.0.1:8000/v1/embeddings"},
 				Model:           "embeddinggemma-300m-4bit",
 				HealthThreshold: 0.70,
 			},

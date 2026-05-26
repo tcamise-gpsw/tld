@@ -31,8 +31,8 @@ import (
 
 func NewWatchCmd() *cobra.Command {
 	var host, port, dataDirFlag string
-	var embeddingProvider, embeddingEndpoint, embeddingModel string
-	var embeddingDimension int
+	var embeddingProvider, embeddingEndpoint, embeddingModel, embeddingRuntimePath string
+	var embeddingDimension, embeddingMaxTokens int
 	var languageFlags []string
 	var watcherMode, pollInterval, debounce string
 	var maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup int
@@ -49,20 +49,22 @@ func NewWatchCmd() *cobra.Command {
 			}
 			if dryRun {
 				return runWatchDiff(cmd, path, watchDiffOptions{
-					DataDirFlag:        dataDirFlag,
-					EmbeddingProvider:  embeddingProvider,
-					EmbeddingEndpoint:  embeddingEndpoint,
-					EmbeddingModel:     embeddingModel,
-					EmbeddingDimension: embeddingDimension,
-					LanguageFlags:      languageFlags,
-					MaxElements:        maxElements,
-					MaxConnectors:      maxConnectors,
-					MaxIncoming:        maxIncoming,
-					MaxOutgoing:        maxOutgoing,
-					MaxExpandedGroup:   maxExpandedGroup,
-					Rescan:             rescan,
-					FailOnDrift:        failOnDrift,
-					GroupDiffs:         true,
+					DataDirFlag:          dataDirFlag,
+					EmbeddingProvider:    embeddingProvider,
+					EmbeddingEndpoint:    embeddingEndpoint,
+					EmbeddingModel:       embeddingModel,
+					EmbeddingDimension:   embeddingDimension,
+					EmbeddingMaxTokens:   embeddingMaxTokens,
+					EmbeddingRuntimePath: embeddingRuntimePath,
+					LanguageFlags:        languageFlags,
+					MaxElements:          maxElements,
+					MaxConnectors:        maxConnectors,
+					MaxIncoming:          maxIncoming,
+					MaxOutgoing:          maxOutgoing,
+					MaxExpandedGroup:     maxExpandedGroup,
+					Rescan:               rescan,
+					FailOnDrift:          failOnDrift,
+					GroupDiffs:           true,
 				})
 			}
 			cfg, err := workspace.LoadGlobalConfig()
@@ -95,7 +97,7 @@ func NewWatchCmd() *cobra.Command {
 				}
 				logger.InfoContext(cmd.Context(), "watch.command.completed", "elapsed", time.Since(commandStarted).Round(time.Millisecond).String())
 			}()
-			embeddingCfg := resolveEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension)
+			embeddingCfg := resolveEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension, embeddingMaxTokens, embeddingRuntimePath)
 			watchSettings := resolveWatchSettings(cfg, languageFlags, watcherMode, pollInterval, debounce, maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup)
 			logger.InfoContext(cmd.Context(), "watch.command.started",
 				"path", path,
@@ -309,6 +311,7 @@ func NewWatchCmd() *cobra.Command {
 	c.Flags().StringVar(&embeddingEndpoint, "embedding-endpoint", "", "embedding endpoint for representation")
 	c.Flags().StringVar(&embeddingModel, "embedding-model", "", "embedding model for representation")
 	c.Flags().IntVar(&embeddingDimension, "embedding-dimension", 0, "embedding vector dimension")
+	c.Flags().IntVar(&embeddingMaxTokens, "embedding-max-tokens", 0, "maximum input token length for embedding model")
 	c.Flags().StringSliceVar(&languageFlags, "language", nil, "source language to watch (repeatable)")
 	c.Flags().StringVar(&watcherMode, "watcher", "", "watcher backend: auto, fsnotify, or poll")
 	c.Flags().StringVar(&pollInterval, "poll-interval", "", "poll interval (for example 1s)")
@@ -416,18 +419,50 @@ func confirmLSPProceed(cmd *cobra.Command, status watch.LSPStatus) error {
 	}
 	term.Warn(cmd.OutOrStdout(), "Some requested language servers are unavailable or unhealthy. Reference resolution quality will be lower.")
 	term.Hint(cmd.OutOrStdout(), "tld will fall back to conservative name matching, which may drop ambiguous connectors.")
+	hasUnavailable := false
+	hasFailed := false
 	for _, server := range watch.LSPDegradedServers(status) {
-		detail := server.Command
-		if detail == "" {
-			detail = server.Language
+		language := server.Language
+		if len(language) > 0 {
+			language = strings.ToUpper(language[0:1]) + language[1:]
 		}
-		if server.LastError != "" {
-			detail += ": " + server.LastError
+
+		statusDesc := ""
+		switch server.State {
+		case "unavailable":
+			statusDesc = "not found in PATH"
+			hasUnavailable = true
+		case "failed":
+			hasFailed = true
+			if server.RestartCount > 0 {
+				statusDesc = "crashed"
+			} else {
+				statusDesc = "initialization failed"
+			}
+		case "memory_limited":
+			statusDesc = "memory limit exceeded"
+			hasFailed = true
+		default:
+			statusDesc = server.State
+		}
+
+		detail := fmt.Sprintf("%s (%s): %s", language, server.Command, statusDesc)
+		if server.Command == "" {
+			detail = fmt.Sprintf("%s: %s", language, statusDesc)
 		}
 		term.Hint(cmd.OutOrStdout(), detail)
+		if server.LastError != "" {
+			term.Hint(cmd.OutOrStdout(), "    Error: "+server.LastError)
+		}
 	}
-	term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server, ensure it is on PATH, or disable LSP with `tld config set watch.lsp.enabled false`.")
-	term.Hint(cmd.OutOrStdout(), "Examples: gopls, pyright-langserver, rust-analyzer, jdtls, typescript-language-server, clangd.")
+
+	if hasUnavailable {
+		term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server(s) or ensure they are on your PATH.")
+	}
+	if hasFailed {
+		term.Hint(cmd.OutOrStdout(), "Remediation: check your project configuration or try increasing memory limits.")
+	}
+	term.Hint(cmd.OutOrStdout(), "Alternatively, disable LSP with `tld config set watch.lsp.enabled false`.")
 	if !isInteractiveInput(cmd.InOrStdin()) {
 		term.Hint(cmd.OutOrStdout(), "Non-interactive input detected; continuing without confirmation.")
 		return nil
@@ -623,8 +658,8 @@ func newScanCmd() *cobra.Command {
 
 func newRepresentCmd() *cobra.Command {
 	var dataDirFlag string
-	var embeddingProvider, embeddingEndpoint, embeddingModel string
-	var embeddingDimension int
+	var embeddingProvider, embeddingEndpoint, embeddingModel, embeddingRuntimePath string
+	var embeddingDimension, embeddingMaxTokens int
 	var languageFlags []string
 	var jsonOut, rescan bool
 	var maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup int
@@ -648,7 +683,7 @@ func newRepresentCmd() *cobra.Command {
 			if err := os.MkdirAll(dataDir, 0o755); err != nil {
 				return fmt.Errorf("create data dir: %w", err)
 			}
-			embeddingCfg := resolveEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension)
+			embeddingCfg := resolveEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension, embeddingMaxTokens, embeddingRuntimePath)
 			watchSettings := resolveWatchSettings(cfg, languageFlags, "", "", "", maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup)
 			progress := newCLIProgress(cmd.ErrOrStderr())
 			if embeddingCfg.Provider != "none" {
@@ -700,6 +735,8 @@ func newRepresentCmd() *cobra.Command {
 	c.Flags().StringVar(&embeddingEndpoint, "embedding-endpoint", "", "embedding endpoint for representation")
 	c.Flags().StringVar(&embeddingModel, "embedding-model", "", "embedding model for representation")
 	c.Flags().IntVar(&embeddingDimension, "embedding-dimension", 0, "embedding vector dimension")
+	c.Flags().IntVar(&embeddingMaxTokens, "embedding-max-tokens", 0, "maximum input token length for embedding model")
+	c.Flags().StringVar(&embeddingRuntimePath, "embedding-runtime-path", "", "ONNX Runtime shared library path for local embedding providers")
 	c.Flags().StringSliceVar(&languageFlags, "language", nil, "source language to scan (repeatable)")
 	c.Flags().IntVar(&maxElements, "max-elements-per-view", 0, "maximum generated elements per view")
 	c.Flags().IntVar(&maxConnectors, "max-connectors-per-view", 0, "maximum generated connectors per view")
@@ -713,8 +750,8 @@ func newRepresentCmd() *cobra.Command {
 
 func newDiffCmd() *cobra.Command {
 	var dataDirFlag string
-	var embeddingProvider, embeddingEndpoint, embeddingModel string
-	var embeddingDimension int
+	var embeddingProvider, embeddingEndpoint, embeddingModel, embeddingRuntimePath string
+	var embeddingDimension, embeddingMaxTokens int
 	var languageFlags []string
 	var failOnDrift bool
 	var maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup int
@@ -728,18 +765,20 @@ func newDiffCmd() *cobra.Command {
 				path = args[0]
 			}
 			return runWatchDiff(cmd, path, watchDiffOptions{
-				DataDirFlag:        dataDirFlag,
-				EmbeddingProvider:  embeddingProvider,
-				EmbeddingEndpoint:  embeddingEndpoint,
-				EmbeddingModel:     embeddingModel,
-				EmbeddingDimension: embeddingDimension,
-				LanguageFlags:      languageFlags,
-				MaxElements:        maxElements,
-				MaxConnectors:      maxConnectors,
-				MaxIncoming:        maxIncoming,
-				MaxOutgoing:        maxOutgoing,
-				MaxExpandedGroup:   maxExpandedGroup,
-				FailOnDrift:        failOnDrift,
+				DataDirFlag:          dataDirFlag,
+				EmbeddingProvider:    embeddingProvider,
+				EmbeddingEndpoint:    embeddingEndpoint,
+				EmbeddingModel:       embeddingModel,
+				EmbeddingDimension:   embeddingDimension,
+				EmbeddingMaxTokens:   embeddingMaxTokens,
+				EmbeddingRuntimePath: embeddingRuntimePath,
+				LanguageFlags:        languageFlags,
+				MaxElements:          maxElements,
+				MaxConnectors:        maxConnectors,
+				MaxIncoming:          maxIncoming,
+				MaxOutgoing:          maxOutgoing,
+				MaxExpandedGroup:     maxExpandedGroup,
+				FailOnDrift:          failOnDrift,
 			})
 		},
 	}
@@ -748,6 +787,8 @@ func newDiffCmd() *cobra.Command {
 	c.Flags().StringVar(&embeddingEndpoint, "embedding-endpoint", "", "embedding endpoint for representation")
 	c.Flags().StringVar(&embeddingModel, "embedding-model", "", "embedding model for representation")
 	c.Flags().IntVar(&embeddingDimension, "embedding-dimension", 0, "embedding vector dimension")
+	c.Flags().IntVar(&embeddingMaxTokens, "embedding-max-tokens", 0, "maximum input token length for embedding model")
+	c.Flags().StringVar(&embeddingRuntimePath, "embedding-runtime-path", "", "ONNX Runtime shared library path for local embedding providers")
 	c.Flags().StringSliceVar(&languageFlags, "language", nil, "source language to scan (repeatable)")
 	c.Flags().IntVar(&maxElements, "max-elements-per-view", 0, "maximum generated elements per view")
 	c.Flags().IntVar(&maxConnectors, "max-connectors-per-view", 0, "maximum generated connectors per view")
@@ -759,20 +800,22 @@ func newDiffCmd() *cobra.Command {
 }
 
 type watchDiffOptions struct {
-	DataDirFlag        string
-	EmbeddingProvider  string
-	EmbeddingEndpoint  string
-	EmbeddingModel     string
-	EmbeddingDimension int
-	LanguageFlags      []string
-	MaxElements        int
-	MaxConnectors      int
-	MaxIncoming        int
-	MaxOutgoing        int
-	MaxExpandedGroup   int
-	Rescan             bool
-	FailOnDrift        bool
-	GroupDiffs         bool
+	DataDirFlag          string
+	EmbeddingProvider    string
+	EmbeddingEndpoint    string
+	EmbeddingModel       string
+	EmbeddingDimension   int
+	EmbeddingMaxTokens   int
+	EmbeddingRuntimePath string
+	LanguageFlags        []string
+	MaxElements          int
+	MaxConnectors        int
+	MaxIncoming          int
+	MaxOutgoing          int
+	MaxExpandedGroup     int
+	Rescan               bool
+	FailOnDrift          bool
+	GroupDiffs           bool
 }
 
 type watchDiffPayload struct {
@@ -821,7 +864,7 @@ func runWatchDiff(cmd *cobra.Command, path string, opts watchDiffOptions) error 
 		}
 		logger.InfoContext(cmd.Context(), "watch.diff.completed", "elapsed", time.Since(started).Round(time.Millisecond).String())
 	}()
-	embeddingCfg := resolveEmbeddingConfig(cfg, opts.EmbeddingProvider, opts.EmbeddingEndpoint, opts.EmbeddingModel, opts.EmbeddingDimension)
+	embeddingCfg := resolveEmbeddingConfig(cfg, opts.EmbeddingProvider, opts.EmbeddingEndpoint, opts.EmbeddingModel, opts.EmbeddingDimension, opts.EmbeddingMaxTokens, opts.EmbeddingRuntimePath)
 	watchSettings := resolveWatchSettings(cfg, opts.LanguageFlags, "", "", "", opts.MaxElements, opts.MaxConnectors, opts.MaxIncoming, opts.MaxOutgoing, opts.MaxExpandedGroup)
 	logger.InfoContext(cmd.Context(), "watch.diff.started", "path", path, "data_dir", dataDir, "rescan", opts.Rescan, "fail_on_drift", opts.FailOnDrift, "group_diffs", opts.GroupDiffs, "embedding_provider", embeddingCfg.Provider, "embedding_model", embeddingCfg.Model, "languages", strings.Join(watchSettings.Languages, ","))
 	sqliteStore, err := store.OpenLocal(cmd.Context(), cfg, dataDir, assets.FS)
@@ -888,8 +931,8 @@ func hasWatchDriftDiffs(diffs []watch.RepresentationDiff) bool {
 	return false
 }
 
-func resolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int) watch.EmbeddingConfig {
-	return watch.ResolveEmbeddingConfig(cfg, provider, endpoint, model, dimension)
+func resolveEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int, maxTokens int, runtimePath ...string) watch.EmbeddingConfig {
+	return watch.ResolveEmbeddingConfig(cfg, provider, endpoint, model, dimension, maxTokens, runtimePath...)
 }
 
 func resolveWatchSettings(cfg *workspace.Config, languages []string, watcherMode, pollInterval, debounce string, maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup int) watch.Settings {

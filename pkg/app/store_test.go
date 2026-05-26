@@ -510,3 +510,81 @@ func openAppStore(t *testing.T) *Store {
 	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
+
+func TestStoreCreateConnectorSemanticDeduplicationAndPlacementConnectorEnrichment(t *testing.T) {
+	store := openAppStore(t)
+	ctx := context.Background()
+
+	view2, err := store.CreateView(ctx, "View 2", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e1, err := store.CreateElement(ctx, LibraryElement{Name: "E1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, err := store.CreateElement(ctx, LibraryElement{Name: "E2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	label := "calls"
+	rel := "gRPC"
+	conn, err := store.CreateConnector(ctx, Connector{
+		ViewID:          view2.ID,
+		SourceElementID: e1.ID,
+		TargetElementID: e2.ID,
+		Label:           &label,
+		Relationship:    &rel,
+		Style:           "bezier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dupConn, err := store.CreateConnector(ctx, Connector{
+		ViewID:          view2.ID,
+		SourceElementID: e1.ID,
+		TargetElementID: e2.ID,
+		Label:           &label,
+		Relationship:    &rel,
+		Style:           "bezier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dupConn.ID != conn.ID {
+		t.Fatalf("Expected duplicate CreateConnector call to return existing ID %d, got %d", conn.ID, dupConn.ID)
+	}
+
+	if _, err := store.AddPlacement(ctx, 1, e1.ID, 100, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	conns1, err := store.Connectors(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conns1) != 0 {
+		t.Fatalf("Expected 0 connectors, got %d", len(conns1))
+	}
+
+	if _, err := store.AddPlacement(ctx, 1, e2.ID, 250, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	conns1, err = store.Connectors(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conns1) != 1 {
+		t.Fatalf("Expected 1 auto-included connector, got %d", len(conns1))
+	}
+	if conns1[0].SourceElementID != e1.ID || conns1[0].TargetElementID != e2.ID {
+		t.Fatalf("Unexpected connector source/target: %+v", conns1[0])
+	}
+	if conns1[0].Label == nil || *conns1[0].Label != "calls" {
+		t.Fatalf("Unexpected connector label: %v", conns1[0].Label)
+	}
+}
