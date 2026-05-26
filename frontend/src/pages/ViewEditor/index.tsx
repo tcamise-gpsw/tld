@@ -7,7 +7,6 @@ import { SafeBackground } from '../../components/SafeBackground'
 import ReactFlow, {
   BackgroundVariant,
   ConnectionMode,
-  Controls,
   PanOnScrollMode,
   ReactFlowProvider,
   useReactFlow,
@@ -130,6 +129,13 @@ const VIEW_EDITOR_EMPTY_EXTENT_RATIO = 0.75
 const VIEW_EDITOR_PAN_MARGIN_RATIO = 0.25
 const VIEW_EDITOR_PAN_MARGIN_MIN = 180
 const VIEW_EDITOR_PAN_MARGIN_MAX = 720
+const VIEW_EDITOR_MARKDOWN_DEFAULT_WIDTH = 540
+const VIEW_EDITOR_MARKDOWN_MIN_WIDTH = 360
+const VIEW_EDITOR_MARKDOWN_MIN_WIDTH_MOBILE = 280
+const VIEW_EDITOR_CANVAS_MIN_WIDTH = 420
+const VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE = 260
+const VIEW_EDITOR_MARKDOWN_RESIZE_HANDLE_WIDTH = 10
+const VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR = '--topbar-notch-left'
 const SNAP_GRID: [number, number] = [30, 30]
 
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
@@ -253,6 +259,17 @@ function viewSnapshotsEqual(left: ViewMetadataSnapshot, right: ViewMetadataSnaps
 function initialViewMarkdown(name?: string | null) {
   const trimmed = name?.trim()
   return trimmed ? `# ${trimmed}\n\n` : ''
+}
+
+function clampMarkdownPaneWidth(width: number, totalWidth: number, isMobileLayout: boolean) {
+  const minMarkdownWidth = isMobileLayout
+    ? VIEW_EDITOR_MARKDOWN_MIN_WIDTH_MOBILE
+    : VIEW_EDITOR_MARKDOWN_MIN_WIDTH
+  const minCanvasWidth = isMobileLayout
+    ? VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE
+    : VIEW_EDITOR_CANVAS_MIN_WIDTH
+  const maxMarkdownWidth = Math.max(minMarkdownWidth, totalWidth - minCanvasWidth)
+  return Math.min(Math.max(width, minMarkdownWidth), maxMarkdownWidth)
 }
 
 function nodesMatchCurrentView(nodes: RFNode[], elements: PlacedElement[], viewId: number | null) {
@@ -743,7 +760,64 @@ function ViewEditorInner({
   const [isMarkdownLoading, setIsMarkdownLoading] = useState(false)
   const [isMarkdownMutating, setIsMarkdownMutating] = useState(false)
   const [isMarkdownSaving, setIsMarkdownSaving] = useState(false)
+  const [isMarkdownResizing, setIsMarkdownResizing] = useState(false)
+  const [markdownPaneWidth, setMarkdownPaneWidth] = useState(() => {
+    if (typeof window === 'undefined') return VIEW_EDITOR_MARKDOWN_DEFAULT_WIDTH
+    const stored = Number.parseFloat(window.localStorage.getItem('diag:markdownPaneWidth') ?? '')
+    return Number.isFinite(stored) && stored > 0 ? stored : VIEW_EDITOR_MARKDOWN_DEFAULT_WIDTH
+  })
   const markdownRequestSeqRef = useRef(0)
+  const editorSplitRef = useRef<HTMLDivElement | null>(null)
+  const markdownResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  const getClampedMarkdownPaneWidth = useCallback((nextWidth: number) => {
+    const totalWidth = editorSplitRef.current?.clientWidth ?? window.innerWidth
+    return clampMarkdownPaneWidth(nextWidth, totalWidth, isMobileLayout)
+  }, [isMobileLayout])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('diag:markdownPaneWidth', String(markdownPaneWidth))
+  }, [markdownPaneWidth])
+
+  useEffect(() => {
+    if (!isMarkdownOpen) return
+
+    const handleResize = () => {
+      setMarkdownPaneWidth((current) => getClampedMarkdownPaneWidth(current))
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [getClampedMarkdownPaneWidth, isMarkdownOpen])
+
+  useEffect(() => {
+    if (!isMarkdownResizing) return
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = markdownResizeStateRef.current
+      if (!resizeState) return
+      event.preventDefault()
+      const delta = resizeState.startX - event.clientX
+      setMarkdownPaneWidth(getClampedMarkdownPaneWidth(resizeState.startWidth + delta))
+    }
+
+    const stopResizing = () => {
+      markdownResizeStateRef.current = null
+      setIsMarkdownResizing(false)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+    }
+  }, [getClampedMarkdownPaneWidth, isMarkdownResizing])
 
   const loadViewMarkdown = useCallback(async (targetViewId: number, options: { silent?: boolean } = {}) => {
     const requestSeq = ++markdownRequestSeqRef.current
@@ -799,6 +873,16 @@ function ViewEditorInner({
 
   const markdownDirty = viewMarkdownContent !== loadedViewMarkdownContent
   const markdownBusy = isMarkdownLoading || isMarkdownMutating || isMarkdownSaving
+
+  const handleMarkdownResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isMarkdownOpen) return
+    markdownResizeStateRef.current = {
+      startX: event.clientX,
+      startWidth: markdownPaneWidth,
+    }
+    setIsMarkdownResizing(true)
+    event.preventDefault()
+  }, [isMarkdownOpen, markdownPaneWidth])
 
   const handleCreateManagedMarkdown = useCallback(async (options: { fileName?: string; initialContent?: string; openEditor?: boolean } = {}) => {
     if (!canEdit || viewId === null) return
@@ -1921,7 +2005,6 @@ function ViewEditorInner({
     clampedRevealProgress,
     applyDemoRevealViewport,
     disableImportExport,
-    hideFlowControls,
   } = useDemoRevealViewport({
     demoOptions,
     containerRef,
@@ -2095,6 +2178,37 @@ function ViewEditorInner({
     const prev = html.style.overscrollBehaviorX
     html.style.overscrollBehaviorX = 'none'
     return () => { html.style.overscrollBehaviorX = prev }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const root = document.documentElement
+    const target = containerRef.current
+    if (!target) {
+      root.style.removeProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR)
+      return
+    }
+
+    const updateTopbarNotchPosition = () => {
+      const rect = target.getBoundingClientRect()
+      root.style.setProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR, `${rect.left + (rect.width / 2)}px`)
+    }
+
+    updateTopbarNotchPosition()
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => updateTopbarNotchPosition())
+      : null
+
+    resizeObserver?.observe(target)
+    window.addEventListener('resize', updateTopbarNotchPosition)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', updateTopbarNotchPosition)
+      root.style.removeProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR)
+    }
   }, [])
 
   useEffect(() => {
@@ -2371,10 +2485,11 @@ function ViewEditorInner({
       selectedElement, selectedConnector: selectedEdge
     }}>
       <Box h="100%" display="flex" flexDir="column">
-        <Flex flex={1} overflow="hidden">
+        <Flex ref={editorSplitRef} flex={1} overflow="hidden">
           <Box
             ref={containerRef}
-            flex={1}
+            flex="1 1 auto"
+            minW={0}
             position="relative"
             onDrop={onDrop}
             onDragOver={onDragOver}
@@ -2503,9 +2618,6 @@ function ViewEditorInner({
                 zoomOnScroll={false} zoomOnPinch
               >
                 <SafeBackground variant={BackgroundVariant.Dots} gap={16} color="#2D3748" size={1} />
-                {!hideFlowControls && (
-                  <Controls position="bottom-right" className="glass" style={{ overflow: 'hidden', margin: '1rem' }} />
-                )}
               </ReactFlow>
               {canvasOverlaySlot && (
                 <Box position="absolute" inset={0} pointerEvents="none" zIndex={10}>
@@ -2732,6 +2844,60 @@ function ViewEditorInner({
               hideExpandExtras={demoOptions?.hideExpandExtras}
             />
           </Box>
+
+          {isMarkdownOpen && (
+            <>
+              <Box
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize markdown editor"
+                flex="0 0 auto"
+                w={`${VIEW_EDITOR_MARKDOWN_RESIZE_HANDLE_WIDTH}px`}
+                cursor="col-resize"
+                position="relative"
+                onPointerDown={handleMarkdownResizeStart}
+                bg={isMarkdownResizing ? 'whiteAlpha.100' : 'transparent'}
+                _hover={{ bg: 'whiteAlpha.50' }}
+                _active={{ bg: 'whiteAlpha.100' }}
+              >
+                <Box
+                  position="absolute"
+                  top={0}
+                  bottom={0}
+                  left="50%"
+                  transform="translateX(-50%)"
+                  w="1px"
+                  bg="whiteAlpha.100"
+                />
+              </Box>
+
+              <Box
+                flex="0 0 auto"
+                w={`${markdownPaneWidth}px`}
+                minW={`${isMobileLayout ? VIEW_EDITOR_MARKDOWN_MIN_WIDTH_MOBILE : VIEW_EDITOR_MARKDOWN_MIN_WIDTH}px`}
+                maxW={`calc(100% - ${isMobileLayout ? VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE : VIEW_EDITOR_CANVAS_MIN_WIDTH}px)`}
+                minH={0}
+                borderLeft="1px solid"
+                borderColor="whiteAlpha.100"
+              >
+                <ViewMarkdownPanel
+                  isOpen={isMarkdownOpen}
+                  onClose={() => setIsMarkdownOpen(false)}
+                  viewName={view?.name}
+                  markdown={viewMarkdown}
+                  content={viewMarkdownContent}
+                  syncToken={viewMarkdownSyncToken}
+                  canEdit={canEdit}
+                  isLoading={isMarkdownLoading}
+                  isSaving={isMarkdownSaving}
+                  isDirty={markdownDirty}
+                  onChange={setViewMarkdownContent}
+                  onSave={handleSaveMarkdown}
+                  onReload={handleReloadMarkdown}
+                />
+              </Box>
+            </>
+          )}
         </Flex>
 
         <ElementLibrary
@@ -2803,22 +2969,6 @@ function ViewEditorInner({
               handleConnectorDeleted(edgeId, ownerViewId)
             }).catch(() => { /* intentionally empty */ })
           }}
-        />
-
-        <ViewMarkdownPanel
-          isOpen={isMarkdownOpen}
-          onClose={() => setIsMarkdownOpen(false)}
-          viewName={view?.name}
-          markdown={viewMarkdown}
-          content={viewMarkdownContent}
-          syncToken={viewMarkdownSyncToken}
-          canEdit={canEdit}
-          isLoading={isMarkdownLoading}
-          isSaving={isMarkdownSaving}
-          isDirty={markdownDirty}
-          onChange={setViewMarkdownContent}
-          onSave={handleSaveMarkdown}
-          onReload={handleReloadMarkdown}
         />
 
         <ViewPanel

@@ -10,19 +10,19 @@ import (
 )
 
 type ViewTreeNode struct {
-	ID             int64          `json:"id"`
-	OwnerElementID *int64         `json:"owner_element_id"`
-	Name           string         `json:"name"`
-	Description    *string        `json:"description"`
-	LevelLabel     *string        `json:"level_label"`
+	ID             int64                 `json:"id"`
+	OwnerElementID *int64                `json:"owner_element_id"`
+	Name           string                `json:"name"`
+	Description    *string               `json:"description"`
+	LevelLabel     *string               `json:"level_label"`
 	Markdown       *ViewMarkdownDocument `json:"markdown,omitempty"`
-	Tags           []string       `json:"tags"`
-	Level          int            `json:"level"`
-	Depth          int            `json:"depth"`
-	CreatedAt      string         `json:"created_at"`
-	UpdatedAt      string         `json:"updated_at"`
-	ParentViewID   *int64         `json:"parent_view_id"`
-	Children       []ViewTreeNode `json:"children"`
+	Tags           []string              `json:"tags"`
+	Level          int                   `json:"level"`
+	Depth          int                   `json:"depth"`
+	CreatedAt      string                `json:"created_at"`
+	UpdatedAt      string                `json:"updated_at"`
+	ParentViewID   *int64                `json:"parent_view_id"`
+	Children       []ViewTreeNode        `json:"children"`
 }
 
 type ViewSummary struct {

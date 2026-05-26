@@ -9,7 +9,6 @@ import type {
   LibraryElement,
   PlacedElement,
   Tag,
-  TechnologyConnector,
   View,
   ViewConnector,
   ViewMarkdownDocument,
@@ -59,42 +58,17 @@ import {
 } from '@buf/tldiagramcom_diagram.bufbuild_es/diag/v1/org_service_pb'
 import { transport } from './transport'
 import { apiUrl, fetchApiAsset } from '../config/runtime'
+import {
+  normalizeConnectorRouteStyle,
+  normalizeLogoUrl,
+  normalizeTechnologyConnectors,
+} from './client-normalize'
 
-const CONNECTOR_ROUTE_STYLES = new Set(['bezier', 'straight', 'step', 'smoothstep'])
-
-export function normalizeConnectorRouteStyle(style: unknown): string {
-  return typeof style === 'string' && CONNECTOR_ROUTE_STYLES.has(style) ? style : 'bezier'
-}
-
-type ProtoTechnologyLink = {
-  type?: string
-  slug?: string
-  label?: string
-  is_primary_icon?: boolean
-  isPrimaryIcon?: boolean
-}
-
-export function normalizeTechnologyConnectors(value: unknown): TechnologyConnector[] {
-  return ((value ?? []) as ProtoTechnologyLink[]).map(tl => ({
-    type: (tl.type ?? 'custom') as TechnologyConnector['type'],
-    slug: tl.slug,
-    label: tl.label ?? '',
-    is_primary_icon: !!(tl.is_primary_icon ?? tl.isPrimaryIcon),
-  }))
-}
-
-export function normalizeLogoUrl(
-  logoUrl: unknown,
-  technologyConnectors: TechnologyConnector[],
-): string | null {
-  if (logoUrl != null) return logoUrl as string
-  const primary = technologyConnectors.find((link) => (
-    link.type === 'catalog' &&
-    !!link.slug &&
-    !!(link.is_primary_icon ?? link.isPrimaryIcon)
-  )) ?? technologyConnectors.find((link) => link.type === 'catalog' && !!link.slug)
-  return primary?.slug ? `/icons/${primary.slug}.png` : null
-}
+export {
+  normalizeConnectorRouteStyle,
+  normalizeLogoUrl,
+  normalizeTechnologyConnectors,
+} from './client-normalize'
 
 async function responseError(res: Response, fallback: string): Promise<Error> {
   const body = await res.json().catch(() => null) as { error?: string; message?: string } | null
