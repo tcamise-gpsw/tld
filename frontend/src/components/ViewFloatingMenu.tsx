@@ -31,7 +31,6 @@ const DENSITY_STOPS = [
 ] as const
 
 export interface ViewFloatingMenuProps extends ViewFloatingMenuSlots {
-  handleAddElementAtCenter: () => void
   drawingMode: boolean
   setDrawingMode: React.Dispatch<React.SetStateAction<boolean>>
   hasDrawingPaths: boolean
@@ -81,7 +80,6 @@ export interface ViewFloatingMenuProps extends ViewFloatingMenuSlots {
  * Aliases: Bottom bar, Action bar.
  */
 function ViewFloatingMenu({
-  handleAddElementAtCenter,
   drawingMode,
   setDrawingMode,
   hasDrawingPaths,

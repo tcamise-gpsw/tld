@@ -374,7 +374,10 @@ test('renders the explore canvas and opens the tag controls', async ({ page }) =
   expect(stats.nonTransparent).toBeGreaterThan(100)
 
   await page.getByRole('button', { name: 'Fit View' }).click()
-  await page.getByRole('button', { name: 'Tags' }).click()
+  const tagsButton = page.getByRole('button', { name: 'Tags' })
+  await expect(tagsButton).toBeVisible()
+  await tagsButton.click()
+  await expect(tagsButton).toHaveAttribute('aria-expanded', 'true')
 
   await expect(page.getByText(layerName)).toBeVisible()
   await expect(page.getByText(tagName)).toBeVisible()

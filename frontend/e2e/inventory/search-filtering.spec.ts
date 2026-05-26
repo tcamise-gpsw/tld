@@ -20,7 +20,7 @@ function rowByKey(page: Page, key: string) {
 }
 
 async function expandFilterSection(page: Page, title: string) {
-  await page.getByText(title, { exact: true }).click()
+  await page.getByTestId(`inventory-filter-section-${title.toLowerCase()}`).getByText(title, { exact: true }).click()
 }
 
 async function seedInventory(page: Page) {

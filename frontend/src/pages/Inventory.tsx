@@ -1451,7 +1451,7 @@ function FilterSection({
   onToggle: () => void
 }) {
   return (
-    <Box borderBottom="1px solid" borderColor="whiteAlpha.100">
+    <Box data-testid={`inventory-filter-section-${title.toLowerCase()}`} borderBottom="1px solid" borderColor="whiteAlpha.100">
       <Flex
         px={3}
         py={2}

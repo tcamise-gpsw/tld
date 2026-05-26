@@ -64,7 +64,7 @@ export async function addNodeWithToolbar(page: Page, name = uniqueName('Toolbar 
 }
 
 export async function addNodeWithKeyboard(page: Page, name = uniqueName('Keyboard Node')) {
-  await page.getByTestId('vieweditor-canvas').click()
+  await page.getByTestId('vieweditor-canvas').click({ position: { x: 600, y: 100 } })
   await page.keyboard.press('c')
   await confirmInlineNewElement(page, name)
   await expect(nodeByName(page, name)).toBeVisible()
@@ -82,7 +82,7 @@ export async function addNodeWithCanvasContextMenu(page: Page, name = uniqueName
 }
 
 export async function addExistingNodeWithInlineSearch(page: Page, name: string) {
-  await page.getByTestId('vieweditor-canvas').click()
+  await page.getByTestId('vieweditor-canvas').click({ position: { x: 600, y: 100 } })
   await page.keyboard.press('c')
   const input = page.getByTestId('inline-element-adder-input')
   await input.fill(name)

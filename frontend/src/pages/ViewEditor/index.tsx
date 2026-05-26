@@ -2842,7 +2842,6 @@ function ViewEditorInner({
             />
 
             <ViewFloatingMenu
-              handleAddElementAtCenter={handleAddElementAtCenter}
               drawingMode={drawingMode} setDrawingMode={setDrawingMode}
               hasDrawingPaths={drawingPaths.length > 0} drawingVisible={drawingVisible} setDrawingVisible={setDrawingVisible}
               extrasOpen={extrasOpen} setExtrasOpen={setExtrasOpen}
