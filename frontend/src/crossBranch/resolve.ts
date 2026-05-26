@@ -90,6 +90,22 @@ function explicitOffViewContextPath(
   return appendElementToPath(owners, elementId)
 }
 
+function branchContextPath(
+  snapshot: WorkspaceGraphSnapshot,
+  currentViewId: number,
+  currentVisibleElementIds: Set<number>,
+  chosenPlacementViewId: number,
+  elementId: number,
+): number[] {
+  return explicitOffViewContextPath(
+    snapshot,
+    currentViewId,
+    currentVisibleElementIds,
+    chosenPlacementViewId,
+    elementId,
+  )
+}
+
 function chooseBestPlacement(snapshot: WorkspaceGraphSnapshot, elementId: number, focusViewId: number, ownerViewId: number): GraphPlacementRef | null {
   const candidates = snapshot.placementsByElementId[elementId] ?? []
   if (candidates.length === 0) return null
@@ -163,6 +179,7 @@ function buildProxyEndpoint(
       commonAncestorViewName: viewName(snapshot, commonAncestorViewId),
       mergeAncestorElementId,
       contextPathElementIds,
+      branchPathElementIds: contextPathElementIds,
     }
   }
 
@@ -195,6 +212,7 @@ function buildProxyEndpoint(
       commonAncestorViewName: viewName(snapshot, currentViewId),
       mergeAncestorElementId: null,
       contextPathElementIds: [],
+      branchPathElementIds: [],
     }
   }
 
@@ -202,6 +220,13 @@ function buildProxyEndpoint(
   const externalOwners = commonAncestorViewId == null
     ? []
     : relativeOwnerElementPath(snapshot, commonAncestorViewId, chosenPlacement.viewId)
+  const branchPathElementIds = branchContextPath(
+    snapshot,
+    currentViewId,
+    currentVisibleElementIds,
+    chosenPlacement.viewId,
+    elementId,
+  )
   const anchorElementId = commonAncestorViewId == null
     ? elementId
     : commonAncestorViewId === chosenPlacement.viewId
@@ -228,6 +253,7 @@ function buildProxyEndpoint(
     commonAncestorViewName: viewName(snapshot, commonAncestorViewId),
     mergeAncestorElementId: null,
     contextPathElementIds: [],
+    branchPathElementIds,
   }
 }
 

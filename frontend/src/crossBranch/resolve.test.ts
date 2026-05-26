@@ -342,6 +342,82 @@ describe('resolveZUIProxyConnectors', () => {
 })
 
 describe('resolveViewProxyGraph', () => {
+  it('preserves branch ancestry metadata for sibling external endpoints', () => {
+    const siblingTree: ViewTreeNode[] = [{
+      id: 1,
+      owner_element_id: null,
+      name: 'Root',
+      description: null,
+      level_label: null,
+      level: 0,
+      depth: 0,
+      created_at: '2024-01-01',
+      updated_at: '2024-01-01',
+      parent_view_id: null,
+      children: [
+        {
+          id: 2,
+          owner_element_id: 1,
+          name: 'Current Branch',
+          description: null,
+          level_label: null,
+          level: 1,
+          depth: 1,
+          created_at: '2024-01-01',
+          updated_at: '2024-01-01',
+          parent_view_id: 1,
+          children: [],
+        },
+        {
+          id: 3,
+          owner_element_id: 5,
+          name: 'Sibling Branch',
+          description: null,
+          level_label: null,
+          level: 1,
+          depth: 1,
+          created_at: '2024-01-01',
+          updated_at: '2024-01-01',
+          parent_view_id: 1,
+          children: [],
+        },
+      ],
+    }]
+
+    const data: ExploreData = {
+      tree: siblingTree,
+      navigations: [
+        { id: 1, element_id: 1, from_view_id: 1, to_view_id: 2, to_view_name: 'Current Branch', relation_type: 'child' },
+        { id: 2, element_id: 5, from_view_id: 1, to_view_id: 3, to_view_name: 'Sibling Branch', relation_type: 'child' },
+      ],
+      views: {
+        '1': {
+          placements: [placedElement(1, 1, 'Current Owner'), placedElement(1, 5, 'Sibling Owner')],
+          connectors: [],
+        },
+        '2': {
+          placements: [placedElement(2, 2, 'Current Element'), placedElement(2, 3, 'Current Peer')],
+          connectors: [connector(1, 2, 2, 6, 'Current-External')],
+        },
+        '3': {
+          placements: [placedElement(3, 6, 'External Leaf')],
+          connectors: [],
+        },
+      },
+    }
+
+    const snapshot = buildWorkspaceGraphSnapshot(data)
+    const resolved = resolveViewProxyGraph(snapshot, 2, data.views['2'].placements, zuiSettings())
+    const leaf = resolved.proxyConnectors[0]?.details.connectors[0]
+    const external = leaf?.source.externalToView ? leaf.source : leaf?.target
+
+    expect(external).toMatchObject({
+      anchorElementId: 5,
+      branchPathElementIds: [5, 6],
+      contextPathElementIds: [],
+    })
+  })
+
   it('keeps current-view connectors to leaf descendants mergeable with visible owner pairs', () => {
     const data = baseData([
       connector(1, 1, 1, 2, 'A-B'),

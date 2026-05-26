@@ -222,6 +222,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
                 </Text>
                 <Text fontSize="xs" color="gray.400">
                   Find high-level scanned resources from your codebase and place them inside the view.
+                  Requires "tld analyze" with a configured embedding model provider.
                 </Text>
 
                 <FormControl>
