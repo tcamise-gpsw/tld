@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/mertcikla/tld/v2/internal/tagcolors"
+	"github.com/uptrace/bun"
 )
 
 type Tag struct {
@@ -166,34 +168,141 @@ func (s *Store) UpdateTag(ctx context.Context, name, color string, description *
 	return err
 }
 
-// DeleteTag removes a tag from the tags table and strips it from all elements, views, and connectors.
+// DeleteTag removes a tag from the tags table and strips it from all resources that store tag arrays.
 func (s *Store) DeleteTag(ctx context.Context, name string) error {
-	stripSQL := `(SELECT COALESCE(json_group_array(value), '[]') FROM json_each(tags) WHERE value != ?)`
-	hasTagSQL := `EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)`
+	return s.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if err := stripElementTag(ctx, tx, name); err != nil {
+			return err
+		}
+		if err := stripViewTag(ctx, tx, name); err != nil {
+			return err
+		}
+		if err := stripConnectorTag(ctx, tx, name); err != nil {
+			return err
+		}
+		if err := stripLayerTag(ctx, tx, name); err != nil {
+			return err
+		}
+		if _, err := tx.NewDelete().
+			Model((*tagModel)(nil)).
+			Where("name = ?", name).
+			Exec(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
+}
 
-	if _, err := s.bun.DB.ExecContext(ctx,
-		"UPDATE elements SET tags = "+stripSQL+" WHERE "+hasTagSQL,
-		name, name,
-	); err != nil {
+func stripElementTag(ctx context.Context, tx bun.Tx, name string) error {
+	var rows []elementModel
+	if err := tx.NewSelect().Model(&rows).Column("id", "tags").Scan(ctx); err != nil {
 		return err
 	}
-	if _, err := s.bun.DB.ExecContext(ctx,
-		"UPDATE views SET tags = "+stripSQL+" WHERE "+hasTagSQL,
-		name, name,
-	); err != nil {
+	for _, row := range rows {
+		next, changed := stripStoredTag(row.Tags, name)
+		if !changed {
+			continue
+		}
+		if _, err := tx.NewUpdate().
+			Model((*elementModel)(nil)).
+			Set("tags = ?", next).
+			Where("id = ?", row.ID).
+			Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func stripViewTag(ctx context.Context, tx bun.Tx, name string) error {
+	var rows []viewModel
+	if err := tx.NewSelect().Model(&rows).Column("id", "tags").Scan(ctx); err != nil {
 		return err
 	}
-	if _, err := s.bun.DB.ExecContext(ctx,
-		"UPDATE connectors SET tags = "+stripSQL+" WHERE "+hasTagSQL,
-		name, name,
-	); err != nil {
+	for _, row := range rows {
+		next, changed := stripStoredTag(row.Tags, name)
+		if !changed {
+			continue
+		}
+		if _, err := tx.NewUpdate().
+			Model((*viewModel)(nil)).
+			Set("tags = ?", next).
+			Where("id = ?", row.ID).
+			Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func stripConnectorTag(ctx context.Context, tx bun.Tx, name string) error {
+	var rows []connectorModel
+	if err := tx.NewSelect().Model(&rows).Column("id", "tags").Scan(ctx); err != nil {
 		return err
 	}
-	_, err := s.bun.NewDelete().
-		Model((*tagModel)(nil)).
-		Where("name = ?", name).
-		Exec(ctx)
-	return err
+	for _, row := range rows {
+		next, changed := stripStoredTag(row.Tags, name)
+		if !changed {
+			continue
+		}
+		if _, err := tx.NewUpdate().
+			Model((*connectorModel)(nil)).
+			Set("tags = ?", next).
+			Where("id = ?", row.ID).
+			Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func stripLayerTag(ctx context.Context, tx bun.Tx, name string) error {
+	var rows []viewLayerModel
+	if err := tx.NewSelect().Model(&rows).Column("id", "tags").Scan(ctx); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		next, changed := stripStoredTag(row.Tags, name)
+		if !changed {
+			continue
+		}
+		if _, err := tx.NewUpdate().
+			Model((*viewLayerModel)(nil)).
+			Set("tags = ?", next).
+			Where("id = ?", row.ID).
+			Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func stripStoredTag(raw, name string) (string, bool) {
+	tags, valid := parseStoredTagList(raw)
+	filtered := tags[:0]
+	removed := false
+	for _, tag := range tags {
+		if tag == name {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, tag)
+	}
+	if !valid || removed {
+		return jsonString(filtered, "[]"), true
+	}
+	return raw, false
+}
+
+func parseStoredTagList(raw string) ([]string, bool) {
+	if raw == "" || raw == "null" {
+		return []string{}, raw == "null"
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || out == nil {
+		return []string{}, err == nil
+	}
+	return out, true
 }
 
 func (s *Store) pickUnusedColor(ctx context.Context, usedColors []string) string {

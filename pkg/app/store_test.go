@@ -390,6 +390,56 @@ func TestStoreLayersPersistTagsColorsAndUpdates(t *testing.T) {
 	_ = updated
 }
 
+func TestStoreDeleteTagToleratesMalformedStoredTags(t *testing.T) {
+	store := openAppStore(t)
+	ctx := context.Background()
+	db := store.DB()
+
+	if _, err := db.Exec(`
+		INSERT INTO tags(name, color, description) VALUES ('arch:datastore', '#123456', NULL);
+		INSERT INTO elements(id, name, tags, technology_connectors, created_at, updated_at)
+		VALUES
+			(100, 'API', '["arch:datastore","runtime"]', '[]', 'now', 'now'),
+			(101, 'Broken', '', '[]', 'now', 'now');
+		INSERT INTO views(id, owner_element_id, name, description, level_label, tags, level, created_at, updated_at)
+		VALUES (100, NULL, 'System', NULL, 'System', '["arch:datastore"]', 1, 'now', 'now');
+		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, direction, style, tags, created_at, updated_at)
+		VALUES (100, 100, 100, 101, 'reads', 'forward', 'bezier', '["arch:datastore","data"]', 'now', 'now');
+		INSERT INTO view_layers(id, view_id, name, tags, color, created_at, updated_at)
+		VALUES (100, 100, 'Data', '["arch:datastore"]', '#123456', 'now', 'now');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.DeleteTag(ctx, "arch:datastore"); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tags WHERE name = 'arch:datastore'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("tag row count = %d, want 0", count)
+	}
+
+	for _, query := range []string{
+		`SELECT tags FROM elements WHERE id = 100`,
+		`SELECT tags FROM elements WHERE id = 101`,
+		`SELECT tags FROM views WHERE id = 100`,
+		`SELECT tags FROM connectors WHERE id = 100`,
+		`SELECT tags FROM view_layers WHERE id = 100`,
+	} {
+		var raw string
+		if err := db.QueryRow(query).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(raw, "arch:datastore") {
+			t.Fatalf("%s returned tags %q, want deleted tag removed", query, raw)
+		}
+	}
+}
+
 func TestExploreLoadsWorkspaceDataInBatches(t *testing.T) {
 	store := openAppStore(t)
 	ctx := context.Background()
