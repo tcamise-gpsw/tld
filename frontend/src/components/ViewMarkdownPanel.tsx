@@ -157,11 +157,11 @@ function ViewMarkdownPanel({
         flex="1 1 auto"
         minH={0}
         overflow="hidden"
-        bg="#0b1220"
+        bg="var(--bg-canvas)"
         color="gray.100"
         sx={{
           '.tld-markdown-editor': {
-            '--basePageBg': '#0b1220',
+            '--basePageBg': 'var(--bg-canvas)',
             '--baseBase': '#0f172a',
             '--baseBgSubtle': '#111c31',
             '--baseBg': '#152238',
@@ -191,12 +191,12 @@ function ViewMarkdownPanel({
             width: '100%',
             height: '100%',
             minHeight: 0,
-            background: '#0b1220',
+            background: 'var(--bg-canvas)',
             color: '#dbe6f5',
           },
           '.tld-markdown-toolbar': {
             borderBottom: '1px solid rgba(148, 163, 184, 0.18)',
-            background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(11, 18, 32, 0.96) 100%)',
+            background: 'var(--basePageBg)',
             color: '#dbe6f5',
             paddingInline: '0.5rem',
             minHeight: '48px',
@@ -259,7 +259,7 @@ function ViewMarkdownPanel({
             flexDirection: 'column',
             flex: '1 1 auto',
             minHeight: 0,
-            background: '#0b1220',
+            background: 'var(--bg-canvas)',
           },
           '.tld-markdown-editor .mdxeditor-root-contenteditable > div': {
             display: 'flex',
@@ -275,7 +275,7 @@ function ViewMarkdownPanel({
             fontSize: '0.95rem',
             lineHeight: 1.75,
             color: '#dbe6f5',
-            background: '#0b1220',
+            background: 'var(--bg-canvas)',
             outline: 'none',
             boxShadow: 'none',
           },
