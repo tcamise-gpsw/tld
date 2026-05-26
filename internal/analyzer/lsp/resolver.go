@@ -398,9 +398,19 @@ func (r *MultiLanguageResolver) openDocument(ctx context.Context, session *Sessi
 // }
 
 func (r *MultiLanguageResolver) markFailed(ctx context.Context, language analyzer.Language, reason string, err error) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	status := r.ensureRequestedLocked(language)
+
+	if isNonFatalLSPError(err) {
+		r.logInfo(ctx, "watch.lsp."+reason+".non_fatal", language, status, "error", err)
+		return
+	}
+
 	status.State = StateFailed
 	status.LastError = err.Error()
 	r.logError(ctx, "watch.lsp."+reason+".failed", err, language, status)
@@ -524,4 +534,15 @@ func commandDisplay(command ResolvedCommand) string {
 	parts := []string{command.Path}
 	parts = append(parts, command.Args...)
 	return strings.Join(parts, " ")
+}
+
+func isNonFatalLSPError(err error) bool {
+	if err == nil {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no package metadata") ||
+		strings.Contains(msg, "no build state") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "was not found")
 }

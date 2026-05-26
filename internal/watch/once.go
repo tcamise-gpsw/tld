@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tldgit "github.com/mertcikla/tld/v2/internal/git"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 )
 
 type OneShotOptions struct {
@@ -19,6 +20,7 @@ type OneShotOptions struct {
 	DataDir          string
 	Logger           EventLogger
 	ConfirmAfterScan func(context.Context, ScanResult) error
+	Rules            *ignore.Rules
 }
 
 type OneShotResult struct {
@@ -46,6 +48,9 @@ func (r *Runner) RunOnce(ctx context.Context, opts OneShotOptions) (OneShotResul
 	r.Scanner.Settings = settings
 	r.Scanner.Progress = opts.Progress
 	r.Scanner.Logger = opts.Logger
+	if opts.Rules != nil {
+		r.Scanner.Rules = opts.Rules
+	}
 
 	prepareStarted := time.Now()
 	logInfo(ctx, opts.Logger, "watch.prepare.started", "path", opts.Path)

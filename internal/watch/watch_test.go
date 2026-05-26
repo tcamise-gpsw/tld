@@ -4037,7 +4037,7 @@ func TestEmbeddingCacheAvoidsProviderCalls(t *testing.T) {
 	stats, _, err := representer.cacheEmbeddings(context.Background(), modelID, provider, "", []Symbol{
 		symbols[1],
 		symbols[2],
-	}, nil, nil, 0)
+	}, nil, nil, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4050,7 +4050,7 @@ func TestEmbeddingCacheAvoidsProviderCalls(t *testing.T) {
 	stats, _, err = representer.cacheEmbeddings(context.Background(), modelID, provider, "", []Symbol{
 		symbols[1],
 		symbols[2],
-	}, nil, nil, 0)
+	}, nil, nil, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4079,7 +4079,7 @@ func TestEmbeddingCacheChunksProviderCallsAndReportsProgress(t *testing.T) {
 	}
 	progress := &recordingProgress{}
 
-	stats, _, err := NewRepresenter(store).cacheEmbeddings(context.Background(), modelID, provider, "", symbols, nil, progress, 0)
+	stats, _, err := NewRepresenter(store).cacheEmbeddings(context.Background(), modelID, provider, "", symbols, nil, progress, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4096,6 +4096,71 @@ func TestEmbeddingCacheChunksProviderCallsAndReportsProgress(t *testing.T) {
 	}
 	if progress.advances != len(symbols)*2 {
 		t.Fatalf("expected prepare and embed progress advances, got %d", progress.advances)
+	}
+}
+
+func TestPopulateResourceEmbeddingsAreCachedSeparately(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	store := NewStore(db)
+	provider := &countingProvider{}
+	model := provider.ModelID()
+	modelID, err := store.EnsureEmbeddingModel(context.Background(), EmbeddingConfig{Provider: model.Provider, Model: model.Model, Dimension: model.Dimension}, model.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.Exec(`
+		INSERT INTO watch_repositories(remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at)
+		VALUES ('local', ?, 'repo', 'main', '', 'clean', '', 'now', 'now')`, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO elements(id, name, kind, description, tags, technology_connectors, file_path, created_at, updated_at)
+		VALUES (100, 'Watch', 'folder', 'watch service', '["role:watch"]', '[]', 'internal/watch', 'now', 'now');
+		INSERT INTO watch_materialization(repository_id, owner_type, owner_key, resource_type, resource_id, created_at, updated_at)
+		VALUES (?, 'folder', 'folder:internal/watch', 'element', 100, 'now', 'now')`, repoID); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := NewRepresenter(store).cachePopulateResourceEmbeddings(context.Background(), modelID, provider, repoID, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Created != 1 {
+		t.Fatalf("expected one populate resource embedding, got %+v", stats)
+	}
+	if provider.calls != 1 || !strings.Contains(provider.texts[0], "kind folder") || !strings.Contains(provider.texts[0], "Watch") || !strings.Contains(provider.texts[0], "granularity folder") {
+		t.Fatalf("provider calls=%d texts=%v, want populate resource document", provider.calls, provider.texts)
+	}
+	if strings.Contains(provider.texts[0], "repository analysis") {
+		t.Fatalf("populate resource embedding text should not contain repository-specific role expansion:\n%s", provider.texts[0])
+	}
+	stats, err = NewRepresenter(store).cachePopulateResourceEmbeddings(context.Background(), modelID, provider, repoID, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.CacheHits != 1 || provider.calls != 1 {
+		t.Fatalf("expected cache hit without provider call, stats=%+v calls=%d", stats, provider.calls)
+	}
+}
+
+func TestEmbeddingSemanticSignalsUseCrossDomainTaxonomy(t *testing.T) {
+	signals := embeddingSemanticSignals("OrderController", "class", "src/orders/http/order_controller.ts", `["role:api"]`)
+
+	for _, want := range []string{"responsibility interface boundary", "intent request handling", "intent service endpoint"} {
+		if !containsEmbeddingSignal(signals, want) {
+			t.Fatalf("signals = %v, want %q", signals, want)
+		}
+	}
+	for _, unwanted := range []string{"role api", "responsibility repository analysis"} {
+		if containsEmbeddingSignal(signals, unwanted) {
+			t.Fatalf("signals = %v, should not include repo/tag-specific signal %q", signals, unwanted)
+		}
 	}
 }
 
@@ -4116,10 +4181,13 @@ func Outer() {
 		FilePath:      "a.go",
 		StartLine:     3,
 		EndLine:       &end,
-	})
+	}, 4000)
 
 	if !strings.Contains(text, `fmt.Println("body")`) {
 		t.Fatalf("expected embedding text to include code body, got:\n%s", text)
+	}
+	if !strings.Contains(text, "symbol name Outer") || !strings.Contains(text, "signals granularity function") {
+		t.Fatalf("expected embedding text to include normalized symbol signals, got:\n%s", text)
 	}
 	if strings.Contains(text, "Outer\nfunction\na.go") {
 		t.Fatalf("embedding text fell back to metadata instead of source body:\n%s", text)
@@ -4127,7 +4195,7 @@ func Outer() {
 }
 
 func TestShrinkEmbeddingTextFitsApproximateTokenBudget(t *testing.T) {
-	text := shrinkEmbeddingText(strings.Repeat("// comment that should be removed\n", 600) + strings.Repeat("statement := value + otherValue\n", 700))
+	text := shrinkEmbeddingText(strings.Repeat("// comment that should be removed\n", 600)+strings.Repeat("statement := value + otherValue\n", 700), 0)
 	if approximateTokenCount(text) > maxEmbeddingInputApproxTokens {
 		t.Fatalf("expected text within token budget, got %d", approximateTokenCount(text))
 	}
@@ -4214,6 +4282,112 @@ func TestOpenAIHealthCheckUsesCompatibleEmbeddingsEndpoint(t *testing.T) {
 	}
 	if cfg.Dimension != 3 || result.Dimension != 3 || result.Similarity < DefaultEmbeddingHealthThreshold {
 		t.Fatalf("unexpected health result cfg=%+v result=%+v", cfg, result)
+	}
+}
+
+func TestOpenAIMultiEndpointHealthCheckAndSplitsWork(t *testing.T) {
+	requests := make([]int, 2)
+	servers := make([]*httptest.Server, 0, 2)
+	for serverIndex := 0; serverIndex < 2; serverIndex++ {
+		index := serverIndex
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/embeddings" {
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
+			var body struct {
+				Input []string `json:"input"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			requests[index] += len(body.Input)
+			w.Header().Set("Content-Type", "application/json")
+			data := make([]string, 0, len(body.Input))
+			for i := range body.Input {
+				if i%2 == 0 {
+					data = append(data, fmt.Sprintf(`{"object":"embedding","index":%d,"embedding":[1,0,0]}`, i))
+				} else {
+					data = append(data, fmt.Sprintf(`{"object":"embedding","index":%d,"embedding":[0.95,0.05,0]}`, i))
+				}
+			}
+			_, _ = w.Write([]byte(`{"object":"list","model":"embeddinggemma-300m-4bit","data":[` + strings.Join(data, ",") + `]}`))
+		}))
+		defer server.Close()
+		servers = append(servers, server)
+	}
+
+	cfg, result, err := CheckEmbeddingHealth(context.Background(), EmbeddingConfig{
+		Provider:  "openai",
+		Endpoints: []string{servers[0].URL + "/v1/embeddings", servers[1].URL + "/v1/embeddings"},
+		Model:     "embeddinggemma-300m-4bit",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dimension != 3 || result.Dimension != 3 || result.Similarity < DefaultEmbeddingHealthThreshold {
+		t.Fatalf("unexpected health result cfg=%+v result=%+v", cfg, result)
+	}
+	provider, err := NewEmbeddingProvider(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vectors, err := provider.Embed(context.Background(), []EmbeddingInput{
+		{Text: "a"},
+		{Text: "b"},
+		{Text: "c"},
+		{Text: "d"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors) != 4 {
+		t.Fatalf("vectors len = %d, want 4", len(vectors))
+	}
+	if requests[0] != 4 || requests[1] != 4 {
+		t.Fatalf("requests = %v, want each endpoint to handle 2 health inputs and 2 work inputs", requests)
+	}
+}
+
+func TestOpenAIProviderAddsJinaCodeEmbeddingInstructions(t *testing.T) {
+	var requestBody struct {
+		Model string   `json:"model"`
+		Input []string `json:"input"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","model":"jinaai/jina-code-embeddings-1.5b","data":[{"object":"embedding","index":0,"embedding":[1,0,0]},{"object":"embedding","index":1,"embedding":[0,1,0]},{"object":"embedding","index":2,"embedding":[0,0,1]}]}`))
+	}))
+	defer server.Close()
+
+	provider := OpenAIProvider{
+		Endpoint: server.URL + "/v1/embeddings",
+		Model:    "jinaai/jina-code-embeddings-1.5b",
+		Client:   server.Client(),
+	}
+	vectors, err := provider.Embed(context.Background(), []EmbeddingInput{
+		{OwnerType: "query", Text: "watch"},
+		{OwnerType: "symbol", Text: "func Watch() {}"},
+		{OwnerType: "file", Text: "package watch"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors) != 3 {
+		t.Fatalf("vectors len = %d, want 3", len(vectors))
+	}
+	want := []string{
+		"Find the most relevant code snippet given the following query:\nwatch",
+		"Candidate code snippet:\nfunc Watch() {}",
+		"package watch",
+	}
+	if !reflect.DeepEqual(requestBody.Input, want) {
+		t.Fatalf("input = %#v, want %#v", requestBody.Input, want)
 	}
 }
 

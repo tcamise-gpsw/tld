@@ -16,6 +16,8 @@ import (
 
 	assets "github.com/mertcikla/tld/v2"
 	"github.com/mertcikla/tld/v2/cmd/version"
+	"github.com/mertcikla/tld/v2/internal/cmdutil"
+	"github.com/mertcikla/tld/v2/internal/ignore"
 	"github.com/mertcikla/tld/v2/internal/localserver"
 	"github.com/mertcikla/tld/v2/internal/store"
 	"github.com/mertcikla/tld/v2/internal/term"
@@ -29,8 +31,8 @@ import (
 func NewAnalyzeCmd(wdir *string) *cobra.Command {
 	var dryRun bool
 	var dataDirFlag string
-	var embeddingProvider, embeddingEndpoint, embeddingModel string
-	var embeddingDimension int
+	var embeddingProvider, embeddingEndpoint, embeddingModel, embeddingRuntimePath string
+	var embeddingDimension, embeddingMaxTokens int
 	var languageFlags []string
 	var rescan, failOnDrift bool
 	var maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup int
@@ -55,6 +57,14 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 			ws, err := workspace.Load(*wdir)
 			if err != nil {
 				return fmt.Errorf("load workspace: %w", err)
+			}
+			scopes, err := cmdutil.ResolveAnalyzeRepoScopes(ws, absPath)
+			if err != nil {
+				return err
+			}
+			var rules *ignore.Rules
+			if len(scopes) > 0 {
+				rules = ws.IgnoreRulesForRepository(scopes[0].Name)
 			}
 			cfg, err := workspace.LoadGlobalConfig()
 			if err != nil {
@@ -97,7 +107,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 				"languages", strings.Join(languageFlags, ","),
 			)
 			logger.InfoContext(cmd.Context(), "analyze.setup.completed", "elapsed", time.Since(commandStarted).Round(time.Millisecond).String(), "workspace", *wdir, "data_dir", dataDir)
-			embeddingCfg := resolveAnalyzeEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension)
+			embeddingCfg := resolveAnalyzeEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension, embeddingMaxTokens, embeddingRuntimePath)
 			settings := resolveAnalyzeWatchSettings(cfg, languageFlags, maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup)
 			logger.InfoContext(cmd.Context(), "analyze.settings.resolved",
 				"embedding_provider", embeddingCfg.Provider,
@@ -144,7 +154,7 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 					term.Label(cmd.OutOrStdout(), 20, "Mode", "dry-run")
 				}
 			}
-			once, err := watchpkg.NewRunner(watchStore).RunOnce(cmd.Context(), watchpkg.OneShotOptions{Path: absPath, Rescan: rescan, Embedding: embeddingCfg, Settings: settings, DataDir: dataDir, Progress: progress, Logger: logger, ConfirmAfterScan: confirmAnalyzeLSPProceed(cmd)})
+			once, err := watchpkg.NewRunner(watchStore).RunOnce(cmd.Context(), watchpkg.OneShotOptions{Path: absPath, Rescan: rescan, Embedding: embeddingCfg, Settings: settings, DataDir: dataDir, Progress: progress, Logger: logger, ConfirmAfterScan: confirmAnalyzeLSPProceed(cmd), Rules: rules})
 			if err != nil {
 				return fail("analyze.watch_pipeline.failed", err)
 			}
@@ -198,6 +208,8 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 	c.Flags().StringVar(&embeddingEndpoint, "embedding-endpoint", "", "embedding endpoint for representation")
 	c.Flags().StringVar(&embeddingModel, "embedding-model", "", "embedding model for representation")
 	c.Flags().IntVar(&embeddingDimension, "embedding-dimension", 0, "embedding vector dimension")
+	c.Flags().IntVar(&embeddingMaxTokens, "embedding-max-tokens", 0, "maximum input token length for embedding model")
+	c.Flags().StringVar(&embeddingRuntimePath, "embedding-runtime-path", "", "ONNX Runtime shared library path for local embedding providers")
 	c.Flags().IntVar(&maxElements, "max-elements-per-view", 0, "maximum generated elements per view")
 	c.Flags().IntVar(&maxConnectors, "max-connectors-per-view", 0, "maximum generated connectors per view")
 	c.Flags().IntVar(&maxIncoming, "max-incoming-per-element", 0, "maximum incoming references per element before collapsing")
@@ -216,15 +228,17 @@ func openAnalyzeLog(dataDir string) (*os.File, *slog.Logger, error) {
 	return file, logger, nil
 }
 
-func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int) watchpkg.EmbeddingConfig {
+func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, model string, dimension int, maxTokens int, runtimePath ...string) watchpkg.EmbeddingConfig {
 	embedding := watchpkg.EmbeddingConfig{Provider: "none"}
 	if cfg != nil {
 		embedding = watchpkg.EmbeddingConfig{
 			Provider:        cfg.Watch.Embedding.Provider,
-			Endpoint:        cfg.Watch.Embedding.Endpoint,
+			Endpoint:        cfg.Watch.Embedding.Endpoint.String(),
 			Model:           cfg.Watch.Embedding.Model,
 			Dimension:       cfg.Watch.Embedding.Dimension,
+			RuntimePath:     cfg.Watch.Embedding.RuntimePath,
 			HealthThreshold: cfg.Watch.Embedding.HealthThreshold,
+			MaxTokens:       cfg.Watch.Embedding.MaxTokens,
 		}
 	}
 	if provider != "" {
@@ -238,6 +252,12 @@ func resolveAnalyzeEmbeddingConfig(cfg *workspace.Config, provider, endpoint, mo
 	}
 	if dimension > 0 {
 		embedding.Dimension = dimension
+	}
+	if maxTokens > 0 {
+		embedding.MaxTokens = maxTokens
+	}
+	if len(runtimePath) > 0 && runtimePath[0] != "" {
+		embedding.RuntimePath = runtimePath[0]
 	}
 	return watchpkg.NormalizeEmbeddingConfig(embedding)
 }
@@ -391,18 +411,50 @@ func confirmLSPProceed(cmd *cobra.Command, status watchpkg.LSPStatus) error {
 	}
 	term.Warn(cmd.OutOrStdout(), "Some requested language servers are unavailable or unhealthy. Reference resolution quality will be lower.")
 	term.Hint(cmd.OutOrStdout(), "tld will fall back to conservative name matching, which may drop ambiguous connectors.")
+	hasUnavailable := false
+	hasFailed := false
 	for _, server := range watchpkg.LSPDegradedServers(status) {
-		detail := server.Command
-		if detail == "" {
-			detail = server.Language
+		language := server.Language
+		if len(language) > 0 {
+			language = strings.ToUpper(language[0:1]) + language[1:]
 		}
-		if server.LastError != "" {
-			detail += ": " + server.LastError
+
+		statusDesc := ""
+		switch server.State {
+		case "unavailable":
+			statusDesc = "not found in PATH"
+			hasUnavailable = true
+		case "failed":
+			hasFailed = true
+			if server.RestartCount > 0 {
+				statusDesc = "crashed"
+			} else {
+				statusDesc = "initialization failed"
+			}
+		case "memory_limited":
+			statusDesc = "memory limit exceeded"
+			hasFailed = true
+		default:
+			statusDesc = server.State
+		}
+
+		detail := fmt.Sprintf("%s (%s): %s", language, server.Command, statusDesc)
+		if server.Command == "" {
+			detail = fmt.Sprintf("%s: %s", language, statusDesc)
 		}
 		term.Hint(cmd.OutOrStdout(), detail)
+		if server.LastError != "" {
+			term.Hint(cmd.OutOrStdout(), "    Error: "+server.LastError)
+		}
 	}
-	term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server, ensure it is on PATH, or disable LSP with `tld config set watch.lsp.enabled false`.")
-	term.Hint(cmd.OutOrStdout(), "Examples: gopls, pyright-langserver, rust-analyzer, jdtls, typescript-language-server, clangd.")
+
+	if hasUnavailable {
+		term.Hint(cmd.OutOrStdout(), "Remediation: install the missing language server(s) or ensure they are on your PATH.")
+	}
+	if hasFailed {
+		term.Hint(cmd.OutOrStdout(), "Remediation: check your project configuration or try increasing memory limits.")
+	}
+	term.Hint(cmd.OutOrStdout(), "Alternatively, disable LSP with `tld config set watch.lsp.enabled false`.")
 	if !isInteractiveInput(cmd.InOrStdin()) {
 		term.Hint(cmd.OutOrStdout(), "Non-interactive input detected; continuing without confirmation.")
 		return nil

@@ -98,7 +98,7 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 		}
 		usedRefs[ref] = struct{}{}
 		elementRefByID[int32(mapping.ResourceID)] = ref
-		out.Elements[ref] = &workspace.Element{
+		newElem := &workspace.Element{
 			Name:        elem.GetName(),
 			Kind:        defaultString(elem.GetKind(), "element"),
 			Description: elem.GetDescription(),
@@ -113,6 +113,62 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 			HasView:     false,
 			ViewLabel:   strings.TrimSpace(elem.GetViewLabel()),
 		}
+		existing := base.Elements[ref]
+		if existing != nil {
+			if existing.Name != "" {
+				newElem.Name = existing.Name
+			}
+			if existing.Kind != "" {
+				newElem.Kind = existing.Kind
+			}
+			if existing.Owner != "" {
+				newElem.Owner = existing.Owner
+			}
+			if existing.Description != "" {
+				newElem.Description = existing.Description
+			}
+			if existing.Technology != "" {
+				newElem.Technology = existing.Technology
+			}
+			if existing.URL != "" {
+				newElem.URL = existing.URL
+			}
+			if existing.LogoURL != "" {
+				newElem.LogoURL = existing.LogoURL
+			}
+			if existing.Repo != "" {
+				newElem.Repo = existing.Repo
+			}
+			if existing.Branch != "" {
+				newElem.Branch = existing.Branch
+			}
+			if existing.Language != "" {
+				newElem.Language = existing.Language
+			}
+			if existing.FilePath != "" {
+				newElem.FilePath = existing.FilePath
+			}
+			if existing.Symbol != "" {
+				newElem.Symbol = existing.Symbol
+			}
+			if len(existing.Tags) > 0 {
+				newElem.Tags = existing.Tags
+			}
+			if existing.HasView {
+				newElem.HasView = true
+			}
+			if existing.ViewName != "" {
+				newElem.ViewName = existing.ViewName
+			}
+			if existing.ViewLabel != "" {
+				newElem.ViewLabel = existing.ViewLabel
+			}
+			if existing.DensityLevel > 0 {
+				newElem.DensityLevel = existing.DensityLevel
+			}
+			newElem.Placements = append([]workspace.ViewPlacement(nil), existing.Placements...)
+		}
+		out.Elements[ref] = newElem
 		out.Meta.Elements[ref] = &workspace.ResourceMetadata{ID: workspace.ResourceID(elem.Id), UpdatedAt: timestampTime(elem.GetUpdatedAt())}
 	}
 	progressAdvance(progress, "Elements merged")
@@ -138,6 +194,11 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 
 	elementOverrideDeltas := elementOverrideDeltas(overrides)
 	for _, placement := range placements {
+		// Only process placements for elements generated/updated in the current run.
+		// For other elements, their placements are already correct and cloned from YAML.
+		if _, ok := index.elementIDs[int32(placement.ElementId)]; !ok {
+			continue
+		}
 		elemRef := elementRefByID[placement.ElementId]
 		if elemRef == "" || out.Elements[elemRef] == nil {
 			continue
@@ -146,12 +207,31 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 		if parentRef == "" {
 			parentRef = "root"
 		}
-		out.Elements[elemRef].Placements = append(out.Elements[elemRef].Placements, workspace.ViewPlacement{
+		newPlacement := workspace.ViewPlacement{
 			ParentRef:       parentRef,
 			PositionX:       placement.PositionX,
 			PositionY:       placement.PositionY,
 			VisibilityDelta: elementOverrideDeltas[overrideKey{viewID: int64(placement.ViewId), resourceID: int64(placement.ElementId)}],
-		})
+		}
+		found := false
+		for idx, p := range out.Elements[elemRef].Placements {
+			if p.ParentRef == parentRef {
+				if p.PositionXSet {
+					newPlacement.PositionX = p.PositionX
+					newPlacement.PositionXSet = true
+				}
+				if p.PositionYSet {
+					newPlacement.PositionY = p.PositionY
+					newPlacement.PositionYSet = true
+				}
+				out.Elements[elemRef].Placements[idx] = newPlacement
+				found = true
+				break
+			}
+		}
+		if !found {
+			out.Elements[elemRef].Placements = append(out.Elements[elemRef].Placements, newPlacement)
+		}
 	}
 
 	connectorByID := connectorsByID(connectors)
@@ -187,6 +267,33 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 		}
 		if ref == "" || out.Connectors[ref] != nil {
 			ref = workspace.ConnectorKey(spec)
+		}
+		existingConn := base.Connectors[ref]
+		if existingConn != nil {
+			if existingConn.Label != "" {
+				spec.Label = existingConn.Label
+			}
+			if existingConn.Description != "" {
+				spec.Description = existingConn.Description
+			}
+			if existingConn.Relationship != "" {
+				spec.Relationship = existingConn.Relationship
+			}
+			if existingConn.Direction != "" {
+				spec.Direction = existingConn.Direction
+			}
+			if existingConn.Style != "" {
+				spec.Style = existingConn.Style
+			}
+			if existingConn.URL != "" {
+				spec.URL = existingConn.URL
+			}
+			if existingConn.SourceHandle != "" {
+				spec.SourceHandle = existingConn.SourceHandle
+			}
+			if existingConn.TargetHandle != "" {
+				spec.TargetHandle = existingConn.TargetHandle
+			}
 		}
 		out.Connectors[ref] = spec
 		out.Meta.Connectors[ref] = &workspace.ResourceMetadata{ID: workspace.ResourceID(conn.Id), UpdatedAt: timestampTime(conn.GetUpdatedAt())}
