@@ -428,6 +428,7 @@ CREATE INDEX IF NOT EXISTS idx_watch_representation_diffs_version_id
 
 CREATE TABLE IF NOT EXISTS workspace_versions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id TEXT NULL,
   version_id TEXT NOT NULL UNIQUE,
   source TEXT NOT NULL,
   parent_version_id INTEGER NULL,

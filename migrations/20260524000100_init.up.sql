@@ -2,6 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS views (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id TEXT NULL,
   owner_element_id INTEGER NULL,
   name TEXT NOT NULL,
   description TEXT NULL,
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS views (
 
 CREATE TABLE IF NOT EXISTS elements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id TEXT NULL,
   name TEXT NOT NULL,
   kind TEXT NULL,
   description TEXT NULL,
@@ -45,6 +47,7 @@ CREATE TABLE IF NOT EXISTS placements (
 
 CREATE TABLE IF NOT EXISTS connectors (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id TEXT NULL,
   view_id INTEGER NOT NULL,
   source_element_id INTEGER NOT NULL,
   target_element_id INTEGER NOT NULL,
@@ -75,6 +78,7 @@ CREATE TABLE IF NOT EXISTS view_layers (
 );
 
 CREATE TABLE IF NOT EXISTS tags (
+  org_id TEXT NULL,
   name TEXT PRIMARY KEY,
   color TEXT NOT NULL,
   description TEXT NULL

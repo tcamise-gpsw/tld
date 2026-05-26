@@ -141,7 +141,7 @@ func (s *Store) generatedWorkspaceCounts(ctx context.Context, repositoryID int64
 		"connector": &out.Connectors,
 		"view":      &out.Views,
 	} {
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_materialization WHERE repository_id = ? AND resource_type = ?`, repositoryID, resourceType).Scan(dest); err != nil {
+		if err := s.rowRaw(ctx, `SELECT COUNT(*) FROM watch_materialization WHERE repository_id = ? AND resource_type = ?`, repositoryID, resourceType).Scan(dest); err != nil {
 			return contextRemovalStats{}, err
 		}
 	}
@@ -200,7 +200,7 @@ func (s *Store) AdjustContextExpansion(ctx context.Context, repositoryID int64, 
 	now := nowString()
 	for _, owner := range owners {
 		if after == 0 {
-			if _, err := s.db.ExecContext(ctx, `
+			if _, err := s.execRaw(ctx, `
 				DELETE FROM watch_context_expansions
 				WHERE repository_id = ? AND scope_resource_type = ? AND scope_resource_id = ? AND scope_owner_type = ? AND scope_owner_key = ?`,
 				repositoryID, req.ResourceType, req.ResourceID, owner.OwnerType, owner.OwnerKey); err != nil {
@@ -208,7 +208,7 @@ func (s *Store) AdjustContextExpansion(ctx context.Context, repositoryID int64, 
 			}
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `
+		if _, err := s.execRaw(ctx, `
 			INSERT INTO watch_context_expansions(repository_id, scope_resource_type, scope_resource_id, scope_owner_type, scope_owner_key, tier, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(repository_id, scope_resource_type, scope_resource_id, scope_owner_type, scope_owner_key)
@@ -222,7 +222,7 @@ func (s *Store) AdjustContextExpansion(ctx context.Context, repositoryID int64, 
 
 func (s *Store) contextExpansionTier(ctx context.Context, repositoryID int64, req ContextResourceRequest) (int, error) {
 	var tier sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT MAX(tier)
 		FROM watch_context_expansions
 		WHERE repository_id = ? AND scope_resource_type = ? AND scope_resource_id = ?`,
@@ -240,7 +240,7 @@ func (s *Store) contextExpansionTier(ctx context.Context, repositoryID int64, re
 }
 
 func (s *Store) ActiveContextExpansionSet(ctx context.Context, repositoryID int64) (contextExpansionSet, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT scope_owner_type, scope_owner_key, tier
 		FROM watch_context_expansions
 		WHERE repository_id = ? AND tier > 0
@@ -461,7 +461,7 @@ func (s *Store) contextOwnerFiles(ctx context.Context, repositoryID int64, owner
 
 func (s *Store) materializationByResource(ctx context.Context, repositoryID int64, resourceType string, resourceID int64) (watchMaterializationMapping, bool, error) {
 	var item watchMaterializationMapping
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT id, owner_type, owner_key, resource_type, resource_id, updated_at
 		FROM watch_materialization
 		WHERE repository_id = ? AND resource_type = ? AND resource_id = ?
@@ -474,7 +474,7 @@ func (s *Store) materializationByResource(ctx context.Context, repositoryID int6
 }
 
 func (s *Store) materializedElementOwnersInView(ctx context.Context, repositoryID, viewID int64) ([]contextOwner, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT wm.owner_type, wm.owner_key
 		FROM placements p
 		JOIN watch_materialization wm ON wm.resource_type = 'element' AND wm.resource_id = p.element_id
@@ -487,7 +487,7 @@ func (s *Store) materializedElementOwnersInView(ctx context.Context, repositoryI
 }
 
 func (s *Store) materializedConnectorOwnersInView(ctx context.Context, repositoryID, viewID int64) ([]contextOwner, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT wm.owner_type, wm.owner_key
 		FROM connectors c
 		JOIN watch_materialization wm ON wm.resource_type = 'connector' AND wm.resource_id = c.id
@@ -500,7 +500,7 @@ func (s *Store) materializedConnectorOwnersInView(ctx context.Context, repositor
 }
 
 func (s *Store) materializedConnectorOwnersTouchingElement(ctx context.Context, repositoryID, elementID int64) ([]contextOwner, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT wm.owner_type, wm.owner_key
 		FROM connectors c
 		JOIN watch_materialization wm ON wm.resource_type = 'connector' AND wm.resource_id = c.id
@@ -513,7 +513,7 @@ func (s *Store) materializedConnectorOwnersTouchingElement(ctx context.Context, 
 }
 
 func (s *Store) materializedNeighborOwners(ctx context.Context, repositoryID, elementID int64) ([]contextOwner, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT wm.owner_type, wm.owner_key
 		FROM connectors c
 		JOIN watch_materialization wm ON wm.resource_type = 'element'
@@ -546,7 +546,7 @@ func (s *Store) saveContextPolicies(ctx context.Context, repositoryID int64, act
 	}
 	created, updated, deactivated := 0, 0, 0
 	for _, owner := range uniqueContextOwners(owners) {
-		res, err := s.db.ExecContext(ctx, `
+		res, err := s.execRaw(ctx, `
 			UPDATE watch_context_policies
 			SET active = 0, updated_at = ?
 			WHERE repository_id = ? AND owner_type = ? AND owner_key = ? AND action = ? AND active = 1`,
@@ -558,7 +558,7 @@ func (s *Store) saveContextPolicies(ctx context.Context, repositoryID int64, act
 			deactivated += int(rows)
 		}
 		var id int64
-		err = s.db.QueryRowContext(ctx, `
+		err = s.rowRaw(ctx, `
 			SELECT id FROM watch_context_policies
 			WHERE repository_id = ? AND owner_type = ? AND owner_key = ? AND action = ? AND active = 1
 			ORDER BY id DESC LIMIT 1`, repositoryID, owner.OwnerType, owner.OwnerKey, action).Scan(&id)
@@ -567,13 +567,13 @@ func (s *Store) saveContextPolicies(ctx context.Context, repositoryID int64, act
 		}
 		reason := "user context " + action
 		if id != 0 {
-			if _, err := s.db.ExecContext(ctx, `UPDATE watch_context_policies SET scope = ?, reason = ?, updated_at = ? WHERE id = ?`, scope, reason, now, id); err != nil {
+			if _, err := s.execRaw(ctx, `UPDATE watch_context_policies SET scope = ?, reason = ?, updated_at = ? WHERE id = ?`, scope, reason, now, id); err != nil {
 				return 0, 0, 0, err
 			}
 			updated++
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `
+		if _, err := s.execRaw(ctx, `
 			INSERT INTO watch_context_policies(repository_id, owner_type, owner_key, action, scope, active, reason, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`, repositoryID, owner.OwnerType, owner.OwnerKey, action, scope, reason, now, now); err != nil {
 			return 0, 0, 0, err
@@ -584,7 +584,7 @@ func (s *Store) saveContextPolicies(ctx context.Context, repositoryID int64, act
 }
 
 func (s *Store) ActiveContextPolicySet(ctx context.Context, repositoryID int64) (contextPolicySet, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT owner_type, owner_key, action
 		FROM watch_context_policies
 		WHERE repository_id = ? AND active = 1

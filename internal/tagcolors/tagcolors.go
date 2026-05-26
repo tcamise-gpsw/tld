@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+
+	"github.com/uptrace/bun"
 )
 
 var SwatchColors = []string{
@@ -15,11 +17,36 @@ var SwatchColors = []string{
 }
 
 func Ensure(ctx context.Context, db *sql.DB, tags []string) error {
+	return ensure(ctx, db.QueryContext, func(ctx context.Context, name, color string) error {
+		_, err := db.ExecContext(ctx, `INSERT INTO tags(name, color, description) VALUES (?, ?, NULL) ON CONFLICT(name) DO NOTHING`, name, color)
+		return err
+	}, tags)
+}
+
+func EnsureBun(ctx context.Context, db *bun.DB, tags []string) error {
+	return ensure(ctx, db.QueryContext, func(ctx context.Context, name, color string) error {
+		_, err := db.NewInsert().
+			Model(&tagModel{Name: name, Color: color}).
+			On("CONFLICT (name) DO NOTHING").
+			Exec(ctx)
+		return err
+	}, tags)
+}
+
+type tagModel struct {
+	bun.BaseModel `bun:"table:tags"`
+
+	Name        string  `bun:"name,pk"`
+	Color       string  `bun:"color"`
+	Description *string `bun:"description"`
+}
+
+func ensure(ctx context.Context, query func(context.Context, string, ...any) (*sql.Rows, error), insert func(context.Context, string, string) error, tags []string) error {
 	if len(tags) == 0 {
 		return nil
 	}
 
-	rows, err := db.QueryContext(ctx, `SELECT name, color FROM tags ORDER BY name`)
+	rows, err := query(ctx, `SELECT name, color FROM tags ORDER BY name`)
 	if err != nil {
 		return err
 	}
@@ -48,7 +75,7 @@ func Ensure(ctx context.Context, db *sql.DB, tags []string) error {
 			continue
 		}
 		color := PickUnusedColor(usedColors)
-		if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO tags(name, color, description) VALUES (?, ?, NULL)`, name, color); err != nil {
+		if err := insert(ctx, name, color); err != nil {
 			return err
 		}
 		usedColors = append(usedColors, color)

@@ -50,37 +50,40 @@ type ReferenceQuery struct {
 }
 
 func (s *Store) BeginFilterRun(ctx context.Context, repositoryID int64, settingsHash, rawGraphHash string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO watch_filter_runs(repository_id, settings_hash, raw_graph_hash, started_at, status)
-		VALUES (?, ?, ?, ?, 'running')`, repositoryID, settingsHash, rawGraphHash, nowString())
+	row := &filterRunModel{RepositoryID: repositoryID, SettingsHash: settingsHash, RawGraphHash: rawGraphHash, StartedAt: nowString(), Status: "running"}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	return row.ID, nil
 }
 
 func (s *Store) SaveFilterDecision(ctx context.Context, filterRunID int64, ownerType string, ownerID int64, ownerKey string, decision, reason string, score *float64, tier int, signalsJSON string) error {
 	if signalsJSON == "" {
 		signalsJSON = "[]"
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO watch_filter_decisions(filter_run_id, owner_type, owner_id, owner_key, decision, reason, score, tier, signals_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, filterRunID, ownerType, ownerID, ownerKey, decision, reason, score, tier, signalsJSON)
+	row := &filterDecisionModel{FilterRunID: filterRunID, OwnerType: ownerType, OwnerID: ownerID, OwnerKey: ownerKey, Decision: decision, Reason: reason, Score: score, Tier: tier, SignalsJSON: signalsJSON}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	return err
 }
 
 func (s *Store) FinishFilterRun(ctx context.Context, id int64, status string, visibleSymbols, hiddenSymbols, visibleReferences, hiddenReferences int) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE watch_filter_runs
-		SET finished_at = ?, status = ?, visible_symbols = ?, hidden_symbols = ?, visible_references = ?, hidden_references = ?
-		WHERE id = ?`,
-		nowString(), status, visibleSymbols, hiddenSymbols, visibleReferences, hiddenReferences, id)
+	_, err := s.bun.NewUpdate().
+		Model((*filterRunModel)(nil)).
+		Set("finished_at = ?", nowString()).
+		Set("status = ?", status).
+		Set("visible_symbols = ?", visibleSymbols).
+		Set("hidden_symbols = ?", hiddenSymbols).
+		Set("visible_references = ?", visibleReferences).
+		Set("hidden_references = ?", hiddenReferences).
+		Where("id = ?", id).
+		Exec(ctx)
 	return err
 }
 
 func (s *Store) UpsertCluster(ctx context.Context, repositoryID int64, stableKey string, parentClusterID *int64, name, kind, algorithm, settingsHash string, memberIDs []int64) (Cluster, error) {
 	now := nowString()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_clusters(repository_id, stable_key, parent_cluster_id, name, kind, algorithm, settings_hash, member_count, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repository_id, stable_key) DO UPDATE SET
@@ -99,11 +102,11 @@ func (s *Store) UpsertCluster(ctx context.Context, repositoryID int64, stableKey
 	if err != nil {
 		return Cluster{}, err
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_cluster_members WHERE cluster_id = ?`, cluster.ID); err != nil {
+	if _, err := s.execRaw(ctx, `DELETE FROM watch_cluster_members WHERE cluster_id = ?`, cluster.ID); err != nil {
 		return Cluster{}, err
 	}
 	for _, memberID := range memberIDs {
-		if _, err := s.db.ExecContext(ctx, `
+		if _, err := s.execRaw(ctx, `
 			INSERT INTO watch_cluster_members(cluster_id, owner_type, owner_id)
 			VALUES (?, 'symbol', ?)`, cluster.ID, memberID); err != nil {
 			return Cluster{}, err
@@ -113,7 +116,7 @@ func (s *Store) UpsertCluster(ctx context.Context, repositoryID int64, stableKey
 }
 
 func (s *Store) Clusters(ctx context.Context, repositoryID int64) ([]Cluster, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, repository_id, stable_key, parent_cluster_id, name, kind, algorithm, settings_hash, member_count, created_at, updated_at
 		FROM watch_clusters
 		WHERE repository_id = ?
@@ -134,14 +137,10 @@ func (s *Store) Clusters(ctx context.Context, repositoryID int64) ([]Cluster, er
 }
 
 func (s *Store) BeginRepresentationRun(ctx context.Context, repositoryID int64, rawGraphHash, settingsHash string, embeddingModelID *int64, representationHash string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	return s.insertReturningID(ctx, `
 		INSERT INTO watch_representation_runs(repository_id, raw_graph_hash, filter_settings_hash, embedding_model_id, representation_hash, started_at, status)
 		VALUES (?, ?, ?, ?, ?, ?, 'running')`,
 		repositoryID, rawGraphHash, settingsHash, embeddingModelID, representationHash, nowString())
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 func (s *Store) FinishRepresentationRun(ctx context.Context, id int64, status string, result RepresentResult, runErr error) error {
@@ -149,7 +148,7 @@ func (s *Store) FinishRepresentationRun(ctx context.Context, id int64, status st
 	if runErr != nil {
 		errText = runErr.Error()
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		UPDATE watch_representation_runs
 		SET finished_at = ?, status = ?, elements_created = ?, elements_updated = ?, connectors_created = ?, connectors_updated = ?, views_created = ?, error = ?
 		WHERE id = ?`,
@@ -177,7 +176,7 @@ func (s *Store) LatestCompletedRepresentationRun(ctx context.Context, repository
 		args = append(args, *embeddingModelID)
 	}
 	result := RepresentResult{RepositoryID: repositoryID}
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+	err := s.rowRaw(ctx, query, args...).Scan(
 		&result.RepresentationRun,
 		&result.RawGraphHash,
 		&result.SettingsHash,
@@ -196,7 +195,7 @@ func (s *Store) LatestCompletedRepresentationRun(ctx context.Context, repository
 
 func (s *Store) MappingResourceID(ctx context.Context, repositoryID int64, ownerType, ownerKey, resourceType string) (int64, bool, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT resource_id FROM watch_materialization
 		WHERE repository_id = ? AND owner_type = ? AND owner_key = ? AND resource_type = ?`,
 		repositoryID, ownerType, ownerKey, resourceType).Scan(&id)
@@ -221,97 +220,68 @@ func (s *Store) EnsureRepository(ctx context.Context, input RepositoryInput) (Re
 	}
 	now := nowString()
 
-	var existingID int64
+	var existing repositoryModel
 	var err error
 	if input.RemoteURL != "" {
-		err = s.db.QueryRowContext(ctx, `SELECT id FROM watch_repositories WHERE remote_url = ?`, input.RemoteURL).Scan(&existingID)
+		err = s.bun.NewSelect().Model(&existing).Column("id").Where("remote_url = ?", input.RemoteURL).Scan(ctx)
 	} else {
-		err = s.db.QueryRowContext(ctx, `SELECT id FROM watch_repositories WHERE repo_root = ? AND identity_status = 'local_only'`, input.RepoRoot).Scan(&existingID)
+		err = s.bun.NewSelect().Model(&existing).Column("id").Where("repo_root = ?", input.RepoRoot).Where("identity_status = 'local_only'").Scan(ctx)
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Repository{}, err
 	}
-	if existingID > 0 {
-		_, err = s.db.ExecContext(ctx, `
-			UPDATE watch_repositories
-			SET repo_root = ?, display_name = ?, branch = ?, head_commit = ?, identity_status = ?, settings_hash = ?, updated_at = ?
-			WHERE id = ?`,
-			input.RepoRoot,
-			input.DisplayName,
-			nullString(input.Branch),
-			nullString(input.HeadCommit),
-			input.IdentityStatus,
-			input.SettingsHash,
-			now,
-			existingID,
-		)
+	if existing.ID > 0 {
+		_, err = s.bun.NewUpdate().
+			Model((*repositoryModel)(nil)).
+			Set("repo_root = ?", input.RepoRoot).
+			Set("display_name = ?", input.DisplayName).
+			Set("branch = ?", nullString(input.Branch)).
+			Set("head_commit = ?", nullString(input.HeadCommit)).
+			Set("identity_status = ?", input.IdentityStatus).
+			Set("settings_hash = ?", input.SettingsHash).
+			Set("updated_at = ?", now).
+			Where("id = ?", existing.ID).
+			Exec(ctx)
 		if err != nil {
 			return Repository{}, err
 		}
-		return s.Repository(ctx, existingID)
+		return s.Repository(ctx, existing.ID)
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO watch_repositories(remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullString(input.RemoteURL),
-		input.RepoRoot,
-		input.DisplayName,
-		nullString(input.Branch),
-		nullString(input.HeadCommit),
-		input.IdentityStatus,
-		input.SettingsHash,
-		now,
-		now,
-	)
+	row := &repositoryModel{
+		RemoteURL:      stringPtrOrNil(input.RemoteURL),
+		RepoRoot:       input.RepoRoot,
+		DisplayName:    input.DisplayName,
+		Branch:         stringPtrOrNil(input.Branch),
+		HeadCommit:     stringPtrOrNil(input.HeadCommit),
+		IdentityStatus: input.IdentityStatus,
+		SettingsHash:   input.SettingsHash,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	_, err = s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return Repository{}, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Repository{}, err
-	}
-	return s.Repository(ctx, id)
+	return s.Repository(ctx, row.ID)
 }
 
 func (s *Store) Repository(ctx context.Context, id int64) (Repository, error) {
-	var repo Repository
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at
-		FROM watch_repositories
-		WHERE id = ?`, id).Scan(
-		&repo.ID,
-		&repo.RemoteURL,
-		&repo.RepoRoot,
-		&repo.DisplayName,
-		&repo.Branch,
-		&repo.HeadCommit,
-		&repo.IdentityStatus,
-		&repo.SettingsHash,
-		&repo.CreatedAt,
-		&repo.UpdatedAt,
-	)
-	return repo, err
+	var row repositoryModel
+	err := s.bun.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx)
+	return repositoryFromModel(row), err
 }
 
 func (s *Store) Repositories(ctx context.Context) ([]Repository, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, remote_url, repo_root, display_name, branch, head_commit, identity_status, settings_hash, created_at, updated_at
-		FROM watch_repositories
-		ORDER BY display_name, id`)
-	if err != nil {
+	var rows []repositoryModel
+	if err := s.bun.NewSelect().Model(&rows).Order("display_name").Order("id").Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var repos []Repository
-	for rows.Next() {
-		var repo Repository
-		if err := rows.Scan(&repo.ID, &repo.RemoteURL, &repo.RepoRoot, &repo.DisplayName, &repo.Branch, &repo.HeadCommit, &repo.IdentityStatus, &repo.SettingsHash, &repo.CreatedAt, &repo.UpdatedAt); err != nil {
-			return nil, err
-		}
-		repos = append(repos, repo)
+	repos := make([]Repository, 0, len(rows))
+	for _, row := range rows {
+		repos = append(repos, repositoryFromModel(row))
 	}
-	return repos, rows.Err()
+	return repos, nil
 }
 
 func (s *Store) ReassociateRepository(ctx context.Context, id int64, remoteURL string) (Repository, error) {
@@ -319,7 +289,7 @@ func (s *Store) ReassociateRepository(ctx context.Context, id int64, remoteURL s
 	if remoteURL == "" {
 		return Repository{}, fmt.Errorf("remote_url is required")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		UPDATE watch_repositories
 		SET remote_url = ?, identity_status = 'known', updated_at = ?
 		WHERE id = ?`, remoteURL, nowString(), id)
@@ -330,13 +300,9 @@ func (s *Store) ReassociateRepository(ctx context.Context, id int64, remoteURL s
 }
 
 func (s *Store) BeginScanRun(ctx context.Context, repositoryID int64, mode string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	return s.insertReturningID(ctx, `
 		INSERT INTO watch_scan_runs(repository_id, mode, started_at, status)
 		VALUES (?, ?, ?, 'running')`, repositoryID, mode, nowString())
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 func (s *Store) FinishScanRun(ctx context.Context, id int64, status string, result ScanResult, runErr error) error {
@@ -346,7 +312,7 @@ func (s *Store) FinishScanRun(ctx context.Context, id int64, status string, resu
 	} else if result.Warning != "" {
 		errText = result.Warning
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		UPDATE watch_scan_runs
 		SET finished_at = ?, status = ?, files_seen = ?, files_parsed = ?, files_skipped = ?, symbols_seen = ?, references_seen = ?, error = ?
 		WHERE id = ?`,
@@ -370,7 +336,7 @@ func (s *Store) UpsertFile(ctx context.Context, repositoryID int64, path, langua
 	}
 	unchanged := found && existing.WorktreeHash == worktreeHash && existing.ScanStatus != "error"
 	if unchanged {
-		_, err := s.db.ExecContext(ctx, `
+		_, err := s.execRaw(ctx, `
 			UPDATE watch_files
 			SET git_blob_hash = ?, size_bytes = ?, mtime_unix = ?, scan_status = 'skipped', scan_error = NULL, updated_at = ?
 			WHERE id = ?`, nullString(gitBlobHash), sizeBytes, mtimeUnix, nowString(), existing.ID)
@@ -386,7 +352,7 @@ func (s *Store) UpsertFile(ctx context.Context, repositoryID int64, path, langua
 		errText = scanErr.Error()
 	}
 	now := nowString()
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.execRaw(ctx, `
 		INSERT INTO watch_files(repository_id, path, language, git_blob_hash, worktree_hash, size_bytes, mtime_unix, scan_status, scan_error, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repository_id, path) DO UPDATE SET
@@ -407,7 +373,7 @@ func (s *Store) UpsertFile(ctx context.Context, repositoryID int64, path, langua
 }
 
 func (s *Store) DeleteMissingFiles(ctx context.Context, repositoryID int64, seen map[string]struct{}) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, path FROM watch_files WHERE repository_id = ?`, repositoryID)
+	rows, err := s.rowsRaw(ctx, `SELECT id, path FROM watch_files WHERE repository_id = ?`, repositoryID)
 	if err != nil {
 		return err
 	}
@@ -427,12 +393,12 @@ func (s *Store) DeleteMissingFiles(ctx context.Context, repositoryID int64, seen
 		return err
 	}
 	for _, id := range ids {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_files WHERE id = ?`, id); err != nil {
+		if _, err := s.execRaw(ctx, `DELETE FROM watch_files WHERE id = ?`, id); err != nil {
 			return err
 		}
 	}
 	if len(ids) > 0 {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_symbol_identities WHERE repository_id = ? AND current_stable_key NOT IN (SELECT stable_key FROM watch_symbols WHERE repository_id = ?)`, repositoryID, repositoryID); err != nil {
+		if _, err := s.execRaw(ctx, `DELETE FROM watch_symbol_identities WHERE repository_id = ? AND current_stable_key NOT IN (SELECT stable_key FROM watch_symbols WHERE repository_id = ?)`, repositoryID, repositoryID); err != nil {
 			return err
 		}
 	}
@@ -445,7 +411,7 @@ func (s *Store) DeleteFilesByPath(ctx context.Context, repositoryID int64, paths
 		if path == "" {
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_files WHERE repository_id = ? AND path = ?`, repositoryID, path); err != nil {
+		if _, err := s.execRaw(ctx, `DELETE FROM watch_files WHERE repository_id = ? AND path = ?`, repositoryID, path); err != nil {
 			return err
 		}
 	}
@@ -472,7 +438,7 @@ func (s *Store) ReplaceFileSymbolsWithMissingCandidates(ctx context.Context, rep
 		identityKey := s.matchSymbolIdentity(sym, existingIdentities, usedIdentities)
 		usedIdentities[identityKey] = struct{}{}
 		now := nowString()
-		_, err := s.db.ExecContext(ctx, `
+		_, err := s.execRaw(ctx, `
 			INSERT INTO watch_symbols(repository_id, file_id, stable_key, name, qualified_name, kind, start_line, end_line, signature_hash, content_hash, raw_json, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(repository_id, stable_key) DO UPDATE SET
@@ -494,7 +460,7 @@ func (s *Store) ReplaceFileSymbolsWithMissingCandidates(ctx context.Context, rep
 			return err
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, stable_key FROM watch_symbols WHERE repository_id = ? AND file_id = ?`, repositoryID, fileID)
+	rows, err := s.rowsRaw(ctx, `SELECT id, stable_key FROM watch_symbols WHERE repository_id = ? AND file_id = ?`, repositoryID, fileID)
 	if err != nil {
 		return err
 	}
@@ -516,12 +482,12 @@ func (s *Store) ReplaceFileSymbolsWithMissingCandidates(ctx context.Context, rep
 		return err
 	}
 	for _, id := range deleteIDs {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_symbols WHERE id = ?`, id); err != nil {
+		if _, err := s.execRaw(ctx, `DELETE FROM watch_symbols WHERE id = ?`, id); err != nil {
 			return err
 		}
 	}
 	for _, key := range deleteStableKeys {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_symbol_identities WHERE repository_id = ? AND current_stable_key = ?`, repositoryID, key); err != nil {
+		if _, err := s.execRaw(ctx, `DELETE FROM watch_symbol_identities WHERE repository_id = ? AND current_stable_key = ?`, repositoryID, key); err != nil {
 			return err
 		}
 	}
@@ -533,7 +499,7 @@ func (s *Store) CachedFileByPath(ctx context.Context, repositoryID int64, path s
 }
 
 func (s *Store) CachedFilesByPath(ctx context.Context, repositoryID int64) (map[string]File, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, repository_id, path, language, git_blob_hash, worktree_hash, size_bytes, mtime_unix, scan_status, scan_error, created_at, updated_at
 		FROM watch_files
 		WHERE repository_id = ?`, repositoryID)
@@ -553,7 +519,7 @@ func (s *Store) CachedFilesByPath(ctx context.Context, repositoryID int64) (map[
 }
 
 func (s *Store) CurrentEnrichmentVersionPaths(ctx context.Context, repositoryID int64, version string) (map[string]struct{}, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT file_path
 		FROM watch_facts
 		WHERE repository_id = ?
@@ -576,7 +542,7 @@ func (s *Store) CurrentEnrichmentVersionPaths(ctx context.Context, repositoryID 
 }
 
 func (s *Store) symbolIdentitiesForFile(ctx context.Context, repositoryID, fileID int64) ([]storedSymbolIdentity, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT COALESCE(i.identity_key, ws.stable_key), ws.stable_key, f.path, ws.kind, ws.name, ws.qualified_name, ws.start_line, ws.content_hash
 		FROM watch_symbols ws
 		JOIN watch_files f ON f.id = ws.file_id
@@ -598,7 +564,7 @@ func (s *Store) symbolIdentitiesForFile(ctx context.Context, repositoryID, fileI
 }
 
 func (s *Store) symbolIdentitiesForRepository(ctx context.Context, repositoryID int64) ([]storedSymbolIdentity, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT COALESCE(i.identity_key, ws.stable_key), ws.stable_key, f.path, ws.kind, ws.name, ws.qualified_name, ws.start_line, ws.content_hash
 		FROM watch_symbols ws
 		JOIN watch_files f ON f.id = ws.file_id
@@ -675,7 +641,7 @@ func (s *Store) materializedOwnerFilePath(ctx context.Context, repositoryID int6
 		return filepathToSlash(path), true, nil
 	case "symbol":
 		var path string
-		err := s.db.QueryRowContext(ctx, `
+		err := s.rowRaw(ctx, `
 			SELECT file_path
 			FROM watch_symbol_identities
 			WHERE repository_id = ? AND (identity_key = ? OR current_stable_key = ?)
@@ -719,7 +685,7 @@ func (s *Store) materializedOwnerMissing(ctx context.Context, repositoryID int64
 }
 
 func (s *Store) deletedMaterializedElementIDs(ctx context.Context, repositoryID int64) (map[int64]struct{}, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT resource_id, owner_type, owner_key
 		FROM watch_materialization
 		WHERE repository_id = ? AND resource_type = 'element' AND owner_type IN ('file', 'symbol')`, repositoryID)
@@ -766,7 +732,7 @@ func (s *Store) connectorTouchesElements(ctx context.Context, connectorID int64,
 		return false, nil
 	}
 	var sourceID, targetID int64
-	err := s.db.QueryRowContext(ctx, `SELECT source_element_id, target_element_id FROM connectors WHERE id = ?`, connectorID).Scan(&sourceID, &targetID)
+	err := s.rowRaw(ctx, `SELECT source_element_id, target_element_id FROM connectors WHERE id = ?`, connectorID).Scan(&sourceID, &targetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -856,7 +822,7 @@ func (s *Store) matchSymbolIdentity(sym Symbol, existing []storedSymbolIdentity,
 
 func (s *Store) UpsertSymbolIdentity(ctx context.Context, repositoryID int64, identityKey string, sym Symbol) error {
 	now := nowString()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_symbol_identities(repository_id, identity_key, current_stable_key, file_path, kind, name, qualified_name, start_line, content_hash, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repository_id, identity_key) DO UPDATE SET
@@ -873,7 +839,7 @@ func (s *Store) UpsertSymbolIdentity(ctx context.Context, repositoryID int64, id
 }
 
 func (s *Store) SymbolIdentityKeys(ctx context.Context, repositoryID int64) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT current_stable_key, identity_key FROM watch_symbol_identities WHERE repository_id = ?`, repositoryID)
+	rows, err := s.rowsRaw(ctx, `SELECT current_stable_key, identity_key FROM watch_symbol_identities WHERE repository_id = ?`, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -891,19 +857,19 @@ func (s *Store) SymbolIdentityKeys(ctx context.Context, repositoryID int64) (map
 
 func (s *Store) ReplaceReferencesForFiles(ctx context.Context, repositoryID int64, fileIDs []int64, refs []Reference) error {
 	for _, fileID := range fileIDs {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_references WHERE repository_id = ? AND source_file_id = ?`, repositoryID, fileID); err != nil {
+		if _, err := s.execRaw(ctx, `DELETE FROM watch_references WHERE repository_id = ? AND source_file_id = ?`, repositoryID, fileID); err != nil {
 			return err
 		}
 	}
 	for _, ref := range refs {
 		now := nowString()
-		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO watch_references(repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, column, evidence_hash, raw_json, created_at, updated_at)
+		_, err := s.execRaw(ctx, `
+			INSERT INTO watch_references(repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, "column", evidence_hash, raw_json, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(repository_id, source_symbol_id, target_symbol_id, kind, evidence_hash) DO UPDATE SET
 				source_file_id = excluded.source_file_id,
 				line = excluded.line,
-				column = excluded.column,
+				"column" = excluded."column",
 				raw_json = excluded.raw_json,
 				updated_at = excluded.updated_at`,
 			repositoryID, ref.SourceSymbolID, ref.TargetSymbolID, ref.SourceFileID, ref.Kind, ref.Line, ref.Column, ref.EvidenceHash, ref.RawJSON, now, now)
@@ -915,7 +881,7 @@ func (s *Store) ReplaceReferencesForFiles(ctx context.Context, repositoryID int6
 }
 
 func (s *Store) ReplaceFactsForFile(ctx context.Context, repositoryID, fileID int64, facts []Fact) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_facts WHERE repository_id = ? AND file_id = ?`, repositoryID, fileID); err != nil {
+	if _, err := s.execRaw(ctx, `DELETE FROM watch_facts WHERE repository_id = ? AND file_id = ?`, repositoryID, fileID); err != nil {
 		return err
 	}
 	for _, fact := range facts {
@@ -930,7 +896,7 @@ func (s *Store) ReplaceFactsForFile(ctx context.Context, repositoryID, fileID in
 		if fact.RawJSON == "" {
 			fact.RawJSON = "{}"
 		}
-		_, err := s.db.ExecContext(ctx, `
+		_, err := s.execRaw(ctx, `
 			INSERT INTO watch_facts(repository_id, file_id, stable_key, type, enricher, subject_kind, subject_stable_key, object_kind, object_stable_key, object_file_path, object_name, relationship, file_path, start_line, end_line, confidence, name, tags, attributes_json, visibility_hints_json, fact_hash, raw_json, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(repository_id, enricher, stable_key) DO UPDATE SET
@@ -964,7 +930,7 @@ func (s *Store) ReplaceFactsForFile(ctx context.Context, repositoryID, fileID in
 
 func (s *Store) FactVersionForFile(ctx context.Context, repositoryID, fileID int64, enricher, stableKey string) (string, error) {
 	var version string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT name
 		FROM watch_facts
 		WHERE repository_id = ? AND file_id = ? AND enricher = ? AND stable_key = ?
@@ -979,7 +945,7 @@ func (s *Store) FactVersionForFile(ctx context.Context, repositoryID, fileID int
 }
 
 func (s *Store) FactsForRepository(ctx context.Context, repositoryID int64) ([]Fact, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, repository_id, file_id, file_path, stable_key, type, enricher, subject_kind, subject_stable_key, object_kind, object_stable_key, object_file_path, object_name, relationship, start_line, end_line, confidence, name, tags, attributes_json, visibility_hints_json, fact_hash, raw_json, created_at, updated_at
 		FROM watch_facts
 		WHERE repository_id = ?
@@ -1010,7 +976,7 @@ func (s *Store) querySymbolsWhere(ctx context.Context, repositoryID int64, where
 		JOIN watch_files f ON f.id = s.file_id
 		WHERE s.repository_id = ? AND ` + whereClause
 	fullArgs := append([]any{repositoryID}, args...)
-	rows, err := s.db.QueryContext(ctx, query, fullArgs...)
+	rows, err := s.rowsRaw(ctx, query, fullArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1038,10 +1004,7 @@ func (s *Store) QuerySymbolsByFiles(ctx context.Context, repositoryID int64, fil
 	}
 	var allSymbols []Symbol
 	for i := 0; i < len(filePaths); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(filePaths) {
-			end = len(filePaths)
-		}
+		end := min(i+maxInClauseIDs, len(filePaths))
 		batch := filePaths[i:end]
 		placeholders, inArgs := buildParameterListStrings(batch)
 		syms, err := s.querySymbolsWhere(ctx, repositoryID, "f.path IN ("+placeholders+")", inArgs...)
@@ -1060,10 +1023,7 @@ func (s *Store) QuerySymbolsByIDs(ctx context.Context, repositoryID int64, ids [
 	}
 	var allSymbols []Symbol
 	for i := 0; i < len(ids); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(ids) {
-			end = len(ids)
-		}
+		end := min(i+maxInClauseIDs, len(ids))
 		batch := ids[i:end]
 		placeholders, inArgs := buildParameterList(batch)
 		syms, err := s.querySymbolsWhere(ctx, repositoryID, "s.id IN ("+placeholders+")", inArgs...)
@@ -1105,7 +1065,7 @@ func (s *Store) QuerySymbols(ctx context.Context, repositoryID int64, q SymbolQu
 			args = append(args, q.Limit, q.Offset)
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.rowsRaw(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1128,7 +1088,7 @@ func (s *Store) QuerySymbols(ctx context.Context, repositoryID int64, q SymbolQu
 
 func (s *Store) QueryReferences(ctx context.Context, repositoryID int64, q ReferenceQuery) ([]Reference, error) {
 	query := `
-		SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, column, evidence_hash, raw_json, created_at, updated_at
+		SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, "column", evidence_hash, raw_json, created_at, updated_at
 		FROM watch_references
 		WHERE repository_id = ?`
 	args := []any{repositoryID}
@@ -1136,13 +1096,13 @@ func (s *Store) QueryReferences(ctx context.Context, repositoryID int64, q Refer
 		query += ` AND (source_symbol_id = ? OR target_symbol_id = ?)`
 		args = append(args, q.SymbolID, q.SymbolID)
 	}
-	query += ` ORDER BY source_file_id, line, column`
+	query += ` ORDER BY source_file_id, line, "column"`
 	if q.Limit == 0 {
 		q.Limit = 100
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, q.Limit, q.Offset)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.rowsRaw(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1159,9 +1119,9 @@ func (s *Store) QueryReferences(ctx context.Context, repositoryID int64, q Refer
 }
 
 func (s *Store) queryReferencesWhere(ctx context.Context, repositoryID int64, whereClause string, whereArgs ...any) ([]Reference, error) {
-	query := "SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, column, evidence_hash, raw_json, created_at, updated_at FROM watch_references WHERE repository_id = ? AND " + whereClause + " ORDER BY source_file_id, line, column"
+	query := `SELECT id, repository_id, source_symbol_id, target_symbol_id, source_file_id, kind, line, "column", evidence_hash, raw_json, created_at, updated_at FROM watch_references WHERE repository_id = ? AND ` + whereClause + ` ORDER BY source_file_id, line, "column"`
 	args := append([]any{repositoryID}, whereArgs...)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.rowsRaw(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1174,7 +1134,7 @@ func (s *Store) BuildDegreeMaps(ctx context.Context, repositoryID int64) (incomi
 	incoming = make(map[int64]int)
 	outgoing = make(map[int64]int)
 
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.rowsRaw(ctx,
 		"SELECT source_symbol_id, COUNT(*) FROM watch_references WHERE repository_id = ? GROUP BY source_symbol_id",
 		repositoryID)
 	if err != nil {
@@ -1193,7 +1153,7 @@ func (s *Store) BuildDegreeMaps(ctx context.Context, repositoryID int64) (incomi
 		return nil, nil, err
 	}
 
-	rows2, err := s.db.QueryContext(ctx,
+	rows2, err := s.rowsRaw(ctx,
 		"SELECT target_symbol_id, COUNT(*) FROM watch_references WHERE repository_id = ? GROUP BY target_symbol_id",
 		repositoryID)
 	if err != nil {
@@ -1222,10 +1182,7 @@ func (s *Store) QueryReferencesBySourceIDs(ctx context.Context, repositoryID int
 	}
 	var allRefs []Reference
 	for i := 0; i < len(sourceIDs); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(sourceIDs) {
-			end = len(sourceIDs)
-		}
+		end := min(i+maxInClauseIDs, len(sourceIDs))
 		batch := sourceIDs[i:end]
 		placeholders, inArgs := buildParameterList(batch)
 		refs, err := s.queryReferencesWhere(ctx, repositoryID, "source_symbol_id IN ("+placeholders+")", inArgs...)
@@ -1244,10 +1201,7 @@ func (s *Store) QueryReferencesByTargetIDs(ctx context.Context, repositoryID int
 	}
 	var allRefs []Reference
 	for i := 0; i < len(targetIDs); i += maxInClauseIDs {
-		end := i + maxInClauseIDs
-		if end > len(targetIDs) {
-			end = len(targetIDs)
-		}
+		end := min(i+maxInClauseIDs, len(targetIDs))
 		batch := targetIDs[i:end]
 		placeholders, inArgs := buildParameterList(batch)
 		refs, err := s.queryReferencesWhere(ctx, repositoryID, "target_symbol_id IN ("+placeholders+")", inArgs...)
@@ -1275,7 +1229,7 @@ func (s *Store) WatchResourceHash(ctx context.Context, resourceType string, reso
 func (s *Store) watchElementHash(ctx context.Context, id int64) (string, bool, error) {
 	var kind, description, technology, repo, branch, filePath, language sql.NullString
 	var name, techLinks, tags string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT name, kind, description, technology, technology_connectors, tags, repo, branch, file_path, language
 		FROM elements WHERE id = ?`, id).Scan(&name, &kind, &description, &technology, &techLinks, &tags, &repo, &branch, &filePath, &language)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1303,7 +1257,7 @@ func (s *Store) watchConnectorHash(ctx context.Context, id int64) (string, bool,
 	var label, relationship sql.NullString
 	var viewID, sourceID, targetID int64
 	var direction, style string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT view_id, source_element_id, target_element_id, label, relationship, direction, style
 		FROM connectors WHERE id = ?`, id).Scan(&viewID, &sourceID, &targetID, &label, &relationship, &direction, &style)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1328,7 +1282,7 @@ func (s *Store) watchViewHash(ctx context.Context, id int64) (string, bool, erro
 	var ownerID sql.NullInt64
 	var levelLabel sql.NullString
 	var name string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT owner_element_id, name, level_label
 		FROM views WHERE id = ?`, id).Scan(&ownerID, &name, &levelLabel)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1351,7 +1305,7 @@ func (s *Store) watchViewHash(ctx context.Context, id int64) (string, bool, erro
 
 func (s *Store) CreateWatchVersion(ctx context.Context, repositoryID int64, commitHash, commitMessage, parentCommitHash, branch, representationHash string, workspaceVersionID *int64, diffs []RepresentationDiff) (Version, error) {
 	now := nowString()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		INSERT INTO watch_versions(repository_id, commit_hash, commit_message, parent_commit_hash, branch, representation_hash, workspace_version_id, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repository_id, commit_hash, representation_hash) DO NOTHING`,
@@ -1364,7 +1318,7 @@ func (s *Store) CreateWatchVersion(ctx context.Context, repositoryID int64, comm
 		return Version{}, err
 	}
 	for _, diff := range diffs {
-		_, err := s.db.ExecContext(ctx, `
+		_, err := s.execRaw(ctx, `
 			INSERT INTO watch_representation_diffs(version_id, owner_type, owner_key, change_type, before_hash, after_hash, resource_type, resource_id, summary, added_lines, removed_lines)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			version.ID, diff.OwnerType, diff.OwnerKey, diff.ChangeType, diff.BeforeHash, diff.AfterHash, diff.ResourceType, diff.ResourceID, diff.Summary, diff.AddedLines, diff.RemovedLines)
@@ -1385,7 +1339,7 @@ func (s *Store) PruneWatchVersions(ctx context.Context, repositoryID int64, keep
 	if keep <= 0 {
 		keep = 5
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execRaw(ctx, `
 		DELETE FROM watch_versions
 		WHERE repository_id = ?
 		  AND id NOT IN (
@@ -1399,7 +1353,7 @@ func (s *Store) PruneWatchVersions(ctx context.Context, repositoryID int64, keep
 }
 
 func (s *Store) WatchVersion(ctx context.Context, repositoryID int64, commitHash, representationHash string) (Version, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.rowRaw(ctx, `
 		SELECT id, repository_id, commit_hash, commit_message, parent_commit_hash, branch, representation_hash, workspace_version_id, created_at
 		FROM watch_versions
 		WHERE repository_id = ? AND commit_hash = ? AND representation_hash = ?`, repositoryID, commitHash, representationHash)
@@ -1410,7 +1364,7 @@ func (s *Store) WatchVersions(ctx context.Context, repositoryID int64, limit int
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rowsRaw(ctx, `
 		SELECT id, repository_id, commit_hash, commit_message, parent_commit_hash, branch, representation_hash, workspace_version_id, created_at
 		FROM watch_versions
 		WHERE repository_id = ?
@@ -1432,7 +1386,7 @@ func (s *Store) WatchVersions(ctx context.Context, repositoryID int64, limit int
 }
 
 func (s *Store) LatestWatchVersion(ctx context.Context, repositoryID int64) (Version, bool, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.rowRaw(ctx, `
 		SELECT id, repository_id, commit_hash, commit_message, parent_commit_hash, branch, representation_hash, workspace_version_id, created_at
 		FROM watch_versions
 		WHERE repository_id = ?
@@ -1451,7 +1405,7 @@ func (s *Store) WorkspaceResourceCounts(ctx context.Context) (views, elements, c
 		`SELECT COUNT(*) FROM elements`:   &elements,
 		`SELECT COUNT(*) FROM connectors`: &connectors,
 	} {
-		if scanErr := s.db.QueryRowContext(ctx, query).Scan(dest); scanErr != nil {
+		if scanErr := s.rowRaw(ctx, query).Scan(dest); scanErr != nil {
 			return 0, 0, 0, scanErr
 		}
 	}
@@ -1459,14 +1413,10 @@ func (s *Store) WorkspaceResourceCounts(ctx context.Context) (views, elements, c
 }
 
 func (s *Store) CreateWorkspaceVersion(ctx context.Context, versionID, source string, parentID *int64, viewCount, elementCount, connectorCount int, description, workspaceHash *string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	return s.insertReturningID(ctx, `
 		INSERT INTO workspace_versions(version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		versionID, source, parentID, viewCount, elementCount, connectorCount, description, workspaceHash, nowString())
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 func (s *Store) WatchDiffs(ctx context.Context, versionID int64, ownerType, changeType, resourceType, language string, limit int) ([]RepresentationDiff, error) {
@@ -1492,7 +1442,7 @@ func (s *Store) WatchDiffs(ctx context.Context, versionID int64, ownerType, chan
 	}
 	query += ` ORDER BY id LIMIT ?`
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.rowsRaw(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -12,10 +12,10 @@ import (
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/mertcikla/tld/v2/internal/app"
 	"github.com/mertcikla/tld/v2/internal/layout"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/mertcikla/tld/v2/pkg/api"
+	"github.com/mertcikla/tld/v2/pkg/app"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -349,11 +349,24 @@ func (a *APIAdapter) CreateConnector(ctx context.Context, _ uuid.UUID, input api
 
 func (a *APIAdapter) createConnectorWithID(ctx context.Context, id int32, input api.ConnectorInput) (*diagv1.Connector, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := a.Store.legacy.DB().ExecContext(ctx, `
-		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, input.ViewID, input.SourceID, input.TargetID, input.Label, input.Description, input.Relationship,
-		input.Direction, input.Style, input.URL, input.SourceHandle, input.TargetHandle, jsonString(input.Tags, "[]"), now, now)
+	_, err := a.Store.legacy.BunDB().NewInsert().
+		Table("connectors").
+		Value("id", "?", id).
+		Value("view_id", "?", input.ViewID).
+		Value("source_element_id", "?", input.SourceID).
+		Value("target_element_id", "?", input.TargetID).
+		Value("label", "?", input.Label).
+		Value("description", "?", input.Description).
+		Value("relationship", "?", input.Relationship).
+		Value("direction", "?", input.Direction).
+		Value("style", "?", input.Style).
+		Value("url", "?", input.URL).
+		Value("source_handle", "?", input.SourceHandle).
+		Value("target_handle", "?", input.TargetHandle).
+		Value("tags", "?", jsonString(input.Tags, "[]")).
+		Value("created_at", "?", now).
+		Value("updated_at", "?", now).
+		Exec(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -779,37 +792,37 @@ func (a *APIAdapter) layoutPlanView(ctx context.Context, viewID int64, targets m
 }
 
 func (a *APIAdapter) planViewPlacementNodes(ctx context.Context, viewID int64) ([]layout.Placement, error) {
-	rows, err := a.Store.legacy.DB().QueryContext(ctx, `SELECT element_id, position_x, position_y FROM placements WHERE view_id = ? ORDER BY id`, viewID)
-	if err != nil {
+	var rows []placementLayoutModel
+	if err := a.Store.legacy.BunDB().NewSelect().
+		Model(&rows).
+		Column("element_id", "position_x", "position_y").
+		Where("view_id = ?", viewID).
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []layout.Placement
-	for rows.Next() {
-		var p layout.Placement
-		if err := rows.Scan(&p.ElementID, &p.X, &p.Y); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
+	out := make([]layout.Placement, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, layout.Placement{ElementID: row.ElementID, X: row.PositionX, Y: row.PositionY})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (a *APIAdapter) planViewLayoutConnectors(ctx context.Context, viewID int64) ([]layout.Connector, error) {
-	rows, err := a.Store.legacy.DB().QueryContext(ctx, `SELECT source_element_id, target_element_id FROM connectors WHERE view_id = ? ORDER BY id`, viewID)
-	if err != nil {
+	var rows []connectorLayoutModel
+	if err := a.Store.legacy.BunDB().NewSelect().
+		Model(&rows).
+		Column("source_element_id", "target_element_id").
+		Where("view_id = ?", viewID).
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []layout.Connector
-	for rows.Next() {
-		var c layout.Connector
-		if err := rows.Scan(&c.Source, &c.Target); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
+	out := make([]layout.Connector, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, layout.Connector{Source: row.SourceElementID, Target: row.TargetElementID})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // PruneMissingCLIResources removes resources previously owned by CLI metadata
@@ -869,69 +882,75 @@ func (a *APIAdapter) ListVersions(ctx context.Context, workspaceID uuid.UUID, li
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := a.Store.DB().QueryContext(ctx, `
-		SELECT id, version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at
-		FROM workspace_versions
-		ORDER BY id DESC
-		LIMIT ?`, limit)
-	if err != nil {
+	var rows []workspaceVersionModel
+	if err := a.Store.legacy.BunDB().NewSelect().
+		Model(&rows).
+		Order("id DESC").
+		Limit(limit).
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []*diagv1.WorkspaceVersionInfo
-	for rows.Next() {
-		version, err := scanWorkspaceVersion(rows, workspaceID)
+	out := make([]*diagv1.WorkspaceVersionInfo, 0, len(rows))
+	for _, row := range rows {
+		version, err := workspaceVersionToProto(row, workspaceID)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, version)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (a *APIAdapter) GetLatestVersion(ctx context.Context, workspaceID uuid.UUID) (*diagv1.WorkspaceVersionInfo, error) {
-	row := a.Store.DB().QueryRowContext(ctx, `
-		SELECT id, version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at
-		FROM workspace_versions
-		ORDER BY id DESC
-		LIMIT 1`)
-	version, err := scanWorkspaceVersion(row, workspaceID)
+	var row workspaceVersionModel
+	err := a.Store.legacy.BunDB().NewSelect().
+		Model(&row).
+		Order("id DESC").
+		Limit(1).
+		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, api.ErrUnimplemented
 	}
-	return version, err
+	if err != nil {
+		return nil, err
+	}
+	return workspaceVersionToProto(row, workspaceID)
 }
 
 func (a *APIAdapter) CreateVersion(ctx context.Context, workspaceID uuid.UUID, versionID, source string, parentID *int32, viewCount, elementCount, connectorCount int, description, workspaceHash *string) (*diagv1.WorkspaceVersionInfo, error) {
-	var parent any
+	var parent *int64
 	if parentID != nil {
-		parent = *parentID
+		value := int64(*parentID)
+		parent = &value
 	}
-	res, err := a.Store.DB().ExecContext(ctx, `
-		INSERT INTO workspace_versions(version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		versionID, source, parent, viewCount, elementCount, connectorCount, description, workspaceHash, time.Now().UTC().Format(time.RFC3339))
+	row := &workspaceVersionModel{
+		VersionID:       versionID,
+		Source:          source,
+		ParentVersionID: parent,
+		ViewCount:       int64(viewCount),
+		ElementCount:    int64(elementCount),
+		ConnectorCount:  int64(connectorCount),
+		Description:     description,
+		WorkspaceHash:   workspaceHash,
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
+	}
+	_, err := a.Store.legacy.BunDB().NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return nil, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	row := a.Store.DB().QueryRowContext(ctx, `
-		SELECT id, version_id, source, parent_version_id, view_count, element_count, connector_count, description, workspace_hash, created_at
-		FROM workspace_versions
-		WHERE id = ?`, id)
-	return scanWorkspaceVersion(row, workspaceID)
+	return workspaceVersionToProto(*row, workspaceID)
 }
 
 func (a *APIAdapter) GetVersioningEnabled(ctx context.Context, _ uuid.UUID) (bool, error) {
-	var enabled int
-	err := a.Store.DB().QueryRowContext(ctx, `SELECT cli_versioning_enabled FROM workspace_version_settings WHERE id = 1`).Scan(&enabled)
+	var row workspaceVersionSettingsModel
+	err := a.Store.legacy.BunDB().NewSelect().
+		Model(&row).
+		Where("id = 1").
+		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
-	return enabled != 0, err
+	return row.CLIVersioningEnabled != 0, err
 }
 
 func (a *APIAdapter) SetVersioningEnabled(ctx context.Context, _ uuid.UUID, enabled bool) error {
@@ -939,25 +958,26 @@ func (a *APIAdapter) SetVersioningEnabled(ctx context.Context, _ uuid.UUID, enab
 	if enabled {
 		value = 1
 	}
-	_, err := a.Store.DB().ExecContext(ctx, `
-		INSERT INTO workspace_version_settings(id, cli_versioning_enabled)
-		VALUES (1, ?)
-		ON CONFLICT(id) DO UPDATE SET cli_versioning_enabled = excluded.cli_versioning_enabled`, value)
+	_, err := a.Store.legacy.BunDB().NewInsert().
+		Model(&workspaceVersionSettingsModel{ID: 1, CLIVersioningEnabled: value}).
+		On("CONFLICT(id) DO UPDATE").
+		Set("cli_versioning_enabled = excluded.cli_versioning_enabled").
+		Exec(ctx)
 	return err
 }
 
 func (a *APIAdapter) GetWorkspaceResourceCounts(ctx context.Context, _ uuid.UUID) (views, elements, connectors int, err error) {
-	for _, item := range []struct {
-		query string
-		dest  *int
-	}{
-		{query: `SELECT COUNT(*) FROM views`, dest: &views},
-		{query: `SELECT COUNT(*) FROM elements`, dest: &elements},
-		{query: `SELECT COUNT(*) FROM connectors`, dest: &connectors},
-	} {
-		if err := a.Store.DB().QueryRowContext(ctx, item.query).Scan(item.dest); err != nil {
-			return 0, 0, 0, err
-		}
+	views, err = a.Store.legacy.BunDB().NewSelect().Model((*countModel)(nil)).Count(ctx)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	elements, err = a.Store.legacy.BunDB().NewSelect().Model((*elementCountModel)(nil)).Count(ctx)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	connectors, err = a.Store.legacy.BunDB().NewSelect().Model((*connectorCountModel)(nil)).Count(ctx)
+	if err != nil {
+		return 0, 0, 0, err
 	}
 	return views, elements, connectors, nil
 }
@@ -975,44 +995,30 @@ func (a *APIAdapter) ensureRootViewID(ctx context.Context) (int32, error) {
 	return 0, fmt.Errorf("root view not found")
 }
 
-type sqlRowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanWorkspaceVersion(row sqlRowScanner, workspaceID uuid.UUID) (*diagv1.WorkspaceVersionInfo, error) {
-	var (
-		id, viewCount, elementCount, connectorCount int64
-		versionID, source, createdAtRaw             string
-		parentID                                    sql.NullInt64
-		description                                 sql.NullString
-		workspaceHash                               sql.NullString
-	)
-	if err := row.Scan(&id, &versionID, &source, &parentID, &viewCount, &elementCount, &connectorCount, &description, &workspaceHash, &createdAtRaw); err != nil {
-		return nil, err
-	}
-	createdAt, err := time.Parse(time.RFC3339, createdAtRaw)
+func workspaceVersionToProto(row workspaceVersionModel, workspaceID uuid.UUID) (*diagv1.WorkspaceVersionInfo, error) {
+	createdAt, err := time.Parse(time.RFC3339, row.CreatedAt)
 	if err != nil {
 		createdAt = time.Now().UTC()
 	}
 	info := &diagv1.WorkspaceVersionInfo{
-		Id:             strconv.FormatInt(id, 10),
+		Id:             strconv.FormatInt(row.ID, 10),
 		OrgId:          workspaceID.String(),
-		VersionId:      versionID,
-		Source:         source,
-		ViewCount:      int32(viewCount),
-		ElementCount:   int32(elementCount),
-		ConnectorCount: int32(connectorCount),
+		VersionId:      row.VersionID,
+		Source:         row.Source,
+		ViewCount:      int32(row.ViewCount),
+		ElementCount:   int32(row.ElementCount),
+		ConnectorCount: int32(row.ConnectorCount),
 		CreatedAt:      timestamppb.New(createdAt),
 	}
-	if parentID.Valid {
-		parent := strconv.FormatInt(parentID.Int64, 10)
+	if row.ParentVersionID != nil {
+		parent := strconv.FormatInt(*row.ParentVersionID, 10)
 		info.ParentVersionId = &parent
 	}
-	if description.Valid {
-		info.Description = &description.String
+	if row.Description != nil {
+		info.Description = row.Description
 	}
-	if workspaceHash.Valid {
-		info.WorkspaceHash = &workspaceHash.String
+	if row.WorkspaceHash != nil {
+		info.WorkspaceHash = row.WorkspaceHash
 	}
 	return info, nil
 }

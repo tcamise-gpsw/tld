@@ -225,6 +225,24 @@ func TestGlobalConfigScaleRecentAndCallerEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestGlobalConfigDatabaseEnvOverrides(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	t.Setenv("TLD_DB_DRIVER", "postgres")
+	t.Setenv("TLD_DATABASE_URL", "postgres://user:pass@example.test/tld")
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Database.Driver != "postgres" {
+		t.Fatalf("Database.Driver = %q, want postgres", cfg.Database.Driver)
+	}
+	if cfg.Database.DatabaseURL != "postgres://user:pass@example.test/tld" {
+		t.Fatalf("Database.DatabaseURL = %q", cfg.Database.DatabaseURL)
+	}
+}
+
 func TestSetGlobalConfigLSPValue(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("TLD_CONFIG_DIR", configDir)

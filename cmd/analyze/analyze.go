@@ -133,13 +133,13 @@ to elements.yaml and connectors.yaml. Manual YAML resources are preserved.`,
 			}
 			storeStarted := time.Now()
 			logger.InfoContext(cmd.Context(), "analyze.store_open.started", "database", localserver.DatabasePath(dataDir))
-			sqliteStore, err := store.Open(localserver.DatabasePath(dataDir), assets.FS)
+			sqliteStore, err := store.OpenLocal(cmd.Context(), cfg, dataDir, assets.FS)
 			if err != nil {
 				return fail("analyze.store_open.failed", err, "elapsed", time.Since(storeStarted).Round(time.Millisecond).String())
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
+			defer func() { _ = sqliteStore.Close() }()
 			logger.InfoContext(cmd.Context(), "analyze.store_open.completed", "elapsed", time.Since(storeStarted).Round(time.Millisecond).String())
-			watchStore := watchpkg.NewStore(sqliteStore.DB())
+			watchStore := watchpkg.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
 			progress := newAnalyzeWatchProgress(cmd.ErrOrStderr())
 			if formatFlag(cmd) != "json" {
 				term.PrintLogo(cmd.OutOrStdout(), version.Version)

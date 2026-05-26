@@ -151,7 +151,7 @@ func NewWatchCmd() *cobra.Command {
 				term.Label(cmd.OutOrStdout(), 20, "Embedding health", fmt.Sprintf("dimension=%d similarity=%.3f", health.Dimension, health.Similarity))
 			}
 			serveCfg := workspace.ResolveServeOptions(cfg, host, port)
-			serveOpts := localserver.ServeOptions{Host: serveCfg.Host, Port: serveCfg.Port}
+			serveOpts := localserver.ServeOptions{Host: serveCfg.Host, Port: serveCfg.Port, Config: cfg}
 			addr := localserver.ResolveAddr(serveOpts)
 			url := "http://" + addr
 			if err := localserver.RegisterProcess(localserver.ProcessRecord{
@@ -217,20 +217,20 @@ func NewWatchCmd() *cobra.Command {
 			if progress != nil {
 				progress.Start("Opening workspace database", 1)
 			}
-			sqliteStore, err := store.Open(localserver.DatabasePath(dataDir), assets.FS)
+			sqliteStore, err := store.OpenLocal(cmd.Context(), cfg, dataDir, assets.FS)
 			if err != nil {
 				if progress != nil {
 					progress.Finish()
 				}
 				return fail("watch.store_open.failed", err, "elapsed", time.Since(storeStarted).Round(time.Millisecond).String())
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
+			defer func() { _ = sqliteStore.Close() }()
 			if progress != nil {
 				progress.Advance("")
 				progress.Finish()
 			}
 			logger.InfoContext(cmd.Context(), "watch.store_open.completed", "elapsed", time.Since(storeStarted).Round(time.Millisecond).String())
-			watchStore := watch.NewStore(sqliteStore.DB())
+			watchStore := watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			events := watch.NewEventQueue()
@@ -622,12 +622,12 @@ func newScanCmd() *cobra.Command {
 				return fmt.Errorf("create data dir: %w", err)
 			}
 			watchSettings := resolveWatchSettings(cfg, languageFlags, "", "", "", 0, 0, 0, 0, 0)
-			sqliteStore, err := store.Open(localserver.DatabasePath(dataDir), assets.FS)
+			sqliteStore, err := store.OpenLocal(cmd.Context(), cfg, dataDir, assets.FS)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
-			scanner := watch.NewScanner(watch.NewStore(sqliteStore.DB()))
+			defer func() { _ = sqliteStore.Close() }()
+			scanner := watch.NewScanner(watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect()))
 			scanner.Settings = watchSettings
 			scanner.Progress = newCLIProgress(cmd.ErrOrStderr())
 			result, err := scanner.ScanWithOptions(cmd.Context(), path, watch.ScanOptions{Force: rescan, DataDir: dataDir})
@@ -694,12 +694,12 @@ func newRepresentCmd() *cobra.Command {
 				embeddingCfg = checked
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Embedding:       %s/%s dimension=%d similarity=%.3f\n", embeddingCfg.Provider, embeddingCfg.Model, health.Dimension, health.Similarity)
 			}
-			sqliteStore, err := store.Open(localserver.DatabasePath(dataDir), assets.FS)
+			sqliteStore, err := store.OpenLocal(cmd.Context(), cfg, dataDir, assets.FS)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = sqliteStore.DB().Close() }()
-			watchStore := watch.NewStore(sqliteStore.DB())
+			defer func() { _ = sqliteStore.Close() }()
+			watchStore := watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
 			scanner := watch.NewScanner(watchStore)
 			scanner.Settings = watchSettings
 			scanner.Progress = progress
@@ -867,12 +867,12 @@ func runWatchDiff(cmd *cobra.Command, path string, opts watchDiffOptions) error 
 	embeddingCfg := resolveEmbeddingConfig(cfg, opts.EmbeddingProvider, opts.EmbeddingEndpoint, opts.EmbeddingModel, opts.EmbeddingDimension, opts.EmbeddingMaxTokens, opts.EmbeddingRuntimePath)
 	watchSettings := resolveWatchSettings(cfg, opts.LanguageFlags, "", "", "", opts.MaxElements, opts.MaxConnectors, opts.MaxIncoming, opts.MaxOutgoing, opts.MaxExpandedGroup)
 	logger.InfoContext(cmd.Context(), "watch.diff.started", "path", path, "data_dir", dataDir, "rescan", opts.Rescan, "fail_on_drift", opts.FailOnDrift, "group_diffs", opts.GroupDiffs, "embedding_provider", embeddingCfg.Provider, "embedding_model", embeddingCfg.Model, "languages", strings.Join(watchSettings.Languages, ","))
-	sqliteStore, err := store.Open(localserver.DatabasePath(dataDir), assets.FS)
+	sqliteStore, err := store.OpenLocal(cmd.Context(), cfg, dataDir, assets.FS)
 	if err != nil {
 		return fail("watch.diff.store_open.failed", err)
 	}
-	defer func() { _ = sqliteStore.DB().Close() }()
-	watchStore := watch.NewStore(sqliteStore.DB())
+	defer func() { _ = sqliteStore.Close() }()
+	watchStore := watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
 	once, err := watch.NewRunner(watchStore).RunOnce(cmd.Context(), watch.OneShotOptions{Path: path, Rescan: opts.Rescan, Embedding: embeddingCfg, Settings: watchSettings, DataDir: dataDir, Logger: logger})
 	if err != nil {
 		return fail("watch.diff.pipeline.failed", err)
