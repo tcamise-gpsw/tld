@@ -1070,57 +1070,6 @@ export default function Inventory() {
           </Flex>
 
           <Box w={{ base: '0', xl: '340px' }} display={{ base: 'none', xl: 'flex' }} flexDir="column" borderLeft="1px solid" borderColor="whiteAlpha.100" overflow="hidden" position="relative">
-            {selectedRow && (
-              <Box p={4} borderBottom="1px solid" borderColor="whiteAlpha.100" bg="rgba(15, 15, 20, 0.45)" backdropFilter="blur(12px)">
-                <Flex gap={2}>
-                  <Button
-                    data-testid="inventory-action-explore"
-                    leftIcon={
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
-                      </svg>
-                    }
-                    size="sm"
-                    w="50%"
-                    bg="rgba(var(--accent-rgb), 0.12)"
-                    color="var(--accent)"
-                    border="1px solid"
-                    borderColor="rgba(var(--accent-rgb), 0.2)"
-                    _hover={{ bg: 'rgba(var(--accent-rgb), 0.18)', borderColor: 'rgba(var(--accent-rgb), 0.35)', transform: 'translateY(-1px)' }}
-                    _active={{ transform: 'translateY(0)' }}
-                    onClick={() => navigate(navigationUrls.exploreUrl)}
-                    fontWeight="semibold"
-                    borderRadius="lg"
-                    transition="all 0.15s ease"
-                  >
-                    Explore
-                  </Button>
-                  <Button
-                    data-testid="inventory-action-editor"
-                    leftIcon={
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
-                      </svg>
-                    }
-                    size="sm"
-                    w="50%"
-                    variant="outline"
-                    color="gray.200"
-                    borderColor="whiteAlpha.200"
-                    _hover={{ bg: 'whiteAlpha.100', borderColor: 'whiteAlpha.300', color: 'white', transform: 'translateY(-1px)' }}
-                    _active={{ transform: 'translateY(0)' }}
-                    onClick={() => navigate(navigationUrls.editorUrl)}
-                    fontWeight="semibold"
-                    borderRadius="lg"
-                    transition="all 0.15s ease"
-                  >
-                    Open in Editor
-                  </Button>
-                </Flex>
-              </Box>
-            )}
             <Box flex={1} minH={0} overflow="auto" position="relative">
               {selectedRow?.objectType === 'view' && (
                 <ViewPanel
@@ -1132,6 +1081,34 @@ export default function Inventory() {
                   availableTags={availableTags}
                   hasBackdrop={false}
                   isInline={true}
+                  actions={
+                    <HStack spacing={0.5}>
+                      <Tooltip label="Explore" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Explore"
+                          data-testid="inventory-action-explore"
+                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>}
+                          size="xs"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
+                          onClick={() => navigate(navigationUrls.exploreUrl)}
+                        />
+                      </Tooltip>
+                      <Tooltip label="Open in Editor" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Open in Editor"
+                          data-testid="inventory-action-editor"
+                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" /></svg>}
+                          size="xs"
+                          variant="ghost"
+                          color="gray.400"
+                          _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                          onClick={() => navigate(navigationUrls.editorUrl)}
+                        />
+                      </Tooltip>
+                    </HStack>
+                  }
                 />
               )}
               {selectedRow?.objectType === 'element' && (
@@ -1147,6 +1124,34 @@ export default function Inventory() {
                   hasBackdrop={false}
                   isInline={true}
                   autoSave
+                  actions={
+                    <HStack spacing={0.5}>
+                      <Tooltip label="Explore" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Explore"
+                          data-testid="inventory-action-explore"
+                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>}
+                          size="xs"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
+                          onClick={() => navigate(navigationUrls.exploreUrl)}
+                        />
+                      </Tooltip>
+                      <Tooltip label="Open in Editor" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Open in Editor"
+                          data-testid="inventory-action-editor"
+                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" /></svg>}
+                          size="xs"
+                          variant="ghost"
+                          color="gray.400"
+                          _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                          onClick={() => navigate(navigationUrls.editorUrl)}
+                        />
+                      </Tooltip>
+                    </HStack>
+                  }
                 />
               )}
               {selectedRow?.objectType === 'connector' && (
@@ -1161,6 +1166,34 @@ export default function Inventory() {
                   hasBackdrop={false}
                   isInline={true}
                   autoSave
+                  actions={
+                    <HStack spacing={0.5}>
+                      <Tooltip label="Explore" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Explore"
+                          data-testid="inventory-action-explore"
+                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>}
+                          size="xs"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
+                          onClick={() => navigate(navigationUrls.exploreUrl)}
+                        />
+                      </Tooltip>
+                      <Tooltip label="Open in Editor" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Open in Editor"
+                          data-testid="inventory-action-editor"
+                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" /></svg>}
+                          size="xs"
+                          variant="ghost"
+                          color="gray.400"
+                          _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                          onClick={() => navigate(navigationUrls.editorUrl)}
+                        />
+                      </Tooltip>
+                    </HStack>
+                  }
                 />
               )}
               {!selectedRow && (

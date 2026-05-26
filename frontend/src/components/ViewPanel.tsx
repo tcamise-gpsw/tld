@@ -1,4 +1,5 @@
 import { memo, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
   Box,
   Button,
@@ -49,6 +50,7 @@ interface Props {
   onLinkMarkdown?: (path: string) => Promise<void> | void
   onUnlinkMarkdown?: (options?: { deleteManagedFile: boolean }) => Promise<void> | void
   onOpenMarkdown?: () => void
+  actions?: ReactNode
 }
 
 /**
@@ -73,6 +75,7 @@ function ViewPanel({
   onLinkMarkdown,
   onUnlinkMarkdown,
   onOpenMarkdown,
+  actions,
 }: Props) {
   const ctx = useContext(ViewEditorContext)
   const { experimental } = useExperimental()
@@ -218,7 +221,7 @@ function ViewPanel({
 
   return (
     <SlidingPanel data-testid="view-panel" isOpen={isOpen} onClose={onClose} panelKey="view" side={isMobile ? 'left' : 'right'} width="320px" hasBackdrop={hasBackdrop} isInline={isInline}>
-      <PanelHeader title="View Details" onClose={onClose} hasCloseButton={!isInline} isInline={isInline} />
+      <PanelHeader title="View Details" onClose={onClose} hasCloseButton={!isInline} isInline={isInline} actions={actions} />
 
       {/* Body */}
       <ScrollIndicatorWrapper px={4} py={4}>

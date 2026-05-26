@@ -6,9 +6,10 @@ interface Props {
   onClose?: () => void
   hasCloseButton?: boolean
   isInline?: boolean
+  actions?: ReactNode
 }
 
-export default function PanelHeader({ title, onClose, hasCloseButton = true, isInline = false }: Props) {
+export default function PanelHeader({ title, onClose, hasCloseButton = true, isInline = false, actions }: Props) {
   return (
     <>
       <HStack
@@ -22,15 +23,18 @@ export default function PanelHeader({ title, onClose, hasCloseButton = true, isI
         <Text fontSize="xs" fontWeight="700" color="white" letterSpacing="0.02em" textTransform="uppercase">
           {title}
         </Text>
-        {hasCloseButton && onClose && (
-          <CloseButton
-            data-testid="panel-close"
-            size="sm"
-            color="whiteAlpha.600"
-            _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
-            onClick={onClose}
-          />
-        )}
+        <HStack spacing={1}>
+          {actions}
+          {hasCloseButton && onClose && (
+            <CloseButton
+              data-testid="panel-close"
+              size="sm"
+              color="whiteAlpha.600"
+              _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
+              onClick={onClose}
+            />
+          )}
+        </HStack>
       </HStack>
       <Divider borderColor="whiteAlpha.100" />
     </>

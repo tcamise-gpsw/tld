@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import type { ConnectorPanelSlots } from '../slots'
 import {
   Badge,
@@ -86,6 +87,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
   noFocusLock?: boolean
   availableTags?: string[]
   isInline?: boolean
+  actions?: ReactNode
 }
 
 /**
@@ -94,7 +96,7 @@ export interface ConnectorPanelProps extends ConnectorPanelSlots {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: Connector Properties, Connector Details.
  */
-function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, noFocusLock, availableTags = [], connectorPanelAfterContentSlot, isInline = false }: ConnectorPanelProps) {
+function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = false, onDelete, visibilityOverrideDelta = 0, onPromoteVisibility, onDemoteVisibility, onResetVisibility, hasBackdrop = true, noFocusLock, availableTags = [], connectorPanelAfterContentSlot, isInline = false, actions }: ConnectorPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isReadOnly = !canEdit
   const autoSaveEdit = autoSave && !!connector && !isReadOnly
@@ -280,7 +282,7 @@ function ConnectorPanel({ isOpen, onClose, connector, orgId, onSave, autoSave = 
   return (
     <>
       <SlidingPanel data-testid="connector-panel" isOpen={isOpen} onClose={handleClose} panelKey="connector" side={isMobile ? 'left' : 'right'} width="300px" hasBackdrop={hasBackdrop} noFocusLock={noFocusLock} autoFocus={true} isInline={isInline}>
-        <PanelHeader title="Edit Connector" onClose={handleClose} hasCloseButton={!isInline} isInline={isInline} />
+        <PanelHeader title="Edit Connector" onClose={handleClose} hasCloseButton={!isInline} isInline={isInline} actions={actions} />
 
         {/* Body */}
         <Box px={4} py={4} overflowY="auto" flex={1}>
