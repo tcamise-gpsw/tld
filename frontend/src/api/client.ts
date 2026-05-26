@@ -1288,7 +1288,11 @@ export const api = {
       return res.json()
     },
     websocketUrl: (): string => {
-      const url = new URL(apiUrl('/watch/ws'), window.location.href)
+      let baseUrl = window.location.href
+      if (baseUrl.startsWith('wails://')) {
+        baseUrl = window.__TLD_SERVER_URL__ ?? 'http://127.0.0.1:8060'
+      }
+      const url = new URL(apiUrl('/watch/ws'), baseUrl)
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
       return url.toString()
     },

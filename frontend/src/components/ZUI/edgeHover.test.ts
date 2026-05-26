@@ -70,8 +70,8 @@ describe('ZUI edge hover index', () => {
     const hovered = findHoveredEdge(route.midX, route.midY, index, view)
 
     expect(hovered?.type).toBe('edge')
-    expect(hovered?.data.id).toBe(10)
-    expect(hovered?.data.label).toBe(`${type} edge`)
+    expect((hovered?.data as any).id).toBe(10)
+    expect((hovered?.data as any).label).toBe(`${type} edge`)
   })
 
   it('returns portal edge hover payloads', () => {
@@ -81,8 +81,8 @@ describe('ZUI edge hover index', () => {
     const hovered = findHoveredEdge(280, 310, index, view)
 
     expect(hovered?.type).toBe('edge')
-    expect(hovered?.data.isPortalConn).toBe(true)
-    expect(hovered?.data.targetDiagId).toBe(42)
+    expect((hovered?.data as any).isPortalConn).toBe(true)
+    expect((hovered?.data as any).targetDiagId).toBe(42)
   })
 
   it('selects the nearest indexed edge within the hover threshold', () => {
@@ -97,6 +97,7 @@ describe('ZUI edge hover index', () => {
 
     const hovered = findHoveredEdge(route.midX, route.midY, index, view)
 
-    expect(hovered?.data.id).toBe(2)
+    expect((hovered?.data as any).id).toBe(2)
   })
 })
+
