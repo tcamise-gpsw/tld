@@ -21,6 +21,7 @@ import logoMarkUrl from "../assets/logo-mark.svg"
 import { useAccentColor } from "../context/ThemeContext"
 import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
+import ExperimentalSettings from "../pages/ExperimentalSettings"
 import { isWailsApp } from "../config/runtime"
 
 const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
@@ -275,7 +276,10 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
               >
                 <PopoverArrow bg="rgba(var(--bg-main-rgb), 0.95)" />
                 <PopoverBody p={4}>
-                  <AppearanceSettings compact />
+                  <Flex direction="column" gap={5}>
+                    <AppearanceSettings compact />
+                    <ExperimentalSettings compact />
+                  </Flex>
                 </PopoverBody>
               </PopoverContent>
             </Portal>

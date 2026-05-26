@@ -31,6 +31,7 @@ import { ChevronDownIcon, ChevronRightIcon } from './Icons'
 
 import { useContext } from 'react'
 import { ViewEditorContext } from '../pages/ViewEditor/context'
+import { useExperimental } from '../context/ExperimentalContext'
 
 interface Props {
   isOpen: boolean
@@ -74,6 +75,7 @@ function ViewPanel({
   onOpenMarkdown,
 }: Props) {
   const ctx = useContext(ViewEditorContext)
+  const { experimental } = useExperimental()
   const canEdit = canEditProp ?? ctx?.canEdit ?? true
   const isReadOnly = !canEdit
   const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
@@ -416,7 +418,7 @@ function ViewPanel({
             </>
           )}
 
-          {canEdit && (
+          {canEdit && experimental.watchEnabled && (
             <>
               <Divider borderColor="whiteAlpha.100" my={2} />
               <VStack align="stretch" spacing={3}>

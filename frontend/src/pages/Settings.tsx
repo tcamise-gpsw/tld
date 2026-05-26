@@ -7,6 +7,7 @@ import { useSetHeader } from '../components/HeaderContext'
 
 const DEFAULT_NAV_ITEMS = [
   { label: 'Appearance', path: '/settings/appearance' },
+  { label: 'Experimental', path: '/settings/experimental' },
 ]
 
 export interface SettingsProps {
