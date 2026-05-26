@@ -32,11 +32,16 @@ var _ api.Store = (*APIAdapter)(nil)
 // APIAdapter exposes the local SQLite-backed store through the shared
 // ConnectRPC-oriented api.Store contract.
 type APIAdapter struct {
-	Store *SQLiteStore
+	Store   *SQLiteStore
+	DataDir string
 }
 
-func NewAPIAdapter(store *SQLiteStore) *APIAdapter {
-	return &APIAdapter{Store: store}
+func NewAPIAdapter(store *SQLiteStore, dataDir ...string) *APIAdapter {
+	adapter := &APIAdapter{Store: store}
+	if len(dataDir) > 0 {
+		adapter.DataDir = dataDir[0]
+	}
+	return adapter
 }
 
 func (a *APIAdapter) ListViews(ctx context.Context, _ uuid.UUID) ([]*diagv1.View, error) {
@@ -1069,6 +1074,9 @@ func viewNodeToProto(node app.ViewTreeNode, workspaceID uuid.UUID) *diagv1.View 
 	if node.OwnerElementID != nil {
 		ownerID := int32(*node.OwnerElementID)
 		p.OwnerElementId = &ownerID
+	}
+	if node.Markdown != nil {
+		p.Markdown = viewMarkdownToProto(node.Markdown)
 	}
 	return p
 }

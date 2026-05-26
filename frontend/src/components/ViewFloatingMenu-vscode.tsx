@@ -30,6 +30,10 @@ interface ViewFloatingMenuProps {
   activeTags?: string[]
   setActiveTags?: (tags: string[]) => void
   availableTags?: string[]
+  hasMarkdown?: boolean
+  markdownOpen?: boolean
+  markdownBusy?: boolean
+  onMarkdownToggle?: () => void
 }
 
 function LayerIcon() {
@@ -82,7 +86,14 @@ export default function ViewFloatingMenu({
   activeTags = [],
   setActiveTags,
   availableTags = [],
+  hasMarkdown = false,
+  markdownOpen = false,
+  markdownBusy = false,
+  onMarkdownToggle,
 }: ViewFloatingMenuProps) {
+  const notesLabel = !hasMarkdown ? 'Enable Notes' : markdownOpen ? 'Hide Notes' : 'Notes'
+  const notesDisabled = markdownBusy || (!hasMarkdown && !canEdit)
+
   return (
     <HStack
       position="absolute"
@@ -122,6 +133,36 @@ export default function ViewFloatingMenu({
           </HStack>
         </Button>
       </Tooltip>
+
+      {onMarkdownToggle && (
+        <>
+          <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
+          <Tooltip
+            label={!hasMarkdown ? 'Create a markdown note for this view' : markdownOpen ? 'Hide notes' : 'Open notes'}
+            placement="top"
+            openDelay={200}
+          >
+            <Button
+              variant="ghost"
+              h="28px"
+              px={2.5}
+              color={hasMarkdown ? 'var(--accent)' : 'gray.300'}
+              bg={hasMarkdown && markdownOpen ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent'}
+              isDisabled={notesDisabled}
+              _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
+              _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
+              onClick={onMarkdownToggle}
+            >
+              <HStack spacing={1.5}>
+                <PencilSvg />
+                <Text fontSize="11px" fontWeight={hasMarkdown ? 'semibold' : 'normal'}>
+                  {notesLabel}
+                </Text>
+              </HStack>
+            </Button>
+          </Tooltip>
+        </>
+      )}
 
       <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
 

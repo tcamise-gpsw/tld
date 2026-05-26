@@ -42,6 +42,7 @@ import type {
   PlacedElement,
   LibraryElement as WorkspaceElement,
   Connector,
+  ViewMarkdownDocument,
   ViewConnector,
   VisibilityOverride,
   Tag,
@@ -53,6 +54,7 @@ import CodePreviewPanel from '../../components/CodePreviewPanel'
 import ConnectorPanel from '../../components/ConnectorPanel'
 import ElementLibrary from '../../components/ElementLibrary'
 import ViewExplorer from '../../components/ViewExplorer'
+import ViewMarkdownPanel from '../../components/ViewMarkdownPanel'
 import ViewPanel from '../../components/ViewPanel'
 import { useSetHeader } from '../../components/HeaderContext'
 import InlineElementAdder from '../../components/InlineElementAdder'
@@ -246,6 +248,11 @@ function placementSnapshotsEqual(left: PlacedElement, right: PlacedElement) {
 
 function viewSnapshotsEqual(left: ViewMetadataSnapshot, right: ViewMetadataSnapshot) {
   return left.id === right.id && left.name === right.name && (left.level_label ?? '') === (right.level_label ?? '')
+}
+
+function initialViewMarkdown(name?: string | null) {
+  const trimmed = name?.trim()
+  return trimmed ? `# ${trimmed}\n\n` : ''
 }
 
 function nodesMatchCurrentView(nodes: RFNode[], elements: PlacedElement[], viewId: number | null) {
@@ -727,6 +734,169 @@ function ViewEditorInner({
     handleElementDeleted, handleElementPermanentlyDeleted, handleElementSaved: applyElementSaved,
   } = data
   refreshElementsRef.current = refreshElements
+
+  const [viewMarkdown, setViewMarkdown] = useState<ViewMarkdownDocument | null>(null)
+  const [viewMarkdownContent, setViewMarkdownContent] = useState('')
+  const [loadedViewMarkdownContent, setLoadedViewMarkdownContent] = useState('')
+  const [viewMarkdownSyncToken, setViewMarkdownSyncToken] = useState(0)
+  const [isMarkdownOpen, setIsMarkdownOpen] = useState(false)
+  const [isMarkdownLoading, setIsMarkdownLoading] = useState(false)
+  const [isMarkdownMutating, setIsMarkdownMutating] = useState(false)
+  const [isMarkdownSaving, setIsMarkdownSaving] = useState(false)
+  const markdownRequestSeqRef = useRef(0)
+
+  const loadViewMarkdown = useCallback(async (targetViewId: number, options: { silent?: boolean } = {}) => {
+    const requestSeq = ++markdownRequestSeqRef.current
+    setIsMarkdownLoading(true)
+    try {
+      const result = await api.workspace.views.markdown.get(targetViewId)
+      if (markdownRequestSeqRef.current !== requestSeq) return null
+      if (!result) {
+        setViewMarkdown(null)
+        setViewMarkdownContent('')
+        setLoadedViewMarkdownContent('')
+        setViewMarkdownSyncToken((prev) => prev + 1)
+        setIsMarkdownOpen(false)
+        return null
+      }
+      setViewMarkdown(result.markdown)
+      setViewMarkdownContent(result.content)
+      setLoadedViewMarkdownContent(result.content)
+      setViewMarkdownSyncToken((prev) => prev + 1)
+      return result
+    } catch (error) {
+      if (markdownRequestSeqRef.current !== requestSeq) return null
+      setViewMarkdown(null)
+      setViewMarkdownContent('')
+      setLoadedViewMarkdownContent('')
+      setViewMarkdownSyncToken((prev) => prev + 1)
+      if (!options.silent) {
+        toast({
+          status: 'error',
+          title: 'Failed to load markdown',
+          description: error instanceof Error ? error.message : String(error),
+        })
+      }
+      return null
+    } finally {
+      if (markdownRequestSeqRef.current === requestSeq) setIsMarkdownLoading(false)
+    }
+  }, [toast])
+
+  useEffect(() => {
+    if (viewId === null) {
+      markdownRequestSeqRef.current += 1
+      setViewMarkdown(null)
+      setViewMarkdownContent('')
+      setLoadedViewMarkdownContent('')
+      setViewMarkdownSyncToken((prev) => prev + 1)
+      setIsMarkdownOpen(false)
+      setIsMarkdownLoading(false)
+      return
+    }
+    void loadViewMarkdown(viewId, { silent: true })
+  }, [loadViewMarkdown, viewId])
+
+  const markdownDirty = viewMarkdownContent !== loadedViewMarkdownContent
+  const markdownBusy = isMarkdownLoading || isMarkdownMutating || isMarkdownSaving
+
+  const handleCreateManagedMarkdown = useCallback(async (options: { fileName?: string; initialContent?: string; openEditor?: boolean } = {}) => {
+    if (!canEdit || viewId === null) return
+    setIsMarkdownMutating(true)
+    try {
+      await api.workspace.views.markdown.create(viewId, {
+        fileName: options.fileName,
+        initialContent: options.initialContent ?? initialViewMarkdown(view?.name),
+      })
+      await loadViewMarkdown(viewId)
+      if (options.openEditor !== false) setIsMarkdownOpen(true)
+      toast({ status: 'success', title: 'Markdown ready' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to create markdown',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownMutating(false)
+    }
+  }, [canEdit, loadViewMarkdown, toast, view?.name, viewId])
+
+  const handleToggleMarkdown = useCallback(() => {
+    if (!viewMarkdown) {
+      void handleCreateManagedMarkdown({ openEditor: true })
+      return
+    }
+    setIsMarkdownOpen((prev) => !prev)
+  }, [handleCreateManagedMarkdown, viewMarkdown])
+
+  const handleOpenMarkdown = useCallback(() => {
+    if (!viewMarkdown) return
+    setIsMarkdownOpen(true)
+  }, [viewMarkdown])
+
+  const handleReloadMarkdown = useCallback(async () => {
+    if (viewId === null) return
+    await loadViewMarkdown(viewId)
+  }, [loadViewMarkdown, viewId])
+
+  const handleLinkMarkdown = useCallback(async (path: string) => {
+    if (!canEdit || viewId === null) return
+    setIsMarkdownMutating(true)
+    try {
+      await api.workspace.views.markdown.link(viewId, path)
+      await loadViewMarkdown(viewId)
+      setIsMarkdownOpen(true)
+      toast({ status: 'success', title: 'Markdown linked' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to link markdown',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownMutating(false)
+    }
+  }, [canEdit, loadViewMarkdown, toast, viewId])
+
+  const handleUnlinkMarkdown = useCallback(async ({ deleteManagedFile }: { deleteManagedFile: boolean } = { deleteManagedFile: false }) => {
+    if (!canEdit || viewId === null) return
+    setIsMarkdownMutating(true)
+    try {
+      await api.workspace.views.markdown.unlink(viewId, deleteManagedFile)
+      await loadViewMarkdown(viewId, { silent: true })
+      setIsMarkdownOpen(false)
+      toast({ status: 'success', title: 'Markdown unlinked' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to unlink markdown',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownMutating(false)
+    }
+  }, [canEdit, loadViewMarkdown, toast, viewId])
+
+  const handleSaveMarkdown = useCallback(async (markdown: string) => {
+    if (viewId === null || !viewMarkdown) return
+    setIsMarkdownSaving(true)
+    try {
+      const updated = await api.workspace.views.markdown.save(viewId, markdown)
+      setViewMarkdown(updated)
+      setViewMarkdownContent(markdown)
+      setLoadedViewMarkdownContent(markdown)
+      toast({ status: 'success', title: 'Notes saved' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to save notes',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownSaving(false)
+    }
+  }, [toast, viewId, viewMarkdown])
 
   const handleElementPermanentlyDeletedEverywhere = useCallback((elementId: number) => {
     handleElementPermanentlyDeleted(elementId)
@@ -2531,6 +2701,10 @@ function ViewEditorInner({
               drawingMode={drawingMode} setDrawingMode={setDrawingMode}
               hasDrawingPaths={drawingPaths.length > 0} drawingVisible={drawingVisible} setDrawingVisible={setDrawingVisible}
               extrasOpen={extrasOpen} setExtrasOpen={setExtrasOpen}
+              hasMarkdown={!!viewMarkdown}
+              markdownOpen={isMarkdownOpen}
+              markdownBusy={markdownBusy}
+              onMarkdownToggle={handleToggleMarkdown}
               focusMode={!crossBranchSettings.enabled}
               onFocusModeChange={handleFocusModeChange}
               densityLevel={densityLevel}
@@ -2631,10 +2805,34 @@ function ViewEditorInner({
           }}
         />
 
+        <ViewMarkdownPanel
+          isOpen={isMarkdownOpen}
+          onClose={() => setIsMarkdownOpen(false)}
+          viewName={view?.name}
+          markdown={viewMarkdown}
+          content={viewMarkdownContent}
+          syncToken={viewMarkdownSyncToken}
+          canEdit={canEdit}
+          isLoading={isMarkdownLoading}
+          isSaving={isMarkdownSaving}
+          isDirty={markdownDirty}
+          onChange={setViewMarkdownContent}
+          onSave={handleSaveMarkdown}
+          onReload={handleReloadMarkdown}
+        />
+
         <ViewPanel
           isOpen={viewDetails.isOpen} onClose={viewDetails.onClose}
           view={view as ViewTreeNode}
-          onSave={handleViewSave} onUnsupportedMutation={handleUnsupportedMutation} hasBackdrop={isMobileLayout}
+          onSave={handleViewSave}
+          onUnsupportedMutation={handleUnsupportedMutation}
+          hasBackdrop={isMobileLayout}
+          markdown={viewMarkdown}
+          markdownLoading={isMarkdownLoading}
+          onCreateMarkdown={(options) => handleCreateManagedMarkdown({ ...options, openEditor: true })}
+          onLinkMarkdown={handleLinkMarkdown}
+          onUnlinkMarkdown={handleUnlinkMarkdown}
+          onOpenMarkdown={handleOpenMarkdown}
         />
 
         <ExportModal

@@ -19,7 +19,7 @@ import {
   WrapItem,
 } from '@chakra-ui/react'
 import { api } from '../api/client'
-import type { ViewTreeNode, LibraryElement } from '../types'
+import type { ViewTreeNode, LibraryElement, ViewMarkdownDocument } from '../types'
 import SlidingPanel from './SlidingPanel'
 import PanelHeader from './PanelHeader'
 import LayoutSection from './LayoutSection'
@@ -39,6 +39,12 @@ interface Props {
   hasBackdrop?: boolean
   availableTags?: string[]
   isInline?: boolean
+  markdown?: ViewMarkdownDocument | null
+  markdownLoading?: boolean
+  onCreateMarkdown?: (options?: { fileName?: string }) => Promise<void> | void
+  onLinkMarkdown?: (path: string) => Promise<void> | void
+  onUnlinkMarkdown?: (options?: { deleteManagedFile: boolean }) => Promise<void> | void
+  onOpenMarkdown?: () => void
 }
 
 /**
@@ -47,7 +53,23 @@ interface Props {
  * Location: Right side of the screen on desktop. Overlays screen on mobile.
  * Aliases: View Properties, View Settings.
  */
-function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsupportedMutation, hasBackdrop = true, availableTags = [], isInline = false }: Props) {
+function ViewPanel({
+  isOpen,
+  onClose,
+  view,
+  canEdit: canEditProp,
+  onSave,
+  onUnsupportedMutation,
+  hasBackdrop = true,
+  availableTags = [],
+  isInline = false,
+  markdown = null,
+  markdownLoading = false,
+  onCreateMarkdown,
+  onLinkMarkdown,
+  onUnlinkMarkdown,
+  onOpenMarkdown,
+}: Props) {
   const ctx = useContext(ViewEditorContext)
   const canEdit = canEditProp ?? ctx?.canEdit ?? true
   const isReadOnly = !canEdit
@@ -65,6 +87,10 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
   const [selectedPopulateIds, setSelectedPopulateIds] = useState<number[]>([])
   const [loadingPopulate, setLoadingPopulate] = useState(false)
   const [searchedPopulate, setSearchedPopulate] = useState(false)
+  const [markdownPath, setMarkdownPath] = useState('')
+  const [managedFileName, setManagedFileName] = useState('')
+  const [deleteManagedFile, setDeleteManagedFile] = useState(true)
+  const [markdownAction, setMarkdownAction] = useState<'create' | 'link' | 'unlink' | null>(null)
 
   useEffect(() => {
     if (view) {
@@ -72,6 +98,9 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
       setDescription(view.description || '')
       setLevelLabel(view.level_label || '')
       setTags(view.tags || [])
+      setMarkdownPath(markdown?.path ?? '')
+      setManagedFileName(markdown?.is_managed ? markdown.path.split('/').pop() ?? '' : '')
+      setDeleteManagedFile(true)
 
       // Reset populate states when view opens or changes
       setPopulateResults([])
@@ -88,7 +117,7 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
           })
       }
     }
-  }, [view, isOpen])
+  }, [view, isOpen, markdown?.is_managed, markdown?.path])
 
   useEffect(() => {
     if (!isOpen) return
@@ -146,6 +175,37 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleCreateMarkdown = async () => {
+  if (!canEdit || !onCreateMarkdown) return
+  setMarkdownAction('create')
+  try {
+    await onCreateMarkdown({ fileName: managedFileName.trim() || undefined })
+  } finally {
+    setMarkdownAction(null)
+  }
+  }
+
+  const handleLinkMarkdown = async () => {
+  if (!canEdit || !onLinkMarkdown || !markdownPath.trim()) return
+  setMarkdownAction('link')
+  try {
+    await onLinkMarkdown(markdownPath.trim())
+  } finally {
+    setMarkdownAction(null)
+  }
+  }
+
+  const handleUnlinkMarkdown = async () => {
+  if (!canEdit || !onUnlinkMarkdown) return
+  setMarkdownAction('unlink')
+  try {
+    await onUnlinkMarkdown({ deleteManagedFile })
+    setMarkdownPath('')
+  } finally {
+    setMarkdownAction(null)
+  }
   }
 
   return (
@@ -212,6 +272,123 @@ function ViewPanel({ isOpen, onClose, view, canEdit: canEditProp, onSave, onUnsu
             </Wrap>
           </FormControl>
           <LayoutSection view={view} canEdit={canEdit} onUnsupportedMutation={onUnsupportedMutation} />
+
+          {(canEdit || !!markdown) && (
+            <>
+              <Divider borderColor="whiteAlpha.100" my={2} />
+              <VStack align="stretch" spacing={3}>
+                <Text fontWeight="bold" fontSize="sm" color="gray.200">
+                  Markdown Notes
+                </Text>
+                <Text fontSize="xs" color="gray.400">
+                  Attach a markdown document to this view. Managed files are created alongside the local data directory.
+                </Text>
+
+                {markdownLoading ? (
+                  <Text fontSize="xs" color="gray.500">Loading markdown metadata…</Text>
+                ) : markdown ? (
+                  <Box
+                    p={3}
+                    bg="whiteAlpha.50"
+                    border="1px solid"
+                    borderColor="whiteAlpha.100"
+                    borderRadius="md"
+                  >
+                    <VStack align="stretch" spacing={2.5}>
+                      <HStack justify="space-between" align="start">
+                        <VStack align="start" spacing={0.5}>
+                          <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">
+                            {markdown.is_managed ? 'Managed markdown file' : 'Linked markdown file'}
+                          </Text>
+                          <Text fontSize="xs" color="gray.400" wordBreak="break-all">
+                            {markdown.path}
+                          </Text>
+                        </VStack>
+                        {onOpenMarkdown && (
+                          <Button size="xs" variant="outline" onClick={onOpenMarkdown}>
+                            Open editor
+                          </Button>
+                        )}
+                      </HStack>
+                      {markdown.updated_at && (
+                        <Text fontSize="10px" color="gray.500">
+                          Updated {new Date(markdown.updated_at).toLocaleString()}
+                        </Text>
+                      )}
+                      {markdown.is_managed && canEdit && (
+                        <Checkbox
+                          size="sm"
+                          isChecked={deleteManagedFile}
+                          onChange={(event) => setDeleteManagedFile(event.target.checked)}
+                        >
+                          <Text fontSize="xs" color="gray.300">Delete the managed file when unlinking</Text>
+                        </Checkbox>
+                      )}
+                      {canEdit && (
+                        <Button
+                          size="sm"
+                          colorScheme="red"
+                          variant="outline"
+                          onClick={() => { void handleUnlinkMarkdown() }}
+                          isLoading={markdownAction === 'unlink'}
+                        >
+                          Unlink Markdown
+                        </Button>
+                      )}
+                    </VStack>
+                  </Box>
+                ) : (
+                  <Text fontSize="xs" color="gray.500">
+                    No markdown document is attached to this view yet.
+                  </Text>
+                )}
+
+                {canEdit && !markdown && (
+                  <>
+                    <FormControl>
+                      <FormLabel fontSize="xs" color="gray.400">Managed File Name</FormLabel>
+                      <Input
+                        size="sm"
+                        value={managedFileName}
+                        onChange={(event) => setManagedFileName(event.target.value)}
+                        placeholder="view-notes.md"
+                      />
+                    </FormControl>
+                    <Button
+                      size="sm"
+                      onClick={() => { void handleCreateMarkdown() }}
+                      isLoading={markdownAction === 'create'}
+                    >
+                      Create Managed File
+                    </Button>
+                  </>
+                )}
+
+                {canEdit && (
+                  <>
+                    <FormControl>
+                      <FormLabel fontSize="xs" color="gray.400">Link Existing Markdown File</FormLabel>
+                      <Input
+                        size="sm"
+                        value={markdownPath}
+                        onChange={(event) => setMarkdownPath(event.target.value)}
+                        placeholder="docs/overview.md or /absolute/path/overview.md"
+                      />
+                    </FormControl>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { void handleLinkMarkdown() }}
+                      isLoading={markdownAction === 'link'}
+                      isDisabled={!markdownPath.trim()}
+                    >
+                      {markdown ? 'Relink Markdown File' : 'Link Markdown File'}
+                    </Button>
+                  </>
+                )}
+              </VStack>
+            </>
+          )}
 
           {canEdit && (
             <>

@@ -15,6 +15,7 @@ type ViewTreeNode struct {
 	Name           string         `json:"name"`
 	Description    *string        `json:"description"`
 	LevelLabel     *string        `json:"level_label"`
+	Markdown       *ViewMarkdownDocument `json:"markdown,omitempty"`
 	Tags           []string       `json:"tags"`
 	Level          int            `json:"level"`
 	Depth          int            `json:"depth"`
@@ -180,7 +181,7 @@ func (s *Store) childViewMetaMap(ctx context.Context) (map[int64]childViewMetaVa
 	return out, rows.Err()
 }
 
-func viewNodeFromRow(row viewRow, parentID *int64, depth int) ViewTreeNode {
+func viewNodeFromRow(row viewRow, parentID *int64, depth int, markdown *ViewMarkdownDocument) ViewTreeNode {
 	var ownerElementID *int64
 	if row.OwnerElementID.Valid {
 		value := row.OwnerElementID.Int64
@@ -202,6 +203,7 @@ func viewNodeFromRow(row viewRow, parentID *int64, depth int) ViewTreeNode {
 		Name:           row.Name,
 		Description:    description,
 		LevelLabel:     levelLabel,
+		Markdown:       markdown,
 		Tags:           parseStrings(row.Tags),
 		Level:          row.Level,
 		Depth:          depth,
@@ -214,6 +216,10 @@ func viewNodeFromRow(row viewRow, parentID *int64, depth int) ViewTreeNode {
 
 func (s *Store) ViewTree(ctx context.Context) ([]ViewTreeNode, error) {
 	rows, err := s.listViewRows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	markdownByViewID, err := s.viewMarkdownMap(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +241,7 @@ func (s *Store) ViewTree(ctx context.Context) ([]ViewTreeNode, error) {
 	visited := make(map[int64]bool, len(rows))
 	var build func(row viewRow, depth int, stack map[int64]bool) ViewTreeNode
 	build = func(row viewRow, depth int, stack map[int64]bool) ViewTreeNode {
-		node := viewNodeFromRow(row, parentMap[row.ID], depth)
+		node := viewNodeFromRow(row, parentMap[row.ID], depth, markdownByViewID[row.ID])
 		visited[row.ID] = true
 		if stack[row.ID] {
 			return node
@@ -329,10 +335,18 @@ func (s *Store) ViewByID(ctx context.Context, id int64) (ViewTreeNode, error) {
 			return ViewTreeNode{}, err
 		}
 	}
-	return viewNodeFromRow(view, parentID, 0), nil
+	markdown, err := s.ViewMarkdownByViewID(ctx, view.ID)
+	if err != nil {
+		return ViewTreeNode{}, err
+	}
+	return viewNodeFromRow(view, parentID, 0, markdown), nil
 }
 
 func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeNode, error) {
+	markdownByViewID, err := s.viewMarkdownMap(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at
 		FROM views v
@@ -350,12 +364,16 @@ func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeN
 			return nil, err
 		}
 		parentID := parentViewID
-		out = append(out, viewNodeFromRow(row, &parentID, 0))
+		out = append(out, viewNodeFromRow(row, &parentID, 0, markdownByViewID[row.ID]))
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
+	markdownByViewID, err := s.viewMarkdownMap(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at
 		FROM views v
@@ -376,7 +394,7 @@ func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
 		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Tags, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, viewNodeFromRow(row, nil, 0))
+		out = append(out, viewNodeFromRow(row, nil, 0, markdownByViewID[row.ID]))
 	}
 	return out, rows.Err()
 }

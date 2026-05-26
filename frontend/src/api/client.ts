@@ -12,6 +12,7 @@ import type {
   TechnologyConnector,
   View,
   ViewConnector,
+  ViewMarkdownDocument,
   ViewLayer,
   ViewPlacement,
   ViewTreeNode,
@@ -96,8 +97,28 @@ export function normalizeLogoUrl(
 }
 
 async function responseError(res: Response, fallback: string): Promise<Error> {
-  const body = await res.json().catch(() => null) as { error?: string } | null
-  return new Error(body?.error || `${fallback}: ${res.statusText}`)
+  const body = await res.json().catch(() => null) as { error?: string; message?: string } | null
+  return new Error(body?.message || body?.error || `${fallback}: ${res.statusText}`)
+}
+
+const WORKSPACE_CONNECT_SERVICE = 'diag.v1.WorkspaceService'
+
+async function connectJsonRpc<T>(
+  method: string,
+  body: Record<string, unknown>,
+  options: { allowNotFound?: boolean } = {},
+): Promise<T | null> {
+  const res = await fetch(apiUrl(`/${WORKSPACE_CONNECT_SERVICE}/${method}`), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Connect-Protocol-Version': '1',
+    },
+    body: JSON.stringify(body),
+  })
+  if (options.allowNotFound && res.status === 404) return null
+  if (!res.ok) throw await responseError(res, `Failed to ${method}`)
+  return await res.json() as T
 }
 
 export interface DependenciesResponse {
@@ -296,6 +317,23 @@ interface ProtoDiagram {
   parent_view_id?: number | null
   parentViewId?: number | null
   children?: ProtoDiagram[]
+}
+
+interface ProtoViewMarkdownDocument {
+  path?: string
+  isManaged?: boolean
+  is_managed?: boolean
+  updatedAt?: string
+  updated_at?: string
+}
+
+function mapViewMarkdown(doc: ProtoViewMarkdownDocument | null | undefined): ViewMarkdownDocument | null {
+  if (!doc?.path) return null
+  return {
+    path: String(doc.path),
+    is_managed: Boolean(doc.isManaged ?? doc.is_managed),
+    updated_at: String(doc.updatedAt ?? doc.updated_at ?? ''),
+  }
 }
 
 function mapDiagram(d: ProtoDiagram): ViewTreeNode {
@@ -797,6 +835,63 @@ export const api = {
           return diagramToView(json.view)
         }),
 
+      markdown: {
+        get: async (id: number): Promise<{ markdown: ViewMarkdownDocument; content: string } | null> => {
+          const json = await connectJsonRpc<{
+            markdown?: ProtoViewMarkdownDocument
+            content?: string
+          }>('GetViewMarkdown', { viewId: id }, { allowNotFound: true })
+          if (!json) return null
+          const markdown = mapViewMarkdown(json.markdown)
+          if (!markdown) return null
+          return {
+            markdown,
+            content: String(json.content ?? ''),
+          }
+        },
+
+        create: async (
+          id: number,
+          data: { fileName?: string; initialContent?: string } = {},
+        ): Promise<ViewTreeNode> => {
+          const json = await connectJsonRpc<{ view?: ProtoDiagram }>('CreateViewMarkdown', {
+            viewId: id,
+            fileName: data.fileName ?? undefined,
+            initialContent: data.initialContent ?? undefined,
+          })
+          if (!json?.view) throw new Error('View markdown was created without an updated view response')
+          return mapDiagram(json.view)
+        },
+
+        link: async (id: number, path: string): Promise<ViewTreeNode> => {
+          const json = await connectJsonRpc<{ view?: ProtoDiagram }>('LinkViewMarkdown', {
+            viewId: id,
+            path,
+          })
+          if (!json?.view) throw new Error('View markdown link was saved without an updated view response')
+          return mapDiagram(json.view)
+        },
+
+        save: async (id: number, content: string): Promise<ViewMarkdownDocument> => {
+          const json = await connectJsonRpc<{ markdown?: ProtoViewMarkdownDocument }>('SaveViewMarkdown', {
+            viewId: id,
+            content,
+          })
+          const markdown = mapViewMarkdown(json?.markdown)
+          if (!markdown) throw new Error('View markdown save returned no markdown metadata')
+          return markdown
+        },
+
+        unlink: async (id: number, deleteManagedFile = false): Promise<ViewTreeNode> => {
+          const json = await connectJsonRpc<{ view?: ProtoDiagram }>('UnlinkViewMarkdown', {
+            viewId: id,
+            deleteManagedFile,
+          })
+          if (!json?.view) throw new Error('View markdown unlink returned no updated view response')
+          return mapDiagram(json.view)
+        },
+      },
+
       rename: (id: number, name: string): Promise<View> =>
         rpc(async () => {
           const res = await workspaceClient.updateView({ viewId: id, name })
@@ -980,7 +1075,7 @@ export const api = {
         },
       ): Promise<Connector> =>
         rpc(async () => {
-          const res = await workspaceClient.createConnector({
+          const request: Record<string, unknown> = {
             viewId: diagramId,
             sourceElementId: data.source_element_id,
             targetElementId: data.target_element_id,
@@ -992,8 +1087,9 @@ export const api = {
             url: data.url ?? undefined,
             sourceHandle: data.source_handle ?? undefined,
             targetHandle: data.target_handle ?? undefined,
-            tags: data.tags,
-          })
+          }
+          if (data.tags !== undefined) request.tags = data.tags
+          const res = await workspaceClient.createConnector(request as Parameters<typeof workspaceClient.createConnector>[0])
           const json = j<{ connector: Record<string, unknown> }>(CreateConnectorResponseSchema, res)
           return protoConnector(json.connector ?? {})
         }),
@@ -1016,7 +1112,7 @@ export const api = {
         },
       ): Promise<Connector> =>
         rpc(async () => {
-          const res = await workspaceClient.updateConnector({
+          const request: Record<string, unknown> = {
             viewId: diagramId,
             connectorId,
             sourceElementId: data.source_element_id ?? undefined,
@@ -1029,8 +1125,9 @@ export const api = {
             url: data.url ?? undefined,
             sourceHandle: data.source_handle ?? undefined,
             targetHandle: data.target_handle ?? undefined,
-            tags: data.tags,
-          })
+          }
+          if (data.tags !== undefined) request.tags = data.tags
+          const res = await workspaceClient.updateConnector(request as Parameters<typeof workspaceClient.updateConnector>[0])
           const json = j<{ connector: Record<string, unknown> }>(UpdateConnectorResponseSchema, res)
           return protoConnector(json.connector ?? {})
         }),
