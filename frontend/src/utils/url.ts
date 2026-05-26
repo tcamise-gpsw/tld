@@ -1,5 +1,15 @@
 import { isNativeApp } from '../config/runtime'
 
+export function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '')
+}
+
+export function trim(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const cleaned = value.trim()
+  return cleaned.length > 0 ? cleaned : undefined
+}
+
 /**
  * Resolves a static asset path (like a logo or icon) taking into account
  * the environment (dev vs production, web vs native Capacitor).

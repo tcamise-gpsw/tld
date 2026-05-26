@@ -12,11 +12,13 @@ import ExperimentalSettings from './pages/ExperimentalSettings'
 import { HeaderProvider, useHeader } from './components/HeaderContext'
 import TopMenuBar from './components/TopMenuBar'
 import WorkspacePanel from './components/WorkspacePanel'
-import { ThemeProvider } from './context/ThemeContext'
 import { ExperimentalProvider, useExperimental } from './context/ExperimentalContext'
 import { WorkspaceVersionProvider } from './context/WorkspaceVersionContext'
-import { ACCENT_DEFAULT, BACKGROUND_DEFAULT, ELEMENT_DEFAULT, hexToRgba } from './constants/colors'
+import { initializeTheme, ThemeProvider } from './context/ThemeContext'
 import { platform } from './platform/local'
+import { HomeRedirect } from './components/HomeRedirect'
+
+initializeTheme()
 
 function AppLayout() {
   const header = useHeader()
@@ -44,56 +46,6 @@ function AppLayout() {
       </Box>
     </Box>
   )
-}
-
-;(() => {
-  const accent = localStorage.getItem('diag:accent-color') ?? ACCENT_DEFAULT
-  document.documentElement.style.setProperty('--accent', accent)
-  const rgba = hexToRgba(accent, 1)
-  document.documentElement.style.setProperty('--accent-rgb', rgba.slice(5, -3))
-
-  const background = localStorage.getItem('diag:background-color') ?? BACKGROUND_DEFAULT
-  document.documentElement.style.setProperty('--bg-main', background)
-  const bgRgba = hexToRgba(background, 1)
-  document.documentElement.style.setProperty('--bg-main-rgb', bgRgba.slice(5, -3))
-
-  const elementColor = localStorage.getItem('diag:element-color') ?? ELEMENT_DEFAULT
-  document.documentElement.style.setProperty('--bg-element', elementColor)
-  const objRgba = hexToRgba(elementColor, 1)
-  document.documentElement.style.setProperty('--bg-element-rgb', objRgba.slice(5, -3))
-})()
-
-function HomeRedirect() {
-  const [loading, setLoading] = useState(true)
-  const [target, setTarget] = useState<string | null>(null)
-
-  useEffect(() => {
-    let mounted = true
-    api.workspace.views
-      .tree()
-      .then((tree) => {
-        if (!mounted) return
-        const roots = (tree || []).filter((view) => view.parent_view_id === null)
-        if (roots.length > 0) setTarget(`/views/${roots[0].id}`)
-        else setTarget('/views')
-      })
-      .catch(() => mounted && setTarget('/views'))
-      .finally(() => mounted && setLoading(false))
-
-    return () => {
-      mounted = false
-    }
-  }, [])
-
-  if (loading) {
-    return (
-      <Center h="100%">
-        <Spinner size="xl" />
-      </Center>
-    )
-  }
-
-  return <Navigate to={target || '/views'} replace />
 }
 
 function DependenciesRedirect() {
