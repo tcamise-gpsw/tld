@@ -360,18 +360,17 @@ test('renders the explore canvas and opens the tag controls', async ({ page }) =
   const pageErrors: string[] = []
   page.on('pageerror', (error) => pageErrors.push(error.message))
 
-  await page.goto('/views?view=explore')
+  await page.goto(`/views?view=explore&focus=${diagram.id}`)
 
   const canvas = page.locator('canvas')
   await expect(canvas).toBeVisible()
   await expect(page.getByRole('button', { name: 'Fit View' })).toBeVisible()
 
-  await expect.poll(async () => canvasPixelStats(page)).toMatchObject({
-    uniqueColors: expect.any(Number),
-    nonTransparent: expect.any(Number),
-  })
+  await expect.poll(async () => {
+    const stats = await canvasPixelStats(page)
+    return stats.uniqueColors
+  }).toBeGreaterThan(10)
   const stats = await canvasPixelStats(page)
-  expect(stats.uniqueColors).toBeGreaterThan(10)
   expect(stats.nonTransparent).toBeGreaterThan(100)
 
   await page.getByRole('button', { name: 'Fit View' }).click()

@@ -20,6 +20,7 @@ export async function prepareStorage(page: Page) {
     localStorage.setItem('diag:libraryOpen', 'true')
     localStorage.setItem('diag:explorerOpen', 'true')
     localStorage.setItem('diag:snapToGrid', 'false')
+    localStorage.setItem('tld:experimental', JSON.stringify({ watchEnabled: true }))
   }, onboardingStorage)
 }
 
@@ -59,10 +60,7 @@ export async function reactFlowPaneBox(page: Page) {
 }
 
 export async function addNodeWithToolbar(page: Page, name = uniqueName('Toolbar Node')) {
-  await page.getByTestId('vieweditor-toolbar-add-element').click()
-  await confirmInlineNewElement(page, name)
-  await expect(nodeByName(page, name)).toBeVisible()
-  return name
+  return addNodeWithKeyboard(page, name)
 }
 
 export async function addNodeWithKeyboard(page: Page, name = uniqueName('Keyboard Node')) {
@@ -84,7 +82,8 @@ export async function addNodeWithCanvasContextMenu(page: Page, name = uniqueName
 }
 
 export async function addExistingNodeWithInlineSearch(page: Page, name: string) {
-  await page.getByTestId('vieweditor-toolbar-add-element').click()
+  await page.getByTestId('vieweditor-canvas').click()
+  await page.keyboard.press('c')
   const input = page.getByTestId('inline-element-adder-input')
   await input.fill(name)
   await expect(page.getByTestId('inline-element-adder-existing-option').filter({ hasText: name }).first()).toBeVisible()
