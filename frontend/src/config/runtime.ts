@@ -19,10 +19,21 @@ export const routerBasename = (() => {
   return undefined
 })()
 
+declare global {
+  interface Window {
+    __TLD_SERVER_URL__?: string
+    __TLD_DIAGRAM_ID__?: number
+    __TLD_APP__?: boolean
+  }
+}
+
 export const isNativeApp = false
+export const isWailsApp = !!window.__TLD_APP__
+
+const defaultApiBase = window.__TLD_SERVER_URL__ ? `${window.__TLD_SERVER_URL__.replace(/\/$/, "")}/api` : "/api"
 
 export const apiBase = trimTrailingSlash(
-  configuredApiBase ?? "/api",
+  configuredApiBase ?? defaultApiBase,
 )
 
 export function apiUrl(path: string): string {

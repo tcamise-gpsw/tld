@@ -21,6 +21,7 @@ import logoMarkUrl from "../assets/logo-mark.svg"
 import { useAccentColor } from "../context/ThemeContext"
 import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
+import { isWailsApp } from "../config/runtime"
 
 const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -134,19 +135,21 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
               className="logo-mark"
               transition="all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)"
             />
-            <Text
-              fontFamily="heading"
-              fontWeight="700"
-              lineHeight="1"
-              mt="3px"
-              sx={{
-                "@container topbar (max-width: 920px)": {
-                  display: "none !important",
-                },
-              }}
-            >
-              tlDiagram
-            </Text>
+            {!isWailsApp && (
+              <Text
+                fontFamily="heading"
+                fontWeight="700"
+                lineHeight="1"
+                mt="3px"
+                sx={{
+                  "@container topbar (max-width: 920px)": {
+                    display: "none !important",
+                  },
+                }}
+              >
+                tlDiagram
+              </Text>
+            )}
           </HStack>
 
           <HStack spacing={2} h="full" align="center">

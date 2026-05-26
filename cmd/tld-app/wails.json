@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "tld",
+  "outputfilename": "tld",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build:app",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "frontend:dir": "../../frontend",
+  "author": {
+    "name": "Mert Cikla",
+    "email": "mertcikla@gmail.com"
+  },
+  "info": {
+    "companyName": "Mert Cikla",
+    "productName": "tlDiagram",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2024",
+    "comments": "Software architecture diagrams"
+  }
+}

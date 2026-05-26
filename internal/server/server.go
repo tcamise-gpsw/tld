@@ -170,11 +170,11 @@ func isAllowedLocalOrigin(origin string) bool {
 		return false
 	}
 	switch u.Scheme {
-	case "vscode-webview", "vscode-webview-resource", "vscode-file", "vscode-resource":
+	case "vscode-webview", "vscode-webview-resource", "vscode-file", "vscode-resource", "wails":
 		return true
 	case "http", "https":
 		host := u.Hostname()
-		return host == "127.0.0.1" || host == "localhost" || host == "::1"
+		return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "wails.localhost"
 	default:
 		return false
 	}
