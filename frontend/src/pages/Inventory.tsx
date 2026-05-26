@@ -16,6 +16,12 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  Popover,
+  PopoverArrow,
+  PopoverBody,
+  PopoverContent,
+  PopoverFooter,
+  PopoverTrigger,
   Spinner,
   Tag,
   TagCloseButton,
@@ -103,6 +109,9 @@ export default function Inventory() {
   const [sortKey, setSortKey] = useState<'name' | 'updatedAt' | 'usage' | 'type'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [tagSearch, setTagSearch] = useState('')
+  const [tagDeleteConfirm, setTagDeleteConfirm] = useState<{ tag: string; count: number } | null>(null)
+  const [deletingTag, setDeletingTag] = useState<string | null>(null)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const selectedType = parseInventoryType(searchParams.get('type'))
@@ -388,6 +397,10 @@ export default function Inventory() {
     })
   }, [rows, selectedKeys.size])
 
+  useEffect(() => {
+    if (selectedKeys.size === 0) setBulkDeleteConfirmOpen(false)
+  }, [selectedKeys.size])
+
   const typeCounts = useMemo(() => {
     const counts: Record<InventoryType, number> = {
       all: rows.length,
@@ -458,7 +471,7 @@ export default function Inventory() {
   }
 
   const handleBulkDelete = async () => {
-    if (!window.confirm(`Delete ${selectedKeys.size} selected item(s)? This cannot be undone.`)) return
+    setBulkDeleteConfirmOpen(false)
     setBulkLoading(true)
     try {
       await Promise.all(
@@ -497,16 +510,16 @@ export default function Inventory() {
     return counts
   }, [selectedRows])
 
-  const handleDeleteTag = async (tag: string, count: number) => {
-    const msg = count > 0
-      ? `Delete tag "${tag}"? It will be removed from ${count} item(s).`
-      : `Delete tag "${tag}"?`
-    if (!window.confirm(msg)) return
+  const handleDeleteTag = async (tag: string) => {
+    setDeletingTag(tag)
     try {
       await api.workspace.orgs.tagColors.delete(tag)
+      setTagDeleteConfirm(null)
       void refresh()
     } catch (err) {
       console.error('Failed to delete tag', err)
+    } finally {
+      setDeletingTag(null)
     }
   }
 
@@ -658,47 +671,100 @@ export default function Inventory() {
                     const isActive = tagsFilter.includes(tag)
                     const count = tagCounts[tag] ?? 0
                     return (
-                      <Flex
-                        key={tag}
-                        data-testid={`inventory-tag-filter-${tag}`}
-                        role="group"
-                        align="center"
-                        px={2}
-                        py={1}
-                        borderRadius="md"
-                        cursor="pointer"
-                        bg={isActive ? 'rgba(66, 153, 225, 0.12)' : 'transparent'}
-                        _hover={{ bg: isActive ? 'rgba(66, 153, 225, 0.18)' : 'whiteAlpha.50' }}
-                        onClick={() => toggleTagFilter(tag)}
-                        userSelect="none"
-                      >
-                        <Box
-                          w="6px"
-                          h="6px"
-                          borderRadius="full"
-                          bg={isActive ? 'blue.400' : 'gray.600'}
-                          mr={2}
-                          flexShrink={0}
-                          transition="background 0.1s"
-                        />
-                        <Text fontSize="xs" color={isActive ? 'blue.300' : 'gray.400'} flex={1} isTruncated>{tag}</Text>
-                        <Text fontSize="10px" color={count === 0 ? 'gray.700' : isActive ? 'blue.400' : 'gray.600'} fontWeight="bold" ml={1} _groupHover={{ display: 'none' }}>{count}</Text>
-                        <Tooltip label={`Delete tag "${tag}"`} placement="right" openDelay={400}>
-                          <IconButton
-                            aria-label={`Delete tag ${tag}`}
-                            icon={<DeleteIcon boxSize="9px" />}
-                            size="xs"
-                            variant="ghost"
-                            color="red.400"
-                            display="none"
-                            _groupHover={{ display: 'flex' }}
-                            onClick={(e) => { e.stopPropagation(); void handleDeleteTag(tag, count) }}
-                            h="16px"
-                            minW="16px"
-                            ml={1}
+                      <Box key={tag}>
+                        <Flex
+                          data-testid={`inventory-tag-filter-${tag}`}
+                          role="group"
+                          align="center"
+                          px={2}
+                          py={1}
+                          borderRadius="md"
+                          cursor="pointer"
+                          bg={isActive ? 'rgba(66, 153, 225, 0.12)' : 'transparent'}
+                          _hover={{ bg: isActive ? 'rgba(66, 153, 225, 0.18)' : 'whiteAlpha.50' }}
+                          onClick={() => toggleTagFilter(tag)}
+                          userSelect="none"
+                        >
+                          <Box
+                            w="6px"
+                            h="6px"
+                            borderRadius="full"
+                            bg={isActive ? 'blue.400' : 'gray.600'}
+                            mr={2}
+                            flexShrink={0}
+                            transition="background 0.1s"
                           />
-                        </Tooltip>
-                      </Flex>
+                          <Text fontSize="xs" color={isActive ? 'blue.300' : 'gray.400'} flex={1} isTruncated>{tag}</Text>
+                          <Text fontSize="10px" color={count === 0 ? 'gray.700' : isActive ? 'blue.400' : 'gray.600'} fontWeight="bold" ml={1} _groupHover={{ display: 'none' }}>{count}</Text>
+                          <Popover
+                            placement="right-start"
+                            isOpen={tagDeleteConfirm?.tag === tag}
+                            onClose={() => setTagDeleteConfirm(null)}
+                            closeOnBlur
+                          >
+                            <Tooltip label={`Delete tag "${tag}"`} placement="right" openDelay={400}>
+                              <Box>
+                                <PopoverTrigger>
+                                  <IconButton
+                                    aria-label={`Delete tag ${tag}`}
+                                    icon={<DeleteIcon boxSize="9px" />}
+                                    size="xs"
+                                    variant="ghost"
+                                    color="red.400"
+                                    display="none"
+                                    _groupHover={{ display: 'flex' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setTagDeleteConfirm((prev) => (prev?.tag === tag ? null : { tag, count }))
+                                    }}
+                                    h="16px"
+                                    minW="16px"
+                                    ml={1}
+                                    isDisabled={deletingTag !== null}
+                                  />
+                                </PopoverTrigger>
+                              </Box>
+                            </Tooltip>
+                            <PopoverContent
+                              onClick={(e) => e.stopPropagation()}
+                              bg="rgb(var(--bg-main-rgb))"
+                              borderColor="rgba(245, 101, 101, 0.45)"
+                              boxShadow="0 14px 36px rgba(0, 0, 0, 0.45)"
+                              maxW="280px"
+                              data-testid={`inventory-tag-delete-confirm-${tag}`}
+                            >
+                              <PopoverArrow bg="rgb(var(--bg-main-rgb))" />
+                              <PopoverBody pt={3} pb={2}>
+                                <Text fontSize="sm" color="gray.100" lineHeight={1.35}>
+                                  {count > 0 ? `Delete "${tag}" and remove it from ${count} item(s)?` : `Delete "${tag}"?`}
+                                </Text>
+                              </PopoverBody>
+                              <PopoverFooter border="0" pt={0} pb={3}>
+                                <HStack justify="flex-end" spacing={2}>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    colorScheme="gray"
+                                    onClick={() => setTagDeleteConfirm(null)}
+                                    isDisabled={deletingTag === tag}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    colorScheme="red"
+                                    onClick={() => { void handleDeleteTag(tag) }}
+                                    isLoading={deletingTag === tag}
+                                    loadingText="Deleting"
+                                  >
+                                    Delete
+                                  </Button>
+                                </HStack>
+                              </PopoverFooter>
+                            </PopoverContent>
+                          </Popover>
+                        </Flex>
+                      </Box>
                     )
                   })}
                 {availableTags.length === 0 && (
@@ -919,17 +985,64 @@ export default function Inventory() {
                             </Menu>
                           )}
                         </HStack>
-                        <Tooltip label="Delete selected">
-                          <IconButton
-                            aria-label="Delete selected"
-                            icon={<DeleteIcon />}
-                            size="xs"
-                            colorScheme="red"
-                            variant="ghost"
-                            isLoading={bulkLoading}
-                            onClick={() => void handleBulkDelete()}
-                          />
-                        </Tooltip>
+                        <Popover
+                          placement="left-start"
+                          isOpen={bulkDeleteConfirmOpen}
+                          onClose={() => setBulkDeleteConfirmOpen(false)}
+                          closeOnBlur
+                        >
+                          <Tooltip label="Delete selected">
+                            <Box>
+                              <PopoverTrigger>
+                                <IconButton
+                                  aria-label="Delete selected"
+                                  icon={<DeleteIcon />}
+                                  size="xs"
+                                  colorScheme="red"
+                                  variant="ghost"
+                                  isLoading={bulkLoading}
+                                  onClick={() => setBulkDeleteConfirmOpen((prev) => !prev)}
+                                />
+                              </PopoverTrigger>
+                            </Box>
+                          </Tooltip>
+                          <PopoverContent
+                            bg="rgb(var(--bg-main-rgb))"
+                            borderColor="rgba(245, 101, 101, 0.45)"
+                            boxShadow="0 14px 36px rgba(0, 0, 0, 0.45)"
+                            maxW="290px"
+                            data-testid="inventory-bulk-delete-confirm"
+                          >
+                            <PopoverArrow bg="rgb(var(--bg-main-rgb))" />
+                            <PopoverBody pt={3} pb={2}>
+                              <Text fontSize="sm" color="gray.100" lineHeight={1.35}>
+                                {`Delete ${selectedKeys.size} selected item(s)? This cannot be undone.`}
+                              </Text>
+                            </PopoverBody>
+                            <PopoverFooter border="0" pt={0} pb={3}>
+                              <HStack justify="flex-end" spacing={2}>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  colorScheme="gray"
+                                  onClick={() => setBulkDeleteConfirmOpen(false)}
+                                  isDisabled={bulkLoading}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  colorScheme="red"
+                                  onClick={() => { void handleBulkDelete() }}
+                                  isLoading={bulkLoading}
+                                  loadingText="Deleting"
+                                >
+                                  Delete
+                                </Button>
+                              </HStack>
+                            </PopoverFooter>
+                          </PopoverContent>
+                        </Popover>
                         <IconButton
                           aria-label="Clear selection"
                           icon={<SmallCloseIcon />}
