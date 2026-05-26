@@ -6,10 +6,10 @@ import {
 } from '@chakra-ui/react'
 import { DownloadIcon } from '@chakra-ui/icons'
 import {
-  AddElementIcon as AddElementSvg,
   EditIcon as PencilSvg,
   EyeIcon as EyeSvg,
   EyeOffIcon as EyeOffSvg,
+  MarkdownIcon as MarkdownSvg,
   ImportIcon,
   ExpandExtrasIcon as ExpandExtrasSvg,
   CollapseExtrasIcon as CollapseExtrasSvg,
@@ -131,7 +131,7 @@ function ViewFloatingMenu({
     () => allTags.filter((tag) => (tagCounts[tag] ?? 0) > 0),
     [allTags, tagCounts],
   )
-  const notesLabel = !hasMarkdown ? 'Enable Notes' : markdownOpen ? 'Hide Notes' : 'Notes'
+  const notesLabel = !hasMarkdown ? 'Notes' : markdownOpen ? 'Hide Notes' : 'Notes'
   const notesDisabled = markdownBusy || (!hasMarkdown && !canEdit)
 
   React.useEffect(() => {
@@ -152,9 +152,6 @@ function ViewFloatingMenu({
     >
       <HStack spacing={4} opacity={0.6} userSelect="none">
         <HStack spacing={1.5}><KbdHint ml={0}>C</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Create</Text></HStack>
-        <HStack spacing={1.5}><KbdHint ml={0}>A</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Library</Text></HStack>
-        <HStack spacing={1.5}><KbdHint ml={0}>D</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Explorer</Text></HStack>
-        <HStack spacing={1.5}><KbdHint ml={0}>G</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Snap</Text></HStack>
         <HStack spacing={1.5}><KbdHint ml={0}>F</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Fit</Text></HStack>
         <HStack spacing={1.5}><KbdHint ml={0}>/</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Search</Text></HStack>
         <HStack spacing={1.5}><KbdHint ml={0}>+/-</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom</Text></HStack>
@@ -173,62 +170,9 @@ function ViewFloatingMenu({
         py={1.5}
         transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
       >
-        <Tooltip label="Create new element (C)" placement="top" openDelay={200}>
-          <Button
-            data-testid="vieweditor-toolbar-add-element"
-            variant="ghost"
-            h="28px"
-            px={2.5}
-            color="var(--accent)"
-            isDisabled={!canEdit}
-            _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
-            _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
-            onClick={() => handleAddElementAtCenter()}
-          >
-            <HStack spacing={1.5}>
-              <AddElementSvg />
-              <Text fontSize="11px" fontWeight="semibold">
-                Add Element
-              </Text>
-              <KbdHint>C</KbdHint>
-            </HStack>
-          </Button>
-        </Tooltip>
-
-        {onMarkdownToggle && (
-          <>
-            <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
-            <Tooltip
-              label={!hasMarkdown ? 'Create a markdown note for this view' : markdownOpen ? 'Hide notes' : 'Open notes'}
-              placement="top"
-              openDelay={200}
-            >
-              <Button
-                data-testid="vieweditor-toolbar-markdown"
-                variant="ghost"
-                h="28px"
-                px={2.5}
-                color={hasMarkdown ? 'var(--accent)' : 'gray.300'}
-                bg={hasMarkdown && markdownOpen ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent'}
-                isDisabled={notesDisabled}
-                _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
-                _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
-                onClick={onMarkdownToggle}
-              >
-                <HStack spacing={1.5}>
-                  <PencilSvg />
-                  <Text fontSize="11px" fontWeight={hasMarkdown ? 'semibold' : 'normal'}>
-                    {notesLabel}
-                  </Text>
-                </HStack>
-              </Button>
-            </Tooltip>
-          </>
-        )}
 
         {(canUndo || canRedo) && (
           <>
-            <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
             {canUndo && (
               <Tooltip label="Undo" placement="top" openDelay={200}>
                 <IconButton
@@ -246,6 +190,7 @@ function ViewFloatingMenu({
                 />
               </Tooltip>
             )}
+
             {canRedo && (
               <Tooltip label="Redo" placement="top" openDelay={200}>
                 <IconButton
@@ -263,12 +208,11 @@ function ViewFloatingMenu({
                 />
               </Tooltip>
             )}
+            <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
           </>
         )}
-
         {showFilters && (
           <>
-            <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
             <Popover isOpen={isFiltersOpen} onClose={onFiltersClose} placement="top" isLazy closeOnBlur>
               <PopoverTrigger>
                 <Button
@@ -530,7 +474,39 @@ function ViewFloatingMenu({
           </>
         )}
 
+        {onMarkdownToggle && (
+          <>
+            <Tooltip
+              label={!hasMarkdown ? 'Create a markdown note for this view' : markdownOpen ? 'Hide notes' : 'Open notes'}
+              placement="top"
+              openDelay={200}
+            >
+              <Button
+                data-testid="vieweditor-toolbar-markdown"
+                variant="ghost"
+                h="28px"
+                px={2.5}
+                color={hasMarkdown ? 'var(--accent)' : 'gray.300'}
+                bg={hasMarkdown && markdownOpen ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent'}
+                isDisabled={notesDisabled}
+                _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
+                _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
+                onClick={onMarkdownToggle}
+              >
+                <HStack spacing={1.5}>
+                  <MarkdownSvg />
+                  <Text fontSize="11px" fontWeight={hasMarkdown ? 'semibold' : 'normal'}>
+                    {notesLabel}
+                  </Text>
+                </HStack>
+              </Button>
+            </Tooltip>
+          </>
+        )}
+
+
         {/* Draw mode toggle */}
+        <Box w="1px" h="16px" bg="whiteAlpha.100" flexShrink={0} mx={0.5} />
         <Tooltip
           label={drawingMode ? 'Exit drawing mode' : 'Draw on diagram'}
           placement="top"

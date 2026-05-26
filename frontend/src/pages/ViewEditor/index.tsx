@@ -894,7 +894,6 @@ function ViewEditorInner({
       })
       await loadViewMarkdown(viewId)
       if (options.openEditor !== false) setIsMarkdownOpen(true)
-      toast({ status: 'success', title: 'Markdown ready' })
     } catch (error) {
       toast({
         status: 'error',

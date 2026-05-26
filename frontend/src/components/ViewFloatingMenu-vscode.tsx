@@ -91,7 +91,7 @@ export default function ViewFloatingMenu({
   markdownBusy = false,
   onMarkdownToggle,
 }: ViewFloatingMenuProps) {
-  const notesLabel = !hasMarkdown ? 'Enable Notes' : markdownOpen ? 'Hide Notes' : 'Notes'
+  const notesLabel = !hasMarkdown ? 'Notes' : markdownOpen ? 'Hide Notes' : 'Notes'
   const notesDisabled = markdownBusy || (!hasMarkdown && !canEdit)
 
   return (
