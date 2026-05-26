@@ -191,7 +191,7 @@ func materializedLineCount(ctx context.Context, db *sql.DB, repositoryID int64, 
 func symbolLineCount(ctx context.Context, db *sql.DB, repositoryID int64, ownerKey string) int {
 	var startLine int
 	var endLine sql.NullInt64
-	err := db.QueryRowContext(ctx, `
+	err := NewStore(db).rowRaw(ctx, `
 		SELECT s.start_line, s.end_line
 		FROM watch_symbols s
 		LEFT JOIN watch_symbol_identities i ON i.repository_id = s.repository_id AND i.current_stable_key = s.stable_key
@@ -231,7 +231,7 @@ func symbolLineRange(ctx context.Context, db *sql.DB, repositoryID int64, ownerK
 	var filePath string
 	var startLine int
 	var endLine sql.NullInt64
-	err := db.QueryRowContext(ctx, `
+	err := NewStore(db).rowRaw(ctx, `
 		SELECT f.path, s.start_line, s.end_line
 		FROM watch_symbols s
 		JOIN watch_files f ON f.id = s.file_id
@@ -249,7 +249,7 @@ func factLineRange(ctx context.Context, db *sql.DB, repositoryID int64, ownerKey
 	var filePath string
 	var startLine int
 	var endLine sql.NullInt64
-	err := db.QueryRowContext(ctx, `
+	err := NewStore(db).rowRaw(ctx, `
 		SELECT file_path, start_line, end_line
 		FROM watch_facts
 		WHERE repository_id = ? AND ('fact:' || enricher || ':' || stable_key) = ?
@@ -266,7 +266,7 @@ func factSummaryLineCount(ctx context.Context, db *sql.DB, repositoryID int64, o
 	if !ok {
 		return 0
 	}
-	rows, err := db.QueryContext(ctx, `
+	rows, err := NewStore(db).rowsRaw(ctx, `
 		SELECT start_line, end_line
 		FROM watch_facts
 		WHERE repository_id = ? AND file_path = ? AND type = ?`, repositoryID, file, factType)
@@ -293,7 +293,7 @@ func symbolSnapshotHash(ctx context.Context, db *sql.DB, repositoryID int64, own
 	var contentHash, signatureHash string
 	var startLine int
 	var endLine sql.NullInt64
-	err := db.QueryRowContext(ctx, `
+	err := NewStore(db).rowRaw(ctx, `
 		SELECT s.content_hash, s.signature_hash, s.start_line, s.end_line
 		FROM watch_symbols s
 		LEFT JOIN watch_symbol_identities i ON i.repository_id = s.repository_id AND i.current_stable_key = s.stable_key
@@ -335,7 +335,7 @@ func fileLineCount(ctx context.Context, db *sql.DB, repositoryID int64, filePath
 		return 0
 	}
 	var maxEnd sql.NullInt64
-	err := db.QueryRowContext(ctx, `
+	err := NewStore(db).rowRaw(ctx, `
 		SELECT MAX(COALESCE(s.end_line, s.start_line))
 		FROM watch_symbols s
 		JOIN watch_files f ON f.id = s.file_id
@@ -351,7 +351,7 @@ func folderLineCount(ctx context.Context, db *sql.DB, repositoryID int64, folder
 	if folderPath == "" {
 		return 0
 	}
-	rows, err := db.QueryContext(ctx, `
+	rows, err := NewStore(db).rowsRaw(ctx, `
 		SELECT MAX(COALESCE(s.end_line, s.start_line))
 		FROM watch_symbols s
 		JOIN watch_files f ON f.id = s.file_id
@@ -516,7 +516,7 @@ func scanVersion(row rowScanner) (Version, error) {
 
 func (s *Store) addElementTags(ctx context.Context, elementID int64, add []string) (int, error) {
 	var raw string
-	if err := s.db.QueryRowContext(ctx, `SELECT tags FROM elements WHERE id = ?`, elementID).Scan(&raw); err != nil {
+	if err := s.rowRaw(ctx, `SELECT tags FROM elements WHERE id = ?`, elementID).Scan(&raw); err != nil {
 		return 0, err
 	}
 	var tags []string
@@ -543,13 +543,13 @@ func (s *Store) addElementTags(ctx context.Context, elementID int64, add []strin
 		return 0, nil
 	}
 	data, _ := json.Marshal(next)
-	_, err := s.db.ExecContext(ctx, `UPDATE elements SET tags = ?, updated_at = ? WHERE id = ?`, string(data), nowString(), elementID)
+	_, err := s.execRaw(ctx, `UPDATE elements SET tags = ?, updated_at = ? WHERE id = ?`, string(data), nowString(), elementID)
 	return added, err
 }
 
 func (s *Store) removeElementTags(ctx context.Context, elementID int64, remove []string) (int, error) {
 	var raw string
-	if err := s.db.QueryRowContext(ctx, `SELECT tags FROM elements WHERE id = ?`, elementID).Scan(&raw); err != nil {
+	if err := s.rowRaw(ctx, `SELECT tags FROM elements WHERE id = ?`, elementID).Scan(&raw); err != nil {
 		return 0, err
 	}
 	var tags []string
@@ -571,7 +571,7 @@ func (s *Store) removeElementTags(ctx context.Context, elementID int64, remove [
 		return 0, nil
 	}
 	data, _ := json.Marshal(next)
-	_, err := s.db.ExecContext(ctx, `UPDATE elements SET tags = ?, updated_at = ? WHERE id = ?`, string(data), nowString(), elementID)
+	_, err := s.execRaw(ctx, `UPDATE elements SET tags = ?, updated_at = ? WHERE id = ?`, string(data), nowString(), elementID)
 	return removed, err
 }
 
@@ -671,7 +671,7 @@ func bytesToVector(data []byte) Vector {
 }
 
 func (s *Store) clusterByStableKey(ctx context.Context, repositoryID int64, stableKey string) (Cluster, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.rowRaw(ctx, `
 		SELECT id, repository_id, stable_key, parent_cluster_id, name, kind, algorithm, settings_hash, member_count, created_at, updated_at
 		FROM watch_clusters
 		WHERE repository_id = ? AND stable_key = ?`, repositoryID, stableKey)
@@ -696,7 +696,7 @@ func scanCluster(row rowScanner) (Cluster, error) {
 
 func (s *Store) latestFilterRunID(ctx context.Context, repositoryID int64) (int64, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT id FROM watch_filter_runs
 		WHERE repository_id = ?
 		ORDER BY id DESC
@@ -709,7 +709,7 @@ func (s *Store) latestFilterRunID(ctx context.Context, repositoryID int64) (int6
 
 func (s *Store) fileByPathMust(ctx context.Context, repositoryID int64, path string) (File, error) {
 	var file File
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT id, repository_id, path, language, git_blob_hash, worktree_hash, size_bytes, mtime_unix, scan_status, scan_error, created_at, updated_at
 		FROM watch_files
 		WHERE repository_id = ? AND path = ?`, repositoryID, path).Scan(&file.ID, &file.RepositoryID, &file.Path, &file.Language, &file.GitBlobHash, &file.WorktreeHash, &file.SizeBytes, &file.MtimeUnix, &file.ScanStatus, &file.ScanError, &file.CreatedAt, &file.UpdatedAt)
@@ -718,7 +718,7 @@ func (s *Store) fileByPathMust(ctx context.Context, repositoryID int64, path str
 
 func (s *Store) file(ctx context.Context, id int64) (File, error) {
 	var file File
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rowRaw(ctx, `
 		SELECT id, repository_id, path, language, git_blob_hash, worktree_hash, size_bytes, mtime_unix, scan_status, scan_error, created_at, updated_at
 		FROM watch_files
 		WHERE id = ?`, id).Scan(&file.ID, &file.RepositoryID, &file.Path, &file.Language, &file.GitBlobHash, &file.WorktreeHash, &file.SizeBytes, &file.MtimeUnix, &file.ScanStatus, &file.ScanError, &file.CreatedAt, &file.UpdatedAt)
@@ -737,7 +737,7 @@ func nowString() string {
 }
 func elementName(ctx context.Context, db *sql.DB, id int64) string {
 	var name sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT name FROM elements WHERE id = ?`, id).Scan(&name); err != nil || !name.Valid {
+	if err := NewStore(db).rowRaw(ctx, `SELECT name FROM elements WHERE id = ?`, id).Scan(&name); err != nil || !name.Valid {
 		return ""
 	}
 	return strings.TrimSpace(name.String)

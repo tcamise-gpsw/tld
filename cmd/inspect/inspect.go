@@ -38,6 +38,7 @@ func NewInspectCmd(wdir, format *string, compact *bool) *cobra.Command {
 				Ref:          args[0],
 				Type:         strings.ToLower(strings.TrimSpace(resourceType)),
 				DataDir:      dataDir,
+				Database:     cfg.Database,
 				IncludeLocal: true,
 				IncludeCloud: includeCloud || includeAll,
 			})

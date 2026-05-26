@@ -60,9 +60,22 @@ export default extendTheme({
         border: '1px solid',
         borderColor: 'glass.border',
       },
+      // Hide popper/popover tooltip arrows rendered by Popper/Chakra
+      '[data-popper-arrow], [data-popper-arrow-inner], .chakra-popover__arrow, .chakra-tooltip__arrow': {
+        display: 'none !important',
+        width: '0 !important',
+        height: '0 !important',
+      },
     },
   },
   components: {
+    Popover: {
+      baseStyle: {
+        arrow: {
+          display: 'none',
+        },
+      },
+    },
     Modal: {
       baseStyle: {
         dialog: {
@@ -127,7 +140,7 @@ export default extendTheme({
         border: '1px solid rgba(255,255,255,0.06)',
         zIndex: 99999,
         arrow: {
-          bg: 'clay.out',
+          display: 'none',
         },
       },
     },

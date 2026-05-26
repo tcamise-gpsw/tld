@@ -12,6 +12,7 @@ import (
 	assets "github.com/mertcikla/tld/v2"
 	"github.com/mertcikla/tld/v2/internal/server"
 	"github.com/mertcikla/tld/v2/internal/store"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 var localWorkspaceID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
@@ -19,6 +20,7 @@ var localWorkspaceID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 type App struct {
 	Addr            string
 	DBPath          string
+	DBDriver        string
 	InitializedData bool
 	Resources       ResourceCounts
 	Handler         http.Handler
@@ -36,6 +38,7 @@ type ServeOptions struct {
 	Host     string
 	Port     string
 	StaticFS fs.FS
+	Config   *workspace.Config
 }
 
 func envOrDefault(key, fallback string) string {
@@ -81,18 +84,24 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 		staticFS = embedded
 	}
 
-	sqliteStore, err := store.Open(dbPath, assets.FS)
+	var sqliteStore *store.SQLiteStore
+	var err error
+	if o.Config != nil {
+		sqliteStore, err = store.OpenLocal(context.Background(), o.Config, dataDir, assets.FS)
+	} else {
+		sqliteStore, err = store.Open(dbPath, assets.FS)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	apiStore := store.NewAPIAdapter(sqliteStore)
+	apiStore := store.NewAPIAdapter(sqliteStore, dataDir)
 	views, elements, connectors, err := apiStore.GetWorkspaceResourceCounts(context.Background(), localWorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	srv, err := server.New(sqliteStore, staticFS, localWorkspaceID)
+	srv, err := server.New(sqliteStore, staticFS, localWorkspaceID, dataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +111,7 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 	return &App{
 		Addr:            addr,
 		DBPath:          dbPath,
+		DBDriver:        string(sqliteStore.Dialect()),
 		InitializedData: initializedData,
 		Resources: ResourceCounts{
 			Views:      views,

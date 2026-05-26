@@ -26,9 +26,9 @@ type Server struct {
 	handler http.Handler
 }
 
-func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID) (*Server, error) {
-	apiStore := store.NewAPIAdapter(sqliteStore)
-	watchStore := watch.NewStore(sqliteStore.DB())
+func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID, dataDir ...string) (*Server, error) {
+	watchStore := watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
+	apiStore := store.NewAPIAdapter(sqliteStore, dataDir...)
 	lockHooks := watchLockHooks{store: watchStore}
 	wsSvc := &api.WorkspaceService{Store: apiStore, Hooks: lockHooks}
 	orgSvc := &api.OrgService{Store: apiStore, Hooks: lockHooks}
@@ -236,12 +236,12 @@ func readStaticAsset(static fs.FS, candidate, acceptEncoding string) ([]byte, st
 }
 
 func acceptsEncoding(header, encoding string) bool {
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		token, params, _ := strings.Cut(strings.TrimSpace(part), ";")
 		if !strings.EqualFold(token, encoding) {
 			continue
 		}
-		for _, param := range strings.Split(params, ";") {
+		for param := range strings.SplitSeq(params, ";") {
 			key, value, ok := strings.Cut(strings.TrimSpace(param), "=")
 			if ok && strings.EqualFold(key, "q") {
 				quality, err := strconv.ParseFloat(strings.TrimSpace(value), 64)

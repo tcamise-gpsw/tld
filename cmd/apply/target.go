@@ -70,6 +70,7 @@ func (r remoteRunner) TargetLabel() string  { return client.NormalizeURL(r.serve
 type localRunner struct {
 	dbPath       string
 	dataDir      string
+	cfg          workspace.Config
 	previousMeta *workspace.Meta
 }
 
@@ -77,18 +78,21 @@ func (r localRunner) ApplyWorkspacePlan(ctx context.Context, req *diagv1.ApplyPl
 	if err := os.MkdirAll(filepath.Dir(r.dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	sqliteStore, err := store.Open(r.dbPath, assets.FS)
+	sqliteStore, err := store.OpenLocal(ctx, &r.cfg, r.dataDir, assets.FS)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = sqliteStore.Legacy().Close() }()
 	adapter := store.NewAPIAdapter(sqliteStore)
-	if _, err := sqliteStore.DB().ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, err
+	transactional := sqliteStore.Dialect() == "sqlite"
+	if transactional {
+		if _, err := sqliteStore.DB().ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+			return nil, err
+		}
 	}
 	committed := false
 	defer func() {
-		if !committed {
+		if transactional && !committed {
 			_, _ = sqliteStore.DB().ExecContext(context.Background(), `ROLLBACK`)
 		}
 	}()
@@ -99,15 +103,17 @@ func (r localRunner) ApplyWorkspacePlan(ctx context.Context, req *diagv1.ApplyPl
 	if err := adapter.PruneMissingCLIResources(ctx, uuid.Nil, r.previousMeta, req); err != nil {
 		return nil, err
 	}
-	if _, err := sqliteStore.DB().ExecContext(ctx, `COMMIT`); err != nil {
-		return nil, err
+	if transactional {
+		if _, err := sqliteStore.DB().ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, err
+		}
 	}
 	committed = true
 	return resp, nil
 }
 
 func (r localRunner) UpdateViewName(ctx context.Context, viewID int32, name string) (*diagv1.View, error) {
-	sqliteStore, err := store.Open(r.dbPath, assets.FS)
+	sqliteStore, err := store.OpenLocal(ctx, &r.cfg, r.dataDir, assets.FS)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +144,7 @@ func NewRunner(cfg workspace.Config, targetOverride, dataDirFlag string, debug b
 		if err != nil {
 			return nil, err
 		}
-		return localRunner{dbPath: localserver.DatabasePath(dataDir), dataDir: dataDir, previousMeta: previousMeta}, nil
+		return localRunner{dbPath: localserver.DatabasePath(dataDir), dataDir: dataDir, cfg: cfg, previousMeta: previousMeta}, nil
 	default:
 		return nil, fmt.Errorf("unknown apply target %q", target)
 	}

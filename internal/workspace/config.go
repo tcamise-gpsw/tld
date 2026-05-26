@@ -63,6 +63,7 @@ type Config struct {
 	APIKey      string           `yaml:"api_key"`
 	WorkspaceID string           `yaml:"org_id"`
 	Apply       ApplyConfig      `yaml:"apply"`
+	Database    DatabaseConfig   `yaml:"database"`
 	Validation  ValidationConfig `yaml:"validation"`
 	Serve       ServeConfig      `yaml:"serve"`
 	Watch       WatchConfig      `yaml:"watch"`
@@ -73,6 +74,11 @@ type Config struct {
 // ApplyConfig controls where CLI workspace plans are materialized.
 type ApplyConfig struct {
 	Target string `yaml:"target"`
+}
+
+type DatabaseConfig struct {
+	Driver      string `yaml:"driver"`
+	DatabaseURL string `yaml:"url"`
 }
 
 // ValidationConfig represents workspace validation settings.
@@ -220,6 +226,9 @@ func DefaultConfig() *Config {
 		ServerURL: "https://tldiagram.com",
 		Apply: ApplyConfig{
 			Target: "auto",
+		},
+		Database: DatabaseConfig{
+			Driver: "sqlite",
 		},
 		Validation: ValidationConfig{
 			Level: DefaultValidationLevel,

@@ -3,6 +3,7 @@ package exportyaml
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,9 +70,7 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 	if err != nil {
 		return nil, Result{}, err
 	}
-	for viewID, level := range computedDensity {
-		storedDensity[viewID] = level
-	}
+	maps.Copy(storedDensity, computedDensity)
 	progressAdvance(progress, "Density loaded")
 
 	out := cloneWorkspace(base)

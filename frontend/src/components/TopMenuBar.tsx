@@ -213,7 +213,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
         {children && (
           <Flex
             position="absolute"
-            left="50%"
+            left="var(--topbar-notch-left, 50%)"
             transform="translateX(-50%)"
             h="full"
             align="flex-start"

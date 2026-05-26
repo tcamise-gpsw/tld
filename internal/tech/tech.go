@@ -146,10 +146,7 @@ func SuggestSimilar(label string, maxResults int) []string {
 
 	sortByDistance(candidates)
 
-	limit := len(candidates)
-	if limit > maxResults {
-		limit = maxResults
-	}
+	limit := min(len(candidates), maxResults)
 	result := make([]string, 0, limit)
 	for i := 0; i < limit; i++ {
 		result = append(result, candidates[i].name)
@@ -158,7 +155,7 @@ func SuggestSimilar(label string, maxResults int) []string {
 }
 
 func sortByDistance(items []scored) {
-	for i := 0; i < len(items); i++ {
+	for i := range items {
 		for j := i + 1; j < len(items); j++ {
 			if items[j].distance < items[i].distance ||
 				(items[j].distance == items[i].distance && len(items[j].name) < len(items[i].name)) {
@@ -205,10 +202,7 @@ func levenshtein(a, b string, maxDist int) int {
 			subst := prev[j-1] + cost
 			ins := curr[j-1] + 1
 			del := prev[j] + 1
-			curr[j] = ins
-			if del < curr[j] {
-				curr[j] = del
-			}
+			curr[j] = min(del, ins)
 			if subst < curr[j] {
 				curr[j] = subst
 			}

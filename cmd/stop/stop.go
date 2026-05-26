@@ -13,6 +13,7 @@ import (
 	"github.com/mertcikla/tld/v2/internal/store"
 	"github.com/mertcikla/tld/v2/internal/term"
 	watchpkg "github.com/mertcikla/tld/v2/internal/watch"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -121,12 +122,16 @@ func requestWatchStop(proc localserver.ProcessRecord) error {
 	if proc.DataDir == "" {
 		return nil
 	}
-	sqliteStore, err := store.Open(localserver.DatabasePath(proc.DataDir), assets.FS)
+	cfg, err := workspace.LoadGlobalConfig()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = sqliteStore.DB().Close() }()
-	return watchpkg.NewStore(sqliteStore.DB()).RequestStopActive(context.Background())
+	sqliteStore, err := store.OpenLocal(context.Background(), cfg, proc.DataDir, assets.FS)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sqliteStore.Close() }()
+	return watchpkg.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect()).RequestStopActive(context.Background())
 }
 
 func printableKind(kind string) string {
