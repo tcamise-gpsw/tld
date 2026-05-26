@@ -28,9 +28,9 @@ declare global {
 }
 
 export const isNativeApp = false
-export const isWailsApp = !!window.__TLD_APP__
+export const isWailsApp = typeof window !== 'undefined' && !!window.__TLD_APP__
 
-const defaultApiBase = window.__TLD_SERVER_URL__ ? `${window.__TLD_SERVER_URL__.replace(/\/$/, "")}/api` : "/api"
+const defaultApiBase = typeof window !== 'undefined' && window.__TLD_SERVER_URL__ ? `${window.__TLD_SERVER_URL__.replace(/\/$/, "")}/api` : "/api"
 
 export const apiBase = trimTrailingSlash(
   configuredApiBase ?? defaultApiBase,

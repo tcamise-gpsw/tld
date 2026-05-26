@@ -3,10 +3,12 @@ import {
   Box,
   Button,
   Checkbox,
+  Collapse,
   Divider,
   FormControl,
   FormLabel,
   HStack,
+  Icon,
   Input,
   Tag,
   TagCloseButton,
@@ -25,6 +27,7 @@ import PanelHeader from './PanelHeader'
 import LayoutSection from './LayoutSection'
 import ScrollIndicatorWrapper from './ScrollIndicatorWrapper'
 import TagUpsert from './TagUpsert'
+import { ChevronDownIcon, ChevronRightIcon } from './Icons'
 
 import { useContext } from 'react'
 import { ViewEditorContext } from '../pages/ViewEditor/context'
@@ -91,6 +94,7 @@ function ViewPanel({
   const [managedFileName, setManagedFileName] = useState('')
   const [deleteManagedFile, setDeleteManagedFile] = useState(true)
   const [markdownAction, setMarkdownAction] = useState<'create' | 'link' | 'unlink' | null>(null)
+  const [markdownOpen, setMarkdownOpen] = useState(!!markdown)
 
   useEffect(() => {
     if (view) {
@@ -101,6 +105,7 @@ function ViewPanel({
       setMarkdownPath(markdown?.path ?? '')
       setManagedFileName(markdown?.is_managed ? markdown.path.split('/').pop() ?? '' : '')
       setDeleteManagedFile(true)
+      setMarkdownOpen(!!markdown)
 
       // Reset populate states when view opens or changes
       setPopulateResults([])
@@ -117,7 +122,7 @@ function ViewPanel({
           })
       }
     }
-  }, [view, isOpen, markdown?.is_managed, markdown?.path])
+  }, [view, isOpen, markdown])
 
   useEffect(() => {
     if (!isOpen) return
@@ -277,115 +282,136 @@ function ViewPanel({
             <>
               <Divider borderColor="whiteAlpha.100" my={2} />
               <VStack align="stretch" spacing={3}>
-                <Text fontWeight="bold" fontSize="sm" color="gray.200">
-                  Markdown Notes
-                </Text>
-                <Text fontSize="xs" color="gray.400">
-                  Attach a markdown document to this view. Managed files are created alongside the local data directory.
-                </Text>
+                <HStack
+                  cursor="pointer"
+                  onClick={() => setMarkdownOpen(v => !v)}
+                  color={markdownOpen ? 'blue.400' : 'whiteAlpha.700'}
+                  _hover={{ color: 'blue.300' }}
+                  transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+                  userSelect="none"
+                  spacing={2}
+                >
+                  <Icon
+                    as={markdownOpen ? ChevronDownIcon : ChevronRightIcon}
+                    boxSize={3.5}
+                    strokeWidth={3.5}
+                    transition="transform 0.25s cubic-bezier(0.25, 1, 0.5, 1)"
+                  />
+                  <Text fontWeight="bold" fontSize="sm">
+                    Markdown Notes
+                  </Text>
+                </HStack>
 
-                {markdownLoading ? (
-                  <Text fontSize="xs" color="gray.500">Loading markdown metadata…</Text>
-                ) : markdown ? (
-                  <Box
-                    p={3}
-                    bg="whiteAlpha.50"
-                    border="1px solid"
-                    borderColor="whiteAlpha.100"
-                    borderRadius="md"
-                  >
-                    <VStack align="stretch" spacing={2.5}>
-                      <HStack justify="space-between" align="start">
-                        <VStack align="start" spacing={0.5}>
-                          <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">
-                            {markdown.is_managed ? 'Managed markdown file' : 'Linked markdown file'}
-                          </Text>
-                          <Text fontSize="xs" color="gray.400" wordBreak="break-all">
-                            {markdown.path}
-                          </Text>
+                <Collapse in={markdownOpen} animateOpacity>
+                  <VStack align="stretch" spacing={3} pt={1}>
+                    <Text fontSize="xs" color="gray.400">
+                      Attach a markdown document to this view. Managed files are created alongside the local data directory.
+                    </Text>
+
+                    {markdownLoading ? (
+                      <Text fontSize="xs" color="gray.500">Loading markdown metadata…</Text>
+                    ) : markdown ? (
+                      <Box
+                        p={3}
+                        bg="whiteAlpha.50"
+                        border="1px solid"
+                        borderColor="whiteAlpha.100"
+                        borderRadius="md"
+                      >
+                        <VStack align="stretch" spacing={2.5}>
+                          <HStack justify="space-between" align="start">
+                            <VStack align="start" spacing={0.5}>
+                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">
+                                {markdown.is_managed ? 'Managed markdown file' : 'Linked markdown file'}
+                              </Text>
+                              <Text fontSize="xs" color="gray.400" wordBreak="break-all">
+                                {markdown.path}
+                              </Text>
+                            </VStack>
+                            {onOpenMarkdown && (
+                              <Button size="xs" variant="outline" onClick={onOpenMarkdown}>
+                                Open editor
+                              </Button>
+                            )}
+                          </HStack>
+                          {markdown.updated_at && (
+                            <Text fontSize="10px" color="gray.500">
+                              Updated {new Date(markdown.updated_at).toLocaleString()}
+                            </Text>
+                          )}
+                          {markdown.is_managed && canEdit && (
+                            <Checkbox
+                              size="sm"
+                              isChecked={deleteManagedFile}
+                              onChange={(event) => setDeleteManagedFile(event.target.checked)}
+                            >
+                              <Text fontSize="xs" color="gray.300">Delete the managed file when unlinking</Text>
+                            </Checkbox>
+                          )}
+                          {canEdit && (
+                            <Button
+                              size="sm"
+                              colorScheme="red"
+                              variant="outline"
+                              onClick={() => { void handleUnlinkMarkdown() }}
+                              isLoading={markdownAction === 'unlink'}
+                            >
+                              Unlink Markdown
+                            </Button>
+                          )}
                         </VStack>
-                        {onOpenMarkdown && (
-                          <Button size="xs" variant="outline" onClick={onOpenMarkdown}>
-                            Open editor
-                          </Button>
-                        )}
-                      </HStack>
-                      {markdown.updated_at && (
-                        <Text fontSize="10px" color="gray.500">
-                          Updated {new Date(markdown.updated_at).toLocaleString()}
-                        </Text>
-                      )}
-                      {markdown.is_managed && canEdit && (
-                        <Checkbox
-                          size="sm"
-                          isChecked={deleteManagedFile}
-                          onChange={(event) => setDeleteManagedFile(event.target.checked)}
-                        >
-                          <Text fontSize="xs" color="gray.300">Delete the managed file when unlinking</Text>
-                        </Checkbox>
-                      )}
-                      {canEdit && (
+                      </Box>
+                    ) : (
+                      <Text fontSize="xs" color="gray.500">
+                        No markdown document is attached to this view yet.
+                      </Text>
+                    )}
+
+                    {canEdit && !markdown && (
+                      <>
+                        <FormControl>
+                          <FormLabel fontSize="xs" color="gray.400">Managed File Name</FormLabel>
+                          <Input
+                            size="sm"
+                            value={managedFileName}
+                            onChange={(event) => setManagedFileName(event.target.value)}
+                            placeholder="view-notes.md"
+                          />
+                        </FormControl>
                         <Button
                           size="sm"
-                          colorScheme="red"
-                          variant="outline"
-                          onClick={() => { void handleUnlinkMarkdown() }}
-                          isLoading={markdownAction === 'unlink'}
+                          onClick={() => { void handleCreateMarkdown() }}
+                          isLoading={markdownAction === 'create'}
                         >
-                          Unlink Markdown
+                          Create Managed File
                         </Button>
-                      )}
-                    </VStack>
-                  </Box>
-                ) : (
-                  <Text fontSize="xs" color="gray.500">
-                    No markdown document is attached to this view yet.
-                  </Text>
-                )}
+                      </>
+                    )}
 
-                {canEdit && !markdown && (
-                  <>
-                    <FormControl>
-                      <FormLabel fontSize="xs" color="gray.400">Managed File Name</FormLabel>
-                      <Input
-                        size="sm"
-                        value={managedFileName}
-                        onChange={(event) => setManagedFileName(event.target.value)}
-                        placeholder="view-notes.md"
-                      />
-                    </FormControl>
-                    <Button
-                      size="sm"
-                      onClick={() => { void handleCreateMarkdown() }}
-                      isLoading={markdownAction === 'create'}
-                    >
-                      Create Managed File
-                    </Button>
-                  </>
-                )}
-
-                {canEdit && (
-                  <>
-                    <FormControl>
-                      <FormLabel fontSize="xs" color="gray.400">Link Existing Markdown File</FormLabel>
-                      <Input
-                        size="sm"
-                        value={markdownPath}
-                        onChange={(event) => setMarkdownPath(event.target.value)}
-                        placeholder="docs/overview.md or /absolute/path/overview.md"
-                      />
-                    </FormControl>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => { void handleLinkMarkdown() }}
-                      isLoading={markdownAction === 'link'}
-                      isDisabled={!markdownPath.trim()}
-                    >
-                      {markdown ? 'Relink Markdown File' : 'Link Markdown File'}
-                    </Button>
-                  </>
-                )}
+                    {canEdit && (
+                      <>
+                        <FormControl>
+                          <FormLabel fontSize="xs" color="gray.400">Link Existing Markdown File</FormLabel>
+                          <Input
+                            size="sm"
+                            value={markdownPath}
+                            onChange={(event) => setMarkdownPath(event.target.value)}
+                            placeholder="docs/overview.md or /absolute/path/overview.md"
+                          />
+                        </FormControl>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => { void handleLinkMarkdown() }}
+                          isLoading={markdownAction === 'link'}
+                          isDisabled={!markdownPath.trim()}
+                        >
+                          {markdown ? 'Relink Markdown File' : 'Link Markdown File'}
+                        </Button>
+                      </>
+                    )}
+                  </VStack>
+                </Collapse>
               </VStack>
             </>
           )}

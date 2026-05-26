@@ -286,7 +286,7 @@ export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: 
           letterSpacing="0.15em"
           textTransform="uppercase"
         >
-          Adjust Layout
+          Layout
         </Text>
       </HStack>
 

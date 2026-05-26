@@ -2755,7 +2755,7 @@ function ViewEditorInner({
                     }
                   }}
                 >
-                  Adjust Layout
+                  Layout
                 </Button>
                 <IconButton
                   aria-label="Dismiss" icon={<CloseButton size="sm" />}
