@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import type { ElementPanelSlots } from '../slots'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -225,6 +226,7 @@ export interface ElementPanelProps extends ElementPanelSlots {
   availableTags?: string[]
   noFocusLock?: boolean
   isInline?: boolean
+  actions?: ReactNode
 }
 
 /**
@@ -254,6 +256,7 @@ function ElementPanel({
   noFocusLock,
   elementPanelAfterContentSlot,
   isInline = false,
+  actions,
 }: ElementPanelProps) {
   const { canEdit, viewId } = useViewEditorContext()
   const isEdit = !!element
@@ -724,7 +727,7 @@ function ElementPanel({
         noFocusLock={noFocusLock}
         isInline={isInline}
       >
-        <PanelHeader title={isEdit ? 'Edit Element' : 'New Element'} onClose={handleClose} hasCloseButton={!isInline} isInline={isInline} />
+        <PanelHeader title={isEdit ? 'Edit Element' : 'New Element'} onClose={handleClose} hasCloseButton={!isInline} isInline={isInline} actions={actions} />
 
         {/* Body */}
         <ScrollIndicatorWrapper px={4} py={4}>

@@ -21,6 +21,7 @@ import logoMarkUrl from "../assets/logo-mark.svg"
 import { useAccentColor } from "../context/ThemeContext"
 import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
+import ExperimentalSettings from "../pages/ExperimentalSettings"
 import { isWailsApp } from "../config/runtime"
 
 const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
@@ -36,8 +37,9 @@ const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
 )
 
 const PencilIcon = ({ size = 24 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
   </svg>
 )
 
@@ -272,11 +274,26 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
                 boxShadow="0 18px 48px rgba(0,0,0,0.45)"
                 borderRadius="20px"
                 overflow="hidden"
+                position="relative"
               >
                 <PopoverArrow bg="rgba(var(--bg-main-rgb), 0.95)" />
-                <PopoverBody p={4}>
-                  <AppearanceSettings compact />
+                <PopoverBody p={4} pb={7}>
+                  <Flex direction="column" gap={5}>
+                    <AppearanceSettings compact />
+                    <ExperimentalSettings compact />
+                  </Flex>
                 </PopoverBody>
+                <Box
+                  position="absolute"
+                  bottom={2}
+                  right={4}
+                  pointerEvents="none"
+                  userSelect="none"
+                >
+                  <Text fontSize="9px" color="gray.600" fontFamily="mono">
+                    v2.2.0-alpha.1
+                  </Text>
+                </Box>
               </PopoverContent>
             </Portal>
           </Popover>

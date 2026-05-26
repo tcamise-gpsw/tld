@@ -73,6 +73,20 @@ const ElementColorContext = createContext<ElementColorContextValue>({
   setElementColor: () => { },
 })
 
+export function initializeTheme(storagePrefix?: string) {
+  const accentKey = storagePrefix ? `${storagePrefix}:accent-color` : ACCENT_KEY
+  const bgKey = storagePrefix ? `${storagePrefix}:background-color` : BG_KEY
+  const elementKey = storagePrefix ? `${storagePrefix}:element-color` : ELEMENT_COLOR_KEY
+
+  const accent = localStorage.getItem(accentKey) ?? ACCENT_DEFAULT
+  const background = localStorage.getItem(bgKey) ?? BACKGROUND_DEFAULT
+  const elementColor = localStorage.getItem(elementKey) ?? ELEMENT_DEFAULT
+
+  applyAccentVars(accent)
+  applyBgVars(background)
+  applyElementVars(elementColor)
+}
+
 export function ThemeProvider({
   children,
   isAuthenticated,

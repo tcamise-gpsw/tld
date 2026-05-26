@@ -764,6 +764,7 @@ func (s *contractStore) Tags(context.Context, uuid.UUID) (map[string]*diagv1.Tag
 func (s *contractStore) UpdateTag(context.Context, uuid.UUID, string, string, *string) error {
 	return nil
 }
+func (s *contractStore) DeleteTag(context.Context, uuid.UUID, string) error { return nil }
 func (s *contractStore) ApplyPlan(context.Context, uuid.UUID, *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
 	return nil, nil
 }

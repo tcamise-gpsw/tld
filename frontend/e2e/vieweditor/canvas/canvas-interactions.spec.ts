@@ -57,7 +57,8 @@ test('canvas context menu snap-to-grid toggle persists in local storage', async 
 test('Escape cancels an inline add operation without creating a placement', async ({ page }) => {
   await createAndLoadDiagramWithNodes(page, 0, 'Cancel Inline')
   const name = uniqueName('Canceled Node')
-  await page.getByTestId('vieweditor-toolbar-add-element').click()
+  await page.getByTestId('vieweditor-canvas').click()
+  await page.keyboard.press('c')
   await page.getByTestId('inline-element-adder-input').fill(name)
   await page.keyboard.press('Escape')
 

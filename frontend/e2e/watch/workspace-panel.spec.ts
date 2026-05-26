@@ -42,8 +42,8 @@ test('active watch panel shows live status and runtime lines', async ({ page }) 
 
   await expect(page.getByTestId('workspace-panel')).toBeVisible()
   await expect(page.getByTestId('workspace-panel').getByText('LIVE')).toBeVisible()
-  await expect(page.getByText('Watch stream connected')).toBeVisible()
-  await expect(page.getByText(/internal\/app\/service\.go changed the diagram/)).toBeVisible()
+  await expect(page.getByText('Watch stream connected').first()).toBeVisible()
+  await expect(page.getByText(/internal\/app\/service\.go changed the diagram/).first()).toBeVisible()
 })
 
 test('watch pause resume and stop send websocket commands', async ({ page }) => {

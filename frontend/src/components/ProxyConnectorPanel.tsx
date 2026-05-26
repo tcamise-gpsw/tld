@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { ProxyConnectorDetails, ProxyConnectorLeaf, ProxyEndpoint, WorkspaceGraphSnapshot } from '../crossBranch/types'
 import SlidingPanel from './SlidingPanel'
 import PanelHeader from './PanelHeader'
-import { NavigationIcon, TrashIcon, EditIcon } from './Icons'
+import { NavigationIcon, TrashIcon, DrawIcon } from './Icons'
 import { useViewEditorContext } from '../pages/ViewEditor/context'
 import type { Connector } from '../types'
 import { truncate } from '../utils/string'
@@ -226,7 +226,7 @@ export default function ProxyConnectorPanel({
                             <HStack spacing={0.5} flexShrink={0}>
                               <IconButton
                                 aria-label="Edit connector"
-                                icon={<EditIcon size={13} />}
+                                icon={<DrawIcon size={13} />}
                                 size="xs"
                                 variant="ghost"
                                 color="blue.300"

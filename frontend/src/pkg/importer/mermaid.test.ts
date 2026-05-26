@@ -299,6 +299,26 @@ E--No-->C
     expect(extractMermaidCode('not a diagram')).toBeNull()
   })
 
+  it('sanitizes br tags from node labels', () => {
+    const code = 'graph TD\n  A["Identify Resources<br/>populate_resource"]\n  B["Line 1<br>Line 2"]'
+    const result = parseMermaid(code)
+    expect(result.elements.length).toBe(2)
+    expect(result.elements[0]?.name).toBe('Identify Resources populate_resource')
+    expect(result.elements[1]?.name).toBe('Line 1 Line 2')
+  })
+
+  it('sanitizes br tags from connector labels', () => {
+    const code = 'graph LR\n  A -->|"Label<br/>split"| B'
+    const result = parseMermaid(code)
+    expect(result.connectors[0]?.label).toBe('Label split')
+  })
+
+  it('strips arbitrary HTML tags from labels', () => {
+    const code = 'graph TD\n  A["<b>Bold</b> text"]'
+    const result = parseMermaid(code)
+    expect(result.elements[0]?.name).toBe('Bold text')
+  })
+
   it('returns null for non-Mermaid clipboard text', () => {
     expect(tryParseMermaid('ordinary text')).toBeNull()
   })

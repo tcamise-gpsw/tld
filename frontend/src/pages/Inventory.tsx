@@ -16,6 +16,12 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  Popover,
+  PopoverArrow,
+  PopoverBody,
+  PopoverContent,
+  PopoverFooter,
+  PopoverTrigger,
   Spinner,
   Tag,
   TagCloseButton,
@@ -24,7 +30,8 @@ import {
   Tooltip,
   VStack,
 } from '@chakra-ui/react'
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, DeleteIcon, SearchIcon, SmallCloseIcon, TriangleDownIcon, TriangleUpIcon } from '@chakra-ui/icons'
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, DeleteIcon, EditIcon, SearchIcon, SmallCloseIcon, TriangleDownIcon, TriangleUpIcon } from '@chakra-ui/icons'
+import { ZoomInIcon } from '../components/Icons'
 import { api } from '../api/client'
 import { TYPE_COLORS } from '../types'
 import { resolveIconPath } from '../utils/url'
@@ -102,6 +109,9 @@ export default function Inventory() {
   const [sortKey, setSortKey] = useState<'name' | 'updatedAt' | 'usage' | 'type'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [tagSearch, setTagSearch] = useState('')
+  const [tagDeleteConfirm, setTagDeleteConfirm] = useState<{ tag: string; count: number } | null>(null)
+  const [deletingTag, setDeletingTag] = useState<string | null>(null)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const selectedType = parseInventoryType(searchParams.get('type'))
@@ -387,6 +397,10 @@ export default function Inventory() {
     })
   }, [rows, selectedKeys.size])
 
+  useEffect(() => {
+    if (selectedKeys.size === 0) setBulkDeleteConfirmOpen(false)
+  }, [selectedKeys.size])
+
   const typeCounts = useMemo(() => {
     const counts: Record<InventoryType, number> = {
       all: rows.length,
@@ -457,7 +471,7 @@ export default function Inventory() {
   }
 
   const handleBulkDelete = async () => {
-    if (!window.confirm(`Delete ${selectedKeys.size} selected item(s)? This cannot be undone.`)) return
+    setBulkDeleteConfirmOpen(false)
     setBulkLoading(true)
     try {
       await Promise.all(
@@ -495,6 +509,19 @@ export default function Inventory() {
     selectedRows.forEach((row) => row.tags.forEach((tag) => { counts[tag] = (counts[tag] ?? 0) + 1 }))
     return counts
   }, [selectedRows])
+
+  const handleDeleteTag = async (tag: string) => {
+    setDeletingTag(tag)
+    try {
+      await api.workspace.orgs.tagColors.delete(tag)
+      setTagDeleteConfirm(null)
+      void refresh()
+    } catch (err) {
+      console.error('Failed to delete tag', err)
+    } finally {
+      setDeletingTag(null)
+    }
+  }
 
   return (
     <ViewEditorContext.Provider value={editorContext}>
@@ -644,31 +671,100 @@ export default function Inventory() {
                     const isActive = tagsFilter.includes(tag)
                     const count = tagCounts[tag] ?? 0
                     return (
-                      <Flex
-                        key={tag}
-                        data-testid={`inventory-tag-filter-${tag}`}
-                        align="center"
-                        px={2}
-                        py={1}
-                        borderRadius="md"
-                        cursor="pointer"
-                        bg={isActive ? 'rgba(66, 153, 225, 0.12)' : 'transparent'}
-                        _hover={{ bg: isActive ? 'rgba(66, 153, 225, 0.18)' : 'whiteAlpha.50' }}
-                        onClick={() => toggleTagFilter(tag)}
-                        userSelect="none"
-                      >
-                        <Box
-                          w="6px"
-                          h="6px"
-                          borderRadius="full"
-                          bg={isActive ? 'blue.400' : 'gray.600'}
-                          mr={2}
-                          flexShrink={0}
-                          transition="background 0.1s"
-                        />
-                        <Text fontSize="xs" color={isActive ? 'blue.300' : 'gray.400'} flex={1} isTruncated>{tag}</Text>
-                        <Text fontSize="10px" color={count === 0 ? 'gray.700' : isActive ? 'blue.400' : 'gray.600'} fontWeight="bold" ml={1}>{count}</Text>
-                      </Flex>
+                      <Box key={tag}>
+                        <Flex
+                          data-testid={`inventory-tag-filter-${tag}`}
+                          role="group"
+                          align="center"
+                          px={2}
+                          py={1}
+                          borderRadius="md"
+                          cursor="pointer"
+                          bg={isActive ? 'rgba(66, 153, 225, 0.12)' : 'transparent'}
+                          _hover={{ bg: isActive ? 'rgba(66, 153, 225, 0.18)' : 'whiteAlpha.50' }}
+                          onClick={() => toggleTagFilter(tag)}
+                          userSelect="none"
+                        >
+                          <Box
+                            w="6px"
+                            h="6px"
+                            borderRadius="full"
+                            bg={isActive ? 'blue.400' : 'gray.600'}
+                            mr={2}
+                            flexShrink={0}
+                            transition="background 0.1s"
+                          />
+                          <Text fontSize="xs" color={isActive ? 'blue.300' : 'gray.400'} flex={1} isTruncated>{tag}</Text>
+                          <Text fontSize="10px" color={count === 0 ? 'gray.700' : isActive ? 'blue.400' : 'gray.600'} fontWeight="bold" ml={1} _groupHover={{ display: 'none' }}>{count}</Text>
+                          <Popover
+                            placement="right-start"
+                            isOpen={tagDeleteConfirm?.tag === tag}
+                            onClose={() => setTagDeleteConfirm(null)}
+                            closeOnBlur
+                          >
+                            <Tooltip label={`Delete tag "${tag}"`} placement="right" openDelay={400}>
+                              <Box>
+                                <PopoverTrigger>
+                                  <IconButton
+                                    aria-label={`Delete tag ${tag}`}
+                                    icon={<DeleteIcon boxSize="9px" />}
+                                    size="xs"
+                                    variant="ghost"
+                                    color="red.400"
+                                    display="none"
+                                    _groupHover={{ display: 'flex' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setTagDeleteConfirm((prev) => (prev?.tag === tag ? null : { tag, count }))
+                                    }}
+                                    h="16px"
+                                    minW="16px"
+                                    ml={1}
+                                    isDisabled={deletingTag !== null}
+                                  />
+                                </PopoverTrigger>
+                              </Box>
+                            </Tooltip>
+                            <PopoverContent
+                              onClick={(e) => e.stopPropagation()}
+                              bg="rgb(var(--bg-main-rgb))"
+                              borderColor="rgba(245, 101, 101, 0.45)"
+                              boxShadow="0 14px 36px rgba(0, 0, 0, 0.45)"
+                              maxW="280px"
+                              data-testid={`inventory-tag-delete-confirm-${tag}`}
+                            >
+                              <PopoverArrow bg="rgb(var(--bg-main-rgb))" />
+                              <PopoverBody pt={3} pb={2}>
+                                <Text fontSize="sm" color="gray.100" lineHeight={1.35}>
+                                  {count > 0 ? `Delete "${tag}" and remove it from ${count} item(s)?` : `Delete "${tag}"?`}
+                                </Text>
+                              </PopoverBody>
+                              <PopoverFooter border="0" pt={0} pb={3}>
+                                <HStack justify="flex-end" spacing={2}>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    colorScheme="gray"
+                                    onClick={() => setTagDeleteConfirm(null)}
+                                    isDisabled={deletingTag === tag}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    colorScheme="red"
+                                    onClick={() => { void handleDeleteTag(tag) }}
+                                    isLoading={deletingTag === tag}
+                                    loadingText="Deleting"
+                                  >
+                                    Delete
+                                  </Button>
+                                </HStack>
+                              </PopoverFooter>
+                            </PopoverContent>
+                          </Popover>
+                        </Flex>
+                      </Box>
                     )
                   })}
                 {availableTags.length === 0 && (
@@ -889,17 +985,64 @@ export default function Inventory() {
                             </Menu>
                           )}
                         </HStack>
-                        <Tooltip label="Delete selected">
-                          <IconButton
-                            aria-label="Delete selected"
-                            icon={<DeleteIcon />}
-                            size="xs"
-                            colorScheme="red"
-                            variant="ghost"
-                            isLoading={bulkLoading}
-                            onClick={() => void handleBulkDelete()}
-                          />
-                        </Tooltip>
+                        <Popover
+                          placement="left-start"
+                          isOpen={bulkDeleteConfirmOpen}
+                          onClose={() => setBulkDeleteConfirmOpen(false)}
+                          closeOnBlur
+                        >
+                          <Tooltip label="Delete selected">
+                            <Box>
+                              <PopoverTrigger>
+                                <IconButton
+                                  aria-label="Delete selected"
+                                  icon={<DeleteIcon />}
+                                  size="xs"
+                                  colorScheme="red"
+                                  variant="ghost"
+                                  isLoading={bulkLoading}
+                                  onClick={() => setBulkDeleteConfirmOpen((prev) => !prev)}
+                                />
+                              </PopoverTrigger>
+                            </Box>
+                          </Tooltip>
+                          <PopoverContent
+                            bg="rgb(var(--bg-main-rgb))"
+                            borderColor="rgba(245, 101, 101, 0.45)"
+                            boxShadow="0 14px 36px rgba(0, 0, 0, 0.45)"
+                            maxW="290px"
+                            data-testid="inventory-bulk-delete-confirm"
+                          >
+                            <PopoverArrow bg="rgb(var(--bg-main-rgb))" />
+                            <PopoverBody pt={3} pb={2}>
+                              <Text fontSize="sm" color="gray.100" lineHeight={1.35}>
+                                {`Delete ${selectedKeys.size} selected item(s)? This cannot be undone.`}
+                              </Text>
+                            </PopoverBody>
+                            <PopoverFooter border="0" pt={0} pb={3}>
+                              <HStack justify="flex-end" spacing={2}>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  colorScheme="gray"
+                                  onClick={() => setBulkDeleteConfirmOpen(false)}
+                                  isDisabled={bulkLoading}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  colorScheme="red"
+                                  onClick={() => { void handleBulkDelete() }}
+                                  isLoading={bulkLoading}
+                                  loadingText="Deleting"
+                                >
+                                  Delete
+                                </Button>
+                              </HStack>
+                            </PopoverFooter>
+                          </PopoverContent>
+                        </Popover>
                         <IconButton
                           aria-label="Clear selection"
                           icon={<SmallCloseIcon />}
@@ -1070,57 +1213,6 @@ export default function Inventory() {
           </Flex>
 
           <Box w={{ base: '0', xl: '340px' }} display={{ base: 'none', xl: 'flex' }} flexDir="column" borderLeft="1px solid" borderColor="whiteAlpha.100" overflow="hidden" position="relative">
-            {selectedRow && (
-              <Box p={4} borderBottom="1px solid" borderColor="whiteAlpha.100" bg="rgba(15, 15, 20, 0.45)" backdropFilter="blur(12px)">
-                <Flex gap={2}>
-                  <Button
-                    data-testid="inventory-action-explore"
-                    leftIcon={
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
-                      </svg>
-                    }
-                    size="sm"
-                    w="50%"
-                    bg="rgba(var(--accent-rgb), 0.12)"
-                    color="var(--accent)"
-                    border="1px solid"
-                    borderColor="rgba(var(--accent-rgb), 0.2)"
-                    _hover={{ bg: 'rgba(var(--accent-rgb), 0.18)', borderColor: 'rgba(var(--accent-rgb), 0.35)', transform: 'translateY(-1px)' }}
-                    _active={{ transform: 'translateY(0)' }}
-                    onClick={() => navigate(navigationUrls.exploreUrl)}
-                    fontWeight="semibold"
-                    borderRadius="lg"
-                    transition="all 0.15s ease"
-                  >
-                    Explore
-                  </Button>
-                  <Button
-                    data-testid="inventory-action-editor"
-                    leftIcon={
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
-                      </svg>
-                    }
-                    size="sm"
-                    w="50%"
-                    variant="outline"
-                    color="gray.200"
-                    borderColor="whiteAlpha.200"
-                    _hover={{ bg: 'whiteAlpha.100', borderColor: 'whiteAlpha.300', color: 'white', transform: 'translateY(-1px)' }}
-                    _active={{ transform: 'translateY(0)' }}
-                    onClick={() => navigate(navigationUrls.editorUrl)}
-                    fontWeight="semibold"
-                    borderRadius="lg"
-                    transition="all 0.15s ease"
-                  >
-                    Open in Editor
-                  </Button>
-                </Flex>
-              </Box>
-            )}
             <Box flex={1} minH={0} overflow="auto" position="relative">
               {selectedRow?.objectType === 'view' && (
                 <ViewPanel
@@ -1132,6 +1224,34 @@ export default function Inventory() {
                   availableTags={availableTags}
                   hasBackdrop={false}
                   isInline={true}
+                  actions={
+                    <HStack spacing={0.5}>
+                      <Tooltip label="Explore" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Explore"
+                          data-testid="inventory-action-explore"
+                          icon={<ZoomInIcon size={15} strokeWidth={2.5} />}
+                          size="sm"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
+                          onClick={() => navigate(navigationUrls.exploreUrl)}
+                        />
+                      </Tooltip>
+                      <Tooltip label="Open in Editor" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Open in Editor"
+                          data-testid="inventory-action-editor"
+                          icon={<EditIcon boxSize="14px" />}
+                          size="sm"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                          onClick={() => navigate(navigationUrls.editorUrl)}
+                        />
+                      </Tooltip>
+                    </HStack>
+                  }
                 />
               )}
               {selectedRow?.objectType === 'element' && (
@@ -1147,6 +1267,34 @@ export default function Inventory() {
                   hasBackdrop={false}
                   isInline={true}
                   autoSave
+                  actions={
+                    <HStack spacing={0.5}>
+                      <Tooltip label="Explore" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Explore"
+                          data-testid="inventory-action-explore"
+                          icon={<ZoomInIcon size={15} strokeWidth={2.5} />}
+                          size="sm"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
+                          onClick={() => navigate(navigationUrls.exploreUrl)}
+                        />
+                      </Tooltip>
+                      <Tooltip label="Open in Editor" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Open in Editor"
+                          data-testid="inventory-action-editor"
+                          icon={<EditIcon boxSize="14px" />}
+                          size="sm"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                          onClick={() => navigate(navigationUrls.editorUrl)}
+                        />
+                      </Tooltip>
+                    </HStack>
+                  }
                 />
               )}
               {selectedRow?.objectType === 'connector' && (
@@ -1161,6 +1309,34 @@ export default function Inventory() {
                   hasBackdrop={false}
                   isInline={true}
                   autoSave
+                  actions={
+                    <HStack spacing={0.5}>
+                      <Tooltip label="Explore" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Explore"
+                          data-testid="inventory-action-explore"
+                          icon={<ZoomInIcon size={15} strokeWidth={2.5} />}
+                          size="sm"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
+                          onClick={() => navigate(navigationUrls.exploreUrl)}
+                        />
+                      </Tooltip>
+                      <Tooltip label="Open in Editor" placement="bottom" hasArrow openDelay={400}>
+                        <IconButton
+                          aria-label="Open in Editor"
+                          data-testid="inventory-action-editor"
+                          icon={<EditIcon boxSize="14px" />}
+                          size="sm"
+                          variant="ghost"
+                          color="var(--accent)"
+                          _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                          onClick={() => navigate(navigationUrls.editorUrl)}
+                        />
+                      </Tooltip>
+                    </HStack>
+                  }
                 />
               )}
               {!selectedRow && (
@@ -1275,7 +1451,7 @@ function FilterSection({
   onToggle: () => void
 }) {
   return (
-    <Box borderBottom="1px solid" borderColor="whiteAlpha.100">
+    <Box data-testid={`inventory-filter-section-${title.toLowerCase()}`} borderBottom="1px solid" borderColor="whiteAlpha.100">
       <Flex
         px={3}
         py={2}

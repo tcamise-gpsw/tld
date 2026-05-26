@@ -17,7 +17,6 @@ test('empty editor shows a usable canvas and primary panels', async ({ page }) =
   await createDiagram(page, uniqueName('Empty Editor'))
 
   await expect(page.getByTestId('vieweditor-canvas')).toBeVisible()
-  await expect(page.getByTestId('vieweditor-toolbar-add-element')).toBeVisible()
   await expect(page.getByTestId('element-library-panel')).toBeVisible()
   await expect(page.getByTestId('view-explorer-panel')).toBeVisible()
 })
@@ -30,7 +29,7 @@ test('toolbar extras open import and export actions', async ({ page }) => {
   await expect(page.getByTestId('vieweditor-toolbar-export')).toBeVisible()
 })
 
-test('toolbar add creates a node with a durable placement', async ({ page }) => {
+test('keyboard add creates a node with a durable placement', async ({ page }) => {
   await createDiagram(page, uniqueName('Undo Redo Node'))
   const name = await addNodeWithToolbar(page, uniqueName('Undoable Node'))
 
@@ -69,10 +68,11 @@ test('clicking a second node switches panel selection', async ({ page }) => {
   await expect(page.getByTestId('element-panel-name-input')).toHaveValue(elements[1].name)
 })
 
-test('canceling inline add from the toolbar leaves no new placement', async ({ page }) => {
+test('canceling inline add from keyboard leaves no new placement', async ({ page }) => {
   await createDiagram(page, uniqueName('Inline Cancel'))
 
-  await page.getByTestId('vieweditor-toolbar-add-element').click()
+  await page.getByTestId('vieweditor-canvas').click()
+  await page.keyboard.press('c')
   await page.getByTestId('inline-element-adder-input').fill('Should Not Exist')
   await page.keyboard.press('Escape')
 

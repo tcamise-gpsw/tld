@@ -306,6 +306,10 @@ func (s *SQLiteStore) UpdateTag(ctx context.Context, name, color string, descrip
 	return s.legacy.UpdateTag(ctx, name, color, description)
 }
 
+func (s *SQLiteStore) DeleteTag(ctx context.Context, name string) error {
+	return s.legacy.DeleteTag(ctx, name)
+}
+
 func (s *SQLiteStore) Explore(ctx context.Context) (core.ExploreData, error) {
 	out, err := s.legacy.Explore(ctx)
 	if err != nil {

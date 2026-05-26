@@ -42,7 +42,7 @@ test('canvas context menu copies Mermaid directly', async ({ page, context }) =>
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin })
 
   const box = await reactFlowPaneBox(page)
-  await page.mouse.click(box.x + box.width * 0.48, box.y + box.height * 0.38, { button: 'right' })
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.15, { button: 'right' })
 
   await page.getByTestId('vieweditor-canvas-context-copy-mermaid').click()
   await expect(page.getByText('Copied Mermaid').first()).toBeVisible()

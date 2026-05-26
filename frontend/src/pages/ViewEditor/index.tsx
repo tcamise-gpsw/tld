@@ -471,8 +471,8 @@ function ViewEditorInner({
   const closeProxyConnectorPanelRef = useRef(proxyConnectorPanel.onClose)
   closeProxyConnectorPanelRef.current = proxyConnectorPanel.onClose
 
-  const openViewDetailsRef = useRef(viewDetails.onOpen)
-  openViewDetailsRef.current = viewDetails.onOpen
+  const openViewDetailsRef = useRef(viewDetails.onToggle)
+  openViewDetailsRef.current = viewDetails.onToggle
 
   const openCodePreviewRef = useRef(codePreview.onOpen)
   openCodePreviewRef.current = codePreview.onOpen
@@ -894,7 +894,6 @@ function ViewEditorInner({
       })
       await loadViewMarkdown(viewId)
       if (options.openEditor !== false) setIsMarkdownOpen(true)
-      toast({ status: 'success', title: 'Markdown ready' })
     } catch (error) {
       toast({
         status: 'error',
@@ -1173,6 +1172,22 @@ function ViewEditorInner({
     }
     return summary
   }, [effectiveWorkspaceSnapshot])
+
+  const supportsZoomOut = useMemo(() => {
+    if (viewId == null || !view) return false
+    return view.parent_view_id != null && treeData.some(n => n.id === view.parent_view_id)
+  }, [viewId, view, treeData])
+
+  const supportsZoomIn = useMemo(() => {
+    if (viewId == null) return false
+    const onCanvasIds = new Set(viewElements.map((o) => o.element_id))
+    return Object.entries(linksMap).some(([elementIdStr, links]) => {
+      const elementId = Number(elementIdStr)
+      if (!Number.isFinite(elementId) || !onCanvasIds.has(elementId)) return false
+      return links && links.length > 0
+    })
+  }, [viewId, viewElements, linksMap])
+
 
   useEffect(() => {
     const requestedElementId = parseNumericId(searchParams.get('element'))
@@ -2043,7 +2058,7 @@ function ViewEditorInner({
       duration: 0,
       padding: VIEW_EDITOR_INITIAL_FIT_PADDING,
       minZoom: computedMinZoom,
-      maxZoom: 4,
+      maxZoom: 1,
     })
     if (ok) {
       if (contextFitNodes.length > 0) fittedContextForViewRef.current = viewIdRef.current
@@ -2172,6 +2187,22 @@ function ViewEditorInner({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [drawingMode, handleUndo, handleRedo, setDrawingTool])
 
+  // ── V shortcut to open View Details ────────────────────────────────────────
+  useEffect(() => {
+    if (drawingMode) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
+      if (e.ctrlKey || e.altKey || e.metaKey) return
+      if (e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        openViewDetailsRef.current()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [drawingMode])
+
   // ── Overscroll prevention ──────────────────────────────────────────────────
   useEffect(() => {
     const html = document.documentElement
@@ -2210,12 +2241,6 @@ function ViewEditorInner({
       root.style.removeProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR)
     }
   }, [])
-
-  useEffect(() => {
-    setHeader({
-      node: <ViewHeaderButton name={viewName ?? undefined} onOpen={openViewDetailsRef.current} />,
-    })
-  }, [viewName, setHeader])
 
   useEffect(() => () => setHeader(null), [setHeader])
   // ── Share ──────────────────────────────────────────────────────────────────
@@ -2756,7 +2781,7 @@ function ViewEditorInner({
                     }
                   }}
                 >
-                  Adjust Layout
+                  Layout
                 </Button>
                 <IconButton
                   aria-label="Dismiss" icon={<CloseButton size="sm" />}
@@ -2808,8 +2833,15 @@ function ViewEditorInner({
               onRemoveFromView={() => { void handleBulkRemoveFromView() }}
             />
 
+            <ViewHeaderButton
+              name={viewName ?? undefined}
+              isOpen={viewDetails.isOpen}
+              onToggle={viewDetails.onToggle}
+              supportsZoomOut={supportsZoomOut}
+              supportsZoomIn={supportsZoomIn}
+            />
+
             <ViewFloatingMenu
-              handleAddElementAtCenter={handleAddElementAtCenter}
               drawingMode={drawingMode} setDrawingMode={setDrawingMode}
               hasDrawingPaths={drawingPaths.length > 0} drawingVisible={drawingVisible} setDrawingVisible={setDrawingVisible}
               extrasOpen={extrasOpen} setExtrasOpen={setExtrasOpen}

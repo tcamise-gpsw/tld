@@ -59,6 +59,7 @@ export { default as NavBreadcrumb } from './components/NavBreadcrumb'
 export { default as ScrollIndicatorWrapper } from './components/ScrollIndicatorWrapper'
 export { default as LayoutSection } from './components/LayoutSection'
 export { default as CrossBranchControls } from './components/CrossBranchControls'
+export { HomeRedirect } from './components/HomeRedirect'
 
 // Icons
 export * from './components/Icons'
@@ -92,7 +93,7 @@ export * from './components/ZUI'
 export { default as theme } from './theme'
 
 // ─── Contexts ────────────────────────────────────────────────────────────────
-export { ThemeProvider, useAccentColor, useTheme } from './context/ThemeContext'
+export { ThemeProvider, useAccentColor, useTheme, initializeTheme } from './context/ThemeContext'
 export { HeaderProvider, useSetHeader, useHeader } from './components/HeaderContext'
 export {
   WorkspaceVersionProvider,
@@ -114,7 +115,23 @@ export { usePlatform } from './platform/context'
 // ─── API Contract ────────────────────────────────────────────────────────────
 // The library ships with a reference stub client (offline/local mode).
 // Host applications can provide their own implementation via the same interface.
-export { api } from './api/client'
+export {
+  api,
+  rpc,
+  j,
+  mapDiagram,
+  diagramToView,
+  protoElementToLibrary,
+  libraryElementToDependency,
+  protoPlacedElement,
+  protoConnector,
+  protoDependencyConnector,
+  protoNavigation,
+  protoDiagramPlacement,
+  protoLayer,
+  mapViewMarkdown,
+  type ProtoDiagram,
+} from './api/client'
 export type { DependenciesResponse } from './api/client'
 
 // ─── Extension Slots ─────────────────────────────────────────────────────────

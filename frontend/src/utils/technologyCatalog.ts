@@ -1,5 +1,6 @@
 import type { TechnologyCatalogItem } from '../types'
 import { isNativeApp } from '../config/runtime'
+import { trimTrailingSlash } from './url'
 
 interface SearchableCatalogItem {
   item: TechnologyCatalogItem
@@ -19,7 +20,7 @@ export function resolveWithBase(urlOrPath: string): string {
   if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://') || urlOrPath.startsWith('data:')) {
     return urlOrPath
   }
-  const vscodeServerUrl = typeof window !== 'undefined' ? window.__TLD_SERVER_URL__?.replace(/\/+$/, '') : undefined
+  const vscodeServerUrl = typeof window !== 'undefined' && window.__TLD_SERVER_URL__ ? trimTrailingSlash(window.__TLD_SERVER_URL__) : undefined
   if (window.__TLD_VSCODE__ && vscodeServerUrl) {
     const normalizedPath = urlOrPath.startsWith('/') ? urlOrPath : `/${urlOrPath}`
     return `${vscodeServerUrl}${normalizedPath}`

@@ -8,25 +8,30 @@ import Inventory from './pages/Inventory'
 import { SharedInfiniteZoom } from './pages/InfiniteZoom'
 import Settings from './pages/Settings'
 import AppearanceSettings from './pages/AppearanceSettings'
+import ExperimentalSettings from './pages/ExperimentalSettings'
 import { HeaderProvider, useHeader } from './components/HeaderContext'
 import TopMenuBar from './components/TopMenuBar'
 import WorkspacePanel from './components/WorkspacePanel'
-import { ThemeProvider } from './context/ThemeContext'
+import { ExperimentalProvider, useExperimental } from './context/ExperimentalContext'
 import { WorkspaceVersionProvider } from './context/WorkspaceVersionContext'
-import { ACCENT_DEFAULT, BACKGROUND_DEFAULT, ELEMENT_DEFAULT, hexToRgba } from './constants/colors'
+import { initializeTheme, ThemeProvider } from './context/ThemeContext'
 import { platform } from './platform/local'
+import { HomeRedirect } from './components/HomeRedirect'
+
+initializeTheme()
 
 function AppLayout() {
   const header = useHeader()
   const node = header && typeof header === 'object' && 'node' in header ? (header as { node: React.ReactNode }).node : header
   const hideMobileBar = header && typeof header === 'object' && 'hideMobileBar' in header ? !!(header as { hideMobileBar?: boolean }).hideMobileBar : false
   const hideTopBar = typeof window !== 'undefined' && !!window.__TLD_VSCODE__
+  const { experimental } = useExperimental()
 
   return (
     <Box h="100dvh" display="flex" flexDirection="column" bg="var(--bg-canvas)" overflow="hidden">
       {!hideTopBar && (
         <>
-          <TopMenuBar hideMobileBar={hideMobileBar} rightSlot={<WorkspacePanel />}>
+          <TopMenuBar hideMobileBar={hideMobileBar} rightSlot={experimental.watchEnabled ? <WorkspacePanel /> : undefined}>
             {node}
           </TopMenuBar>
           <Box
@@ -41,56 +46,6 @@ function AppLayout() {
       </Box>
     </Box>
   )
-}
-
-;(() => {
-  const accent = localStorage.getItem('diag:accent-color') ?? ACCENT_DEFAULT
-  document.documentElement.style.setProperty('--accent', accent)
-  const rgba = hexToRgba(accent, 1)
-  document.documentElement.style.setProperty('--accent-rgb', rgba.slice(5, -3))
-
-  const background = localStorage.getItem('diag:background-color') ?? BACKGROUND_DEFAULT
-  document.documentElement.style.setProperty('--bg-main', background)
-  const bgRgba = hexToRgba(background, 1)
-  document.documentElement.style.setProperty('--bg-main-rgb', bgRgba.slice(5, -3))
-
-  const elementColor = localStorage.getItem('diag:element-color') ?? ELEMENT_DEFAULT
-  document.documentElement.style.setProperty('--bg-element', elementColor)
-  const objRgba = hexToRgba(elementColor, 1)
-  document.documentElement.style.setProperty('--bg-element-rgb', objRgba.slice(5, -3))
-})()
-
-function HomeRedirect() {
-  const [loading, setLoading] = useState(true)
-  const [target, setTarget] = useState<string | null>(null)
-
-  useEffect(() => {
-    let mounted = true
-    api.workspace.views
-      .tree()
-      .then((tree) => {
-        if (!mounted) return
-        const roots = (tree || []).filter((view) => view.parent_view_id === null)
-        if (roots.length > 0) setTarget(`/views/${roots[0].id}`)
-        else setTarget('/views')
-      })
-      .catch(() => mounted && setTarget('/views'))
-      .finally(() => mounted && setLoading(false))
-
-    return () => {
-      mounted = false
-    }
-  }, [])
-
-  if (loading) {
-    return (
-      <Center h="100%">
-        <Spinner size="xl" />
-      </Center>
-    )
-  }
-
-  return <Navigate to={target || '/views'} replace />
 }
 
 function DependenciesRedirect() {
@@ -118,37 +73,40 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider>
-      <Box h="100dvh" bg="var(--bg-canvas)" overflow="hidden">
-        <Routes>
-          {platform.getRoutes({ user: null })}
+    <ExperimentalProvider>
+      <ThemeProvider>
+        <Box h="100dvh" bg="var(--bg-canvas)" overflow="hidden">
+          <Routes>
+            {platform.getRoutes({ user: null })}
 
-          <Route path="/explore/shared/:token" element={<Box h="100dvh" overflow="hidden"><HeaderProvider><WorkspaceVersionProvider><SharedInfiniteZoom /></WorkspaceVersionProvider></HeaderProvider></Box>} />
-          <Route
-            element={
-              <HeaderProvider>
-                <WorkspaceVersionProvider>
-                  <AppLayout />
-                </WorkspaceVersionProvider>
-              </HeaderProvider>
-            }
-          >
-            <Route index element={<HomeRedirect />} />
-            <Route path="views" element={<ViewsPage />} />
-            <Route path="views/:id" element={<ViewEditor />} />
-            <Route path="inventory" element={<Inventory />} />
-            <Route path="dependencies" element={<DependenciesRedirect />} />
-            <Route path="explore" element={<Navigate to="/views" replace />} />
-            <Route path="settings" element={<Settings />}>
-              <Route index element={<Navigate to="appearance" replace />} />
-              {platform.getSettingsRoutes({ user: null })}
-              <Route path="appearance" element={<AppearanceSettings />} />
+            <Route path="/explore/shared/:token" element={<Box h="100dvh" overflow="hidden"><HeaderProvider><WorkspaceVersionProvider><SharedInfiniteZoom /></WorkspaceVersionProvider></HeaderProvider></Box>} />
+            <Route
+              element={
+                <HeaderProvider>
+                  <WorkspaceVersionProvider>
+                    <AppLayout />
+                  </WorkspaceVersionProvider>
+                </HeaderProvider>
+              }
+            >
+              <Route index element={<HomeRedirect />} />
+              <Route path="views" element={<ViewsPage />} />
+              <Route path="views/:id" element={<ViewEditor />} />
+              <Route path="inventory" element={<Inventory />} />
+              <Route path="dependencies" element={<DependenciesRedirect />} />
+              <Route path="explore" element={<Navigate to="/views" replace />} />
+              <Route path="settings" element={<Settings />}>
+                <Route index element={<Navigate to="appearance" replace />} />
+                {platform.getSettingsRoutes({ user: null })}
+                <Route path="appearance" element={<AppearanceSettings />} />
+                <Route path="experimental" element={<ExperimentalSettings />} />
+              </Route>
             </Route>
-          </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Box>
-    </ThemeProvider>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Box>
+      </ThemeProvider>
+    </ExperimentalProvider>
   )
 }

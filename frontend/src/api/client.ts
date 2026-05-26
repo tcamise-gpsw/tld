@@ -236,7 +236,7 @@ const orgClient = createClient(OrgService, transport)
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function rpc<T>(call: () => Promise<T>): Promise<T> {
+export async function rpc<T>(call: () => Promise<T>): Promise<T> {
   try {
     return await call()
   } catch (e) {
@@ -245,7 +245,7 @@ async function rpc<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
-function j<T>(schema: Parameters<typeof toJson>[0], msg: Parameters<typeof toJson>[1]): T {
+export function j<T>(schema: Parameters<typeof toJson>[0], msg: Parameters<typeof toJson>[1]): T {
   return toJson(schema, msg, { useProtoFieldName: true, emitDefaultValues: true }) as unknown as T
 }
 
@@ -273,7 +273,7 @@ function mapWorkspaceVersion(version: WorkspaceVersionInfo): WorkspaceVersion {
 
 // ─── Proto → frontend type mappers ───────────────────────────────────────────
 
-interface ProtoDiagram {
+export interface ProtoDiagram {
   id: number
   ownerElementId?: number | null
   owner_element_id?: number | null
@@ -301,7 +301,7 @@ interface ProtoViewMarkdownDocument {
   updated_at?: string
 }
 
-function mapViewMarkdown(doc: ProtoViewMarkdownDocument | null | undefined): ViewMarkdownDocument | null {
+export function mapViewMarkdown(doc: ProtoViewMarkdownDocument | null | undefined): ViewMarkdownDocument | null {
   if (!doc?.path) return null
   return {
     path: String(doc.path),
@@ -310,7 +310,7 @@ function mapViewMarkdown(doc: ProtoViewMarkdownDocument | null | undefined): Vie
   }
 }
 
-function mapDiagram(d: ProtoDiagram): ViewTreeNode {
+export function mapDiagram(d: ProtoDiagram): ViewTreeNode {
   return {
     id: Number(d.id),
     owner_element_id: d.ownerElementId != null || d.owner_element_id != null
@@ -362,7 +362,7 @@ function pruneTreeAround(nodes: ViewTreeNode[], viewId: number, ancestorLevels: 
   return [scoped]
 }
 
-function diagramToView(d: ProtoDiagram): View {
+export function diagramToView(d: ProtoDiagram): View {
   return {
     id: Number(d.id),
     owner_element_id: d.ownerElementId != null || d.owner_element_id != null
@@ -377,7 +377,7 @@ function diagramToView(d: ProtoDiagram): View {
   }
 }
 
-function protoElementToLibrary(e: Record<string, unknown>): LibraryElement {
+export function protoElementToLibrary(e: Record<string, unknown>): LibraryElement {
   const technologyConnectors = normalizeTechnologyConnectors(e.technology_connectors ?? e.technologyLinks)
   return {
     id: Number(e.id ?? 0),
@@ -400,7 +400,7 @@ function protoElementToLibrary(e: Record<string, unknown>): LibraryElement {
   }
 }
 
-function libraryElementToDependency(element: LibraryElement): DependencyElement {
+export function libraryElementToDependency(element: LibraryElement): DependencyElement {
   return {
     id: String(element.id),
     name: element.name,
@@ -420,7 +420,7 @@ function libraryElementToDependency(element: LibraryElement): DependencyElement 
   }
 }
 
-function protoPlacedElement(p: Record<string, unknown>): PlacedElement {
+export function protoPlacedElement(p: Record<string, unknown>): PlacedElement {
   const technologyConnectors = normalizeTechnologyConnectors(p.technology_connect_ors ?? p.technology_connectors ?? p.technologyLinks)
   return {
     id: Number(p.id ?? 0),
@@ -445,7 +445,7 @@ function protoPlacedElement(p: Record<string, unknown>): PlacedElement {
   }
 }
 
-function protoConnector(e: Record<string, unknown>): Connector {
+export function protoConnector(e: Record<string, unknown>): Connector {
   return {
     id: Number(e.id ?? 0),
     view_id: Number(e.view_id ?? e.viewId ?? 0),
@@ -465,7 +465,7 @@ function protoConnector(e: Record<string, unknown>): Connector {
   }
 }
 
-function protoDependencyConnector(e: Record<string, unknown>): DependencyConnector {
+export function protoDependencyConnector(e: Record<string, unknown>): DependencyConnector {
   return {
     id: String(e.id ?? 0),
     view_id: String(e.view_id ?? e.viewId ?? 0),
@@ -485,7 +485,7 @@ function protoDependencyConnector(e: Record<string, unknown>): DependencyConnect
   }
 }
 
-function protoNavigation(n: Record<string, unknown>): ViewConnector {
+export function protoNavigation(n: Record<string, unknown>): ViewConnector {
   return {
     id: Number(n.id ?? 0),
     element_id: (n.element_id ?? null) as number | null,
@@ -496,14 +496,14 @@ function protoNavigation(n: Record<string, unknown>): ViewConnector {
   }
 }
 
-function protoDiagramPlacement(p: Record<string, unknown>): ViewPlacement {
+export function protoDiagramPlacement(p: Record<string, unknown>): ViewPlacement {
   return {
     view_id: Number(p.view_id ?? 0),
     view_name: String(p.view_name ?? ''),
   }
 }
 
-function protoLayer(l: Record<string, unknown>): ViewLayer {
+export function protoLayer(l: Record<string, unknown>): ViewLayer {
   return {
     id: Number(l.id ?? 0),
     diagram_id: Number(l.view_id ?? l.diagram_id ?? 0),
@@ -653,6 +653,11 @@ export const api = {
         update: (name: string, color: string, description?: string | null): Promise<void> =>
           rpc(async () => {
             await orgClient.updateTag({ tag: name, color, description: description ?? undefined })
+          }),
+        delete: (name: string): Promise<void> =>
+          rpc(async () => {
+            const res = await fetch(apiUrl(`/api/tags/${encodeURIComponent(name)}`), { method: 'DELETE' })
+            if (!res.ok && res.status !== 204) throw await responseError(res, `Failed to delete tag`)
           }),
       },
     },

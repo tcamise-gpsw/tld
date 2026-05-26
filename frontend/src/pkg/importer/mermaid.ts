@@ -39,13 +39,17 @@ function mapEntries(value: unknown): Array<[string, Record<string, unknown>]> {
   return Array.from(value.entries()).map(([key, item]) => [String(key), asRecord(item)])
 }
 
+function sanitizeLabel(value: string) {
+  return value.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function addElement(result: ParsedImport, ref: string, name = ref, kind = 'system', description?: string, technology?: string) {
   if (!ref || result.elements.some((element) => element.ref === ref)) return
   result.elements.push({
     ref,
-    name: name || ref,
+    name: sanitizeLabel(name) || ref,
     kind,
-    description,
+    description: description !== undefined ? sanitizeLabel(description) : undefined,
     technology,
     placements: [{ parentRef: 'root' }],
   } as PlanElement)
@@ -65,7 +69,7 @@ function addConnector(
     viewRef: 'root',
     sourceElementRef: source,
     targetElementRef: target,
-    label,
+    label: sanitizeLabel(label),
     ...options,
   }))
 }

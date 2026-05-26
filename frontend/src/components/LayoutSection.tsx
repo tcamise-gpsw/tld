@@ -17,7 +17,6 @@ import {
   VStack,
   Icon,
   useDisclosure,
-  useBreakpointValue,
 } from '@chakra-ui/react'
 import { ChevronDownIcon, ChevronRightIcon } from './Icons'
 import { api } from '../api/client'
@@ -55,8 +54,7 @@ interface Props {
 }
 
 export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: Props) {
-  const isLargeScreen = useBreakpointValue({ base: false, md: true }) ?? false
-  const [open, setOpen] = useState(isLargeScreen)
+  const [open, setOpen] = useState(false)
   const [algo, setAlgo] = useState<Algorithm>('dagre')
   const [running, setRunning] = useState(false)
   const [collisionRunning, setCollisionRunning] = useState(false)
@@ -269,25 +267,20 @@ export default function LayoutSection({ view, canEdit, onUnsupportedMutation }: 
         mb={open ? 4 : 0}
         cursor="pointer"
         onClick={() => setOpen(v => !v)}
-        color={open ? 'blue.400' : 'whiteAlpha.700'}
-        _hover={{ color: 'blue.300' }}
-        transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+        justify="space-between"
         userSelect="none"
+        _hover={{ color: 'whiteAlpha.900' }}
+        transition="color 0.15s"
       >
+        <Text fontSize="sm" fontWeight="semibold" color="whiteAlpha.800">
+          Layout
+        </Text>
         <Icon
           as={open ? ChevronDownIcon : ChevronRightIcon}
-          boxSize={4}
+          boxSize={3.5}
           strokeWidth={3.5}
-          transition="transform 0.25s cubic-bezier(0.25, 1, 0.5, 1)"
+          color="whiteAlpha.500"
         />
-        <Text
-          fontSize="11px"
-          fontWeight="800"
-          letterSpacing="0.15em"
-          textTransform="uppercase"
-        >
-          Adjust Layout
-        </Text>
       </HStack>
 
       <Collapse in={open} animateOpacity>

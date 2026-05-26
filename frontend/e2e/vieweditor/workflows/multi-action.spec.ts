@@ -31,6 +31,7 @@ test('creates edits connects tags reloads and exports a small diagram', async ({
   await page.getByTestId('element-panel-description-input').fill('Edited inside a multi-action E2E workflow')
   await page.getByTestId('tag-upsert-input').fill('workflow-tag')
   await page.getByTestId('tag-upsert-input').press('Enter')
+  await expect(page.getByTestId('element-panel-tag-chip').filter({ hasText: 'workflow-tag' }).first()).toBeVisible()
   await page.getByTestId('element-panel-url-input').blur()
   await page.reload()
 

@@ -530,7 +530,6 @@ function drawSceneNode(
   const t = state.t
 
   if (state.isLeafCapped) {
-    ctx.save()
     const cx = x + w / 2
     const cy = y + h / 2
     ctx.translate(cx, cy)
@@ -717,14 +716,15 @@ function drawSceneNode(
 
       if (t > 0.8) {
         const m = ctx.getTransform()
-        const vwLocalB = (canvasH - screenFontSize - m.f) / m.d
+        const dp = m.a / drawZoom
+        const vwLocalB = ((canvasH - screenFontSize) * dp - m.f) / m.d
         baseHintY = Math.min(baseHintY, vwLocalB)
         baseHintY = Math.max(baseHintY, y + h / 2)
 
         const vwLocalL = -m.e / m.a
-        const vwLocalR = (canvasW - m.e) / m.a
+        const vwLocalR = (canvasW * dp - m.e) / m.a
 
-        const pad = 30 / view.zoom
+        const pad = 30 / drawZoom
         clampedHintX = Math.max(clampedHintX, vwLocalL + tw / 2 + pad)
         clampedHintX = Math.min(clampedHintX, vwLocalR - tw / 2 - pad)
         clampedHintX = clamp(clampedHintX, x + tw / 2 + 10, x + w - tw / 2 - 10)
