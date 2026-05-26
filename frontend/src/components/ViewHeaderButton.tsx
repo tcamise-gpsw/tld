@@ -7,6 +7,8 @@ export interface ViewHeaderButtonProps {
   name?: string
   isOpen?: boolean
   onToggle: () => void
+  supportsZoomOut?: boolean
+  supportsZoomIn?: boolean
 }
 
 /**
@@ -15,7 +17,13 @@ export interface ViewHeaderButtonProps {
  * Location: Top center of the canvas, floating.
  * Aliases: Diagram Name Button, View Title Bar.
  */
-export default function ViewHeaderButton({ name, isOpen, onToggle }: ViewHeaderButtonProps) {
+export default function ViewHeaderButton({
+  name,
+  isOpen,
+  onToggle,
+  supportsZoomOut = false,
+  supportsZoomIn = false,
+}: ViewHeaderButtonProps) {
   return (
     <VStack
       position="absolute"
@@ -68,8 +76,18 @@ export default function ViewHeaderButton({ name, isOpen, onToggle }: ViewHeaderB
       <HStack spacing={1.5} opacity={0.6} userSelect="none" pointerEvents="none">
         <KbdHint ml={0}>V</KbdHint>
         <Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Details</Text>
-        <HStack spacing={1.5}><KbdHint ml={0}>W</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom Out</Text></HStack>
-        <HStack spacing={1.5}><KbdHint ml={0}>S</KbdHint><Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom In</Text></HStack>
+        {supportsZoomOut && (
+          <HStack spacing={1.5}>
+            <KbdHint ml={0}>W</KbdHint>
+            <Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom Out</Text>
+          </HStack>
+        )}
+        {supportsZoomIn && (
+          <HStack spacing={1.5}>
+            <KbdHint ml={0}>S</KbdHint>
+            <Text fontSize="10px" fontWeight="bold" color="whiteAlpha.600">Zoom In</Text>
+          </HStack>
+        )}
       </HStack>
     </VStack>
   )

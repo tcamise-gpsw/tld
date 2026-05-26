@@ -1173,6 +1173,22 @@ function ViewEditorInner({
     return summary
   }, [effectiveWorkspaceSnapshot])
 
+  const supportsZoomOut = useMemo(() => {
+    if (viewId == null || !view) return false
+    return view.parent_view_id != null && treeData.some(n => n.id === view.parent_view_id)
+  }, [viewId, view, treeData])
+
+  const supportsZoomIn = useMemo(() => {
+    if (viewId == null) return false
+    const onCanvasIds = new Set(viewElements.map((o) => o.element_id))
+    return Object.entries(linksMap).some(([elementIdStr, links]) => {
+      const elementId = Number(elementIdStr)
+      if (!Number.isFinite(elementId) || !onCanvasIds.has(elementId)) return false
+      return links && links.length > 0
+    })
+  }, [viewId, viewElements, linksMap])
+
+
   useEffect(() => {
     const requestedElementId = parseNumericId(searchParams.get('element'))
     if (requestedElementId == null) return
@@ -2817,7 +2833,13 @@ function ViewEditorInner({
               onRemoveFromView={() => { void handleBulkRemoveFromView() }}
             />
 
-            <ViewHeaderButton name={viewName ?? undefined} isOpen={viewDetails.isOpen} onToggle={viewDetails.onToggle} />
+            <ViewHeaderButton
+              name={viewName ?? undefined}
+              isOpen={viewDetails.isOpen}
+              onToggle={viewDetails.onToggle}
+              supportsZoomOut={supportsZoomOut}
+              supportsZoomIn={supportsZoomIn}
+            />
 
             <ViewFloatingMenu
               handleAddElementAtCenter={handleAddElementAtCenter}
