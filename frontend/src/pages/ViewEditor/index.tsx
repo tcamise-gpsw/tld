@@ -7,7 +7,6 @@ import { SafeBackground } from '../../components/SafeBackground'
 import ReactFlow, {
   BackgroundVariant,
   ConnectionMode,
-  Controls,
   PanOnScrollMode,
   ReactFlowProvider,
   useReactFlow,
@@ -42,6 +41,7 @@ import type {
   PlacedElement,
   LibraryElement as WorkspaceElement,
   Connector,
+  ViewMarkdownDocument,
   ViewConnector,
   VisibilityOverride,
   Tag,
@@ -53,6 +53,7 @@ import CodePreviewPanel from '../../components/CodePreviewPanel'
 import ConnectorPanel from '../../components/ConnectorPanel'
 import ElementLibrary from '../../components/ElementLibrary'
 import ViewExplorer from '../../components/ViewExplorer'
+import ViewMarkdownPanel from '../../components/ViewMarkdownPanel'
 import ViewPanel from '../../components/ViewPanel'
 import { useSetHeader } from '../../components/HeaderContext'
 import InlineElementAdder from '../../components/InlineElementAdder'
@@ -128,6 +129,13 @@ const VIEW_EDITOR_EMPTY_EXTENT_RATIO = 0.75
 const VIEW_EDITOR_PAN_MARGIN_RATIO = 0.25
 const VIEW_EDITOR_PAN_MARGIN_MIN = 180
 const VIEW_EDITOR_PAN_MARGIN_MAX = 720
+const VIEW_EDITOR_MARKDOWN_DEFAULT_WIDTH = 540
+const VIEW_EDITOR_MARKDOWN_MIN_WIDTH = 360
+const VIEW_EDITOR_MARKDOWN_MIN_WIDTH_MOBILE = 280
+const VIEW_EDITOR_CANVAS_MIN_WIDTH = 420
+const VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE = 260
+const VIEW_EDITOR_MARKDOWN_RESIZE_HANDLE_WIDTH = 10
+const VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR = '--topbar-notch-left'
 const SNAP_GRID: [number, number] = [30, 30]
 
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
@@ -246,6 +254,22 @@ function placementSnapshotsEqual(left: PlacedElement, right: PlacedElement) {
 
 function viewSnapshotsEqual(left: ViewMetadataSnapshot, right: ViewMetadataSnapshot) {
   return left.id === right.id && left.name === right.name && (left.level_label ?? '') === (right.level_label ?? '')
+}
+
+function initialViewMarkdown(name?: string | null) {
+  const trimmed = name?.trim()
+  return trimmed ? `# ${trimmed}\n\n` : ''
+}
+
+function clampMarkdownPaneWidth(width: number, totalWidth: number, isMobileLayout: boolean) {
+  const minMarkdownWidth = isMobileLayout
+    ? VIEW_EDITOR_MARKDOWN_MIN_WIDTH_MOBILE
+    : VIEW_EDITOR_MARKDOWN_MIN_WIDTH
+  const minCanvasWidth = isMobileLayout
+    ? VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE
+    : VIEW_EDITOR_CANVAS_MIN_WIDTH
+  const maxMarkdownWidth = Math.max(minMarkdownWidth, totalWidth - minCanvasWidth)
+  return Math.min(Math.max(width, minMarkdownWidth), maxMarkdownWidth)
 }
 
 function nodesMatchCurrentView(nodes: RFNode[], elements: PlacedElement[], viewId: number | null) {
@@ -727,6 +751,236 @@ function ViewEditorInner({
     handleElementDeleted, handleElementPermanentlyDeleted, handleElementSaved: applyElementSaved,
   } = data
   refreshElementsRef.current = refreshElements
+
+  const [viewMarkdown, setViewMarkdown] = useState<ViewMarkdownDocument | null>(null)
+  const [viewMarkdownContent, setViewMarkdownContent] = useState('')
+  const [loadedViewMarkdownContent, setLoadedViewMarkdownContent] = useState('')
+  const [viewMarkdownSyncToken, setViewMarkdownSyncToken] = useState(0)
+  const [isMarkdownOpen, setIsMarkdownOpen] = useState(false)
+  const [isMarkdownLoading, setIsMarkdownLoading] = useState(false)
+  const [isMarkdownMutating, setIsMarkdownMutating] = useState(false)
+  const [isMarkdownSaving, setIsMarkdownSaving] = useState(false)
+  const [isMarkdownResizing, setIsMarkdownResizing] = useState(false)
+  const [markdownPaneWidth, setMarkdownPaneWidth] = useState(() => {
+    if (typeof window === 'undefined') return VIEW_EDITOR_MARKDOWN_DEFAULT_WIDTH
+    const stored = Number.parseFloat(window.localStorage.getItem('diag:markdownPaneWidth') ?? '')
+    return Number.isFinite(stored) && stored > 0 ? stored : VIEW_EDITOR_MARKDOWN_DEFAULT_WIDTH
+  })
+  const markdownRequestSeqRef = useRef(0)
+  const editorSplitRef = useRef<HTMLDivElement | null>(null)
+  const markdownResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  const getClampedMarkdownPaneWidth = useCallback((nextWidth: number) => {
+    const totalWidth = editorSplitRef.current?.clientWidth ?? window.innerWidth
+    return clampMarkdownPaneWidth(nextWidth, totalWidth, isMobileLayout)
+  }, [isMobileLayout])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('diag:markdownPaneWidth', String(markdownPaneWidth))
+  }, [markdownPaneWidth])
+
+  useEffect(() => {
+    if (!isMarkdownOpen) return
+
+    const handleResize = () => {
+      setMarkdownPaneWidth((current) => getClampedMarkdownPaneWidth(current))
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [getClampedMarkdownPaneWidth, isMarkdownOpen])
+
+  useEffect(() => {
+    if (!isMarkdownResizing) return
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = markdownResizeStateRef.current
+      if (!resizeState) return
+      event.preventDefault()
+      const delta = resizeState.startX - event.clientX
+      setMarkdownPaneWidth(getClampedMarkdownPaneWidth(resizeState.startWidth + delta))
+    }
+
+    const stopResizing = () => {
+      markdownResizeStateRef.current = null
+      setIsMarkdownResizing(false)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+    }
+  }, [getClampedMarkdownPaneWidth, isMarkdownResizing])
+
+  const loadViewMarkdown = useCallback(async (targetViewId: number, options: { silent?: boolean } = {}) => {
+    const requestSeq = ++markdownRequestSeqRef.current
+    setIsMarkdownLoading(true)
+    try {
+      const result = await api.workspace.views.markdown.get(targetViewId)
+      if (markdownRequestSeqRef.current !== requestSeq) return null
+      if (!result) {
+        setViewMarkdown(null)
+        setViewMarkdownContent('')
+        setLoadedViewMarkdownContent('')
+        setViewMarkdownSyncToken((prev) => prev + 1)
+        setIsMarkdownOpen(false)
+        return null
+      }
+      setViewMarkdown(result.markdown)
+      setViewMarkdownContent(result.content)
+      setLoadedViewMarkdownContent(result.content)
+      setViewMarkdownSyncToken((prev) => prev + 1)
+      return result
+    } catch (error) {
+      if (markdownRequestSeqRef.current !== requestSeq) return null
+      setViewMarkdown(null)
+      setViewMarkdownContent('')
+      setLoadedViewMarkdownContent('')
+      setViewMarkdownSyncToken((prev) => prev + 1)
+      if (!options.silent) {
+        toast({
+          status: 'error',
+          title: 'Failed to load markdown',
+          description: error instanceof Error ? error.message : String(error),
+        })
+      }
+      return null
+    } finally {
+      if (markdownRequestSeqRef.current === requestSeq) setIsMarkdownLoading(false)
+    }
+  }, [toast])
+
+  useEffect(() => {
+    if (viewId === null) {
+      markdownRequestSeqRef.current += 1
+      setViewMarkdown(null)
+      setViewMarkdownContent('')
+      setLoadedViewMarkdownContent('')
+      setViewMarkdownSyncToken((prev) => prev + 1)
+      setIsMarkdownOpen(false)
+      setIsMarkdownLoading(false)
+      return
+    }
+    void loadViewMarkdown(viewId, { silent: true })
+  }, [loadViewMarkdown, viewId])
+
+  const markdownDirty = viewMarkdownContent !== loadedViewMarkdownContent
+  const markdownBusy = isMarkdownLoading || isMarkdownMutating || isMarkdownSaving
+
+  const handleMarkdownResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isMarkdownOpen) return
+    markdownResizeStateRef.current = {
+      startX: event.clientX,
+      startWidth: markdownPaneWidth,
+    }
+    setIsMarkdownResizing(true)
+    event.preventDefault()
+  }, [isMarkdownOpen, markdownPaneWidth])
+
+  const handleCreateManagedMarkdown = useCallback(async (options: { fileName?: string; initialContent?: string; openEditor?: boolean } = {}) => {
+    if (!canEdit || viewId === null) return
+    setIsMarkdownMutating(true)
+    try {
+      await api.workspace.views.markdown.create(viewId, {
+        fileName: options.fileName,
+        initialContent: options.initialContent ?? initialViewMarkdown(view?.name),
+      })
+      await loadViewMarkdown(viewId)
+      if (options.openEditor !== false) setIsMarkdownOpen(true)
+      toast({ status: 'success', title: 'Markdown ready' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to create markdown',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownMutating(false)
+    }
+  }, [canEdit, loadViewMarkdown, toast, view?.name, viewId])
+
+  const handleToggleMarkdown = useCallback(() => {
+    if (!viewMarkdown) {
+      void handleCreateManagedMarkdown({ openEditor: true })
+      return
+    }
+    setIsMarkdownOpen((prev) => !prev)
+  }, [handleCreateManagedMarkdown, viewMarkdown])
+
+  const handleOpenMarkdown = useCallback(() => {
+    if (!viewMarkdown) return
+    setIsMarkdownOpen(true)
+  }, [viewMarkdown])
+
+  const handleReloadMarkdown = useCallback(async () => {
+    if (viewId === null) return
+    await loadViewMarkdown(viewId)
+  }, [loadViewMarkdown, viewId])
+
+  const handleLinkMarkdown = useCallback(async (path: string) => {
+    if (!canEdit || viewId === null) return
+    setIsMarkdownMutating(true)
+    try {
+      await api.workspace.views.markdown.link(viewId, path)
+      await loadViewMarkdown(viewId)
+      setIsMarkdownOpen(true)
+      toast({ status: 'success', title: 'Markdown linked' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to link markdown',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownMutating(false)
+    }
+  }, [canEdit, loadViewMarkdown, toast, viewId])
+
+  const handleUnlinkMarkdown = useCallback(async ({ deleteManagedFile }: { deleteManagedFile: boolean } = { deleteManagedFile: false }) => {
+    if (!canEdit || viewId === null) return
+    setIsMarkdownMutating(true)
+    try {
+      await api.workspace.views.markdown.unlink(viewId, deleteManagedFile)
+      await loadViewMarkdown(viewId, { silent: true })
+      setIsMarkdownOpen(false)
+      toast({ status: 'success', title: 'Markdown unlinked' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to unlink markdown',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownMutating(false)
+    }
+  }, [canEdit, loadViewMarkdown, toast, viewId])
+
+  const handleSaveMarkdown = useCallback(async (markdown: string) => {
+    if (viewId === null || !viewMarkdown) return
+    setIsMarkdownSaving(true)
+    try {
+      const updated = await api.workspace.views.markdown.save(viewId, markdown)
+      setViewMarkdown(updated)
+      setViewMarkdownContent(markdown)
+      setLoadedViewMarkdownContent(markdown)
+      toast({ status: 'success', title: 'Notes saved' })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to save notes',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsMarkdownSaving(false)
+    }
+  }, [toast, viewId, viewMarkdown])
 
   const handleElementPermanentlyDeletedEverywhere = useCallback((elementId: number) => {
     handleElementPermanentlyDeleted(elementId)
@@ -1751,7 +2005,6 @@ function ViewEditorInner({
     clampedRevealProgress,
     applyDemoRevealViewport,
     disableImportExport,
-    hideFlowControls,
   } = useDemoRevealViewport({
     demoOptions,
     containerRef,
@@ -1925,6 +2178,37 @@ function ViewEditorInner({
     const prev = html.style.overscrollBehaviorX
     html.style.overscrollBehaviorX = 'none'
     return () => { html.style.overscrollBehaviorX = prev }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const root = document.documentElement
+    const target = containerRef.current
+    if (!target) {
+      root.style.removeProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR)
+      return
+    }
+
+    const updateTopbarNotchPosition = () => {
+      const rect = target.getBoundingClientRect()
+      root.style.setProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR, `${rect.left + (rect.width / 2)}px`)
+    }
+
+    updateTopbarNotchPosition()
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => updateTopbarNotchPosition())
+      : null
+
+    resizeObserver?.observe(target)
+    window.addEventListener('resize', updateTopbarNotchPosition)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', updateTopbarNotchPosition)
+      root.style.removeProperty(VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR)
+    }
   }, [])
 
   useEffect(() => {
@@ -2201,10 +2485,11 @@ function ViewEditorInner({
       selectedElement, selectedConnector: selectedEdge
     }}>
       <Box h="100%" display="flex" flexDir="column">
-        <Flex flex={1} overflow="hidden">
+        <Flex ref={editorSplitRef} flex={1} overflow="hidden">
           <Box
             ref={containerRef}
-            flex={1}
+            flex="1 1 auto"
+            minW={0}
             position="relative"
             onDrop={onDrop}
             onDragOver={onDragOver}
@@ -2333,9 +2618,6 @@ function ViewEditorInner({
                 zoomOnScroll={false} zoomOnPinch
               >
                 <SafeBackground variant={BackgroundVariant.Dots} gap={16} color="#2D3748" size={1} />
-                {!hideFlowControls && (
-                  <Controls position="bottom-right" className="glass" style={{ overflow: 'hidden', margin: '1rem' }} />
-                )}
               </ReactFlow>
               {canvasOverlaySlot && (
                 <Box position="absolute" inset={0} pointerEvents="none" zIndex={10}>
@@ -2531,6 +2813,10 @@ function ViewEditorInner({
               drawingMode={drawingMode} setDrawingMode={setDrawingMode}
               hasDrawingPaths={drawingPaths.length > 0} drawingVisible={drawingVisible} setDrawingVisible={setDrawingVisible}
               extrasOpen={extrasOpen} setExtrasOpen={setExtrasOpen}
+              hasMarkdown={!!viewMarkdown}
+              markdownOpen={isMarkdownOpen}
+              markdownBusy={markdownBusy}
+              onMarkdownToggle={handleToggleMarkdown}
               focusMode={!crossBranchSettings.enabled}
               onFocusModeChange={handleFocusModeChange}
               densityLevel={densityLevel}
@@ -2558,6 +2844,60 @@ function ViewEditorInner({
               hideExpandExtras={demoOptions?.hideExpandExtras}
             />
           </Box>
+
+          {isMarkdownOpen && (
+            <>
+              <Box
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize markdown editor"
+                flex="0 0 auto"
+                w={`${VIEW_EDITOR_MARKDOWN_RESIZE_HANDLE_WIDTH}px`}
+                cursor="col-resize"
+                position="relative"
+                onPointerDown={handleMarkdownResizeStart}
+                bg={isMarkdownResizing ? 'whiteAlpha.100' : 'transparent'}
+                _hover={{ bg: 'whiteAlpha.50' }}
+                _active={{ bg: 'whiteAlpha.100' }}
+              >
+                <Box
+                  position="absolute"
+                  top={0}
+                  bottom={0}
+                  left="50%"
+                  transform="translateX(-50%)"
+                  w="1px"
+                  bg="whiteAlpha.100"
+                />
+              </Box>
+
+              <Box
+                flex="0 0 auto"
+                w={`${markdownPaneWidth}px`}
+                minW={`${isMobileLayout ? VIEW_EDITOR_MARKDOWN_MIN_WIDTH_MOBILE : VIEW_EDITOR_MARKDOWN_MIN_WIDTH}px`}
+                maxW={`calc(100% - ${isMobileLayout ? VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE : VIEW_EDITOR_CANVAS_MIN_WIDTH}px)`}
+                minH={0}
+                borderLeft="1px solid"
+                borderColor="whiteAlpha.100"
+              >
+                <ViewMarkdownPanel
+                  isOpen={isMarkdownOpen}
+                  onClose={() => setIsMarkdownOpen(false)}
+                  viewName={view?.name}
+                  markdown={viewMarkdown}
+                  content={viewMarkdownContent}
+                  syncToken={viewMarkdownSyncToken}
+                  canEdit={canEdit}
+                  isLoading={isMarkdownLoading}
+                  isSaving={isMarkdownSaving}
+                  isDirty={markdownDirty}
+                  onChange={setViewMarkdownContent}
+                  onSave={handleSaveMarkdown}
+                  onReload={handleReloadMarkdown}
+                />
+              </Box>
+            </>
+          )}
         </Flex>
 
         <ElementLibrary
@@ -2634,7 +2974,15 @@ function ViewEditorInner({
         <ViewPanel
           isOpen={viewDetails.isOpen} onClose={viewDetails.onClose}
           view={view as ViewTreeNode}
-          onSave={handleViewSave} onUnsupportedMutation={handleUnsupportedMutation} hasBackdrop={isMobileLayout}
+          onSave={handleViewSave}
+          onUnsupportedMutation={handleUnsupportedMutation}
+          hasBackdrop={isMobileLayout}
+          markdown={viewMarkdown}
+          markdownLoading={isMarkdownLoading}
+          onCreateMarkdown={(options) => handleCreateManagedMarkdown({ ...options, openEditor: true })}
+          onLinkMarkdown={handleLinkMarkdown}
+          onUnlinkMarkdown={handleUnlinkMarkdown}
+          onOpenMarkdown={handleOpenMarkdown}
         />
 
         <ExportModal

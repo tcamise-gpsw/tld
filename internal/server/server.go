@@ -26,9 +26,9 @@ type Server struct {
 	handler http.Handler
 }
 
-func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID) (*Server, error) {
-	apiStore := store.NewAPIAdapter(sqliteStore)
+func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID, dataDir ...string) (*Server, error) {
 	watchStore := watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
+	apiStore := store.NewAPIAdapter(sqliteStore, dataDir...)
 	lockHooks := watchLockHooks{store: watchStore}
 	wsSvc := &api.WorkspaceService{Store: apiStore, Hooks: lockHooks}
 	orgSvc := &api.OrgService{Store: apiStore, Hooks: lockHooks}

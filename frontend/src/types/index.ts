@@ -135,6 +135,12 @@ export interface ViewTreeNode {
   children: ViewTreeNode[]
 }
 
+export interface ViewMarkdownDocument {
+  path: string
+  is_managed: boolean
+  updated_at: string
+}
+
 export interface ViewLayer {
   id: number
   diagram_id: number

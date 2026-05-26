@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -277,6 +280,111 @@ func TestListElementsMapsSearchPaginationAndViewMetadata(t *testing.T) {
 	}
 }
 
+func TestViewMarkdownManagedLifecycle(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	dataDir := t.TempDir()
+	adapter := NewAPIAdapter(sqliteStore, dataDir)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `
+		INSERT INTO views(id, owner_element_id, name, description, level_label, level, created_at, updated_at)
+		VALUES (20, NULL, 'System Context', NULL, 'System', 0, 'now', 'now')
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	initialContent := "# System Context\n\nInitial notes.\n"
+	if _, err := adapter.CreateViewMarkdown(ctx, 20, uuid.Nil, nil, &initialContent); err != nil {
+		t.Fatal(err)
+	}
+
+	markdown, content, err := adapter.GetViewMarkdown(ctx, 20, uuid.Nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !markdown.GetIsManaged() {
+		t.Fatalf("managed = %v, want true", markdown.GetIsManaged())
+	}
+	if content != initialContent {
+		t.Fatalf("content = %q, want %q", content, initialContent)
+	}
+	managedPath := filepath.Join(dataDir, markdown.GetPath())
+	raw, err := os.ReadFile(managedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != initialContent {
+		t.Fatalf("file content = %q, want %q", string(raw), initialContent)
+	}
+
+	updatedContent := "# Updated\n\nSaved notes.\n"
+	updatedMarkdown, err := adapter.SaveViewMarkdown(ctx, 20, uuid.Nil, updatedContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedMarkdown.GetPath() != markdown.GetPath() {
+		t.Fatalf("path = %q, want %q", updatedMarkdown.GetPath(), markdown.GetPath())
+	}
+	raw, err = os.ReadFile(managedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != updatedContent {
+		t.Fatalf("saved file content = %q, want %q", string(raw), updatedContent)
+	}
+
+	if _, err := adapter.UnlinkViewMarkdown(ctx, 20, uuid.Nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(managedPath); !os.IsNotExist(err) {
+		t.Fatalf("managed file still exists after unlink: %v", err)
+	}
+	if _, _, err := adapter.GetViewMarkdown(ctx, 20, uuid.Nil); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("get after unlink err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestViewMarkdownLinkReadsRelativeFilesFromDataDir(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	dataDir := t.TempDir()
+	adapter := NewAPIAdapter(sqliteStore, dataDir)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `
+		INSERT INTO views(id, owner_element_id, name, description, level_label, level, created_at, updated_at)
+		VALUES (30, NULL, 'Deployment', NULL, 'System', 0, 'now', 'now')
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	linkedDir := filepath.Join(dataDir, "docs")
+	if err := os.MkdirAll(linkedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	relPath := filepath.Join("docs", "deployment.md")
+	absPath := filepath.Join(dataDir, relPath)
+	linkedContent := "# Deployment\n\nLinked file.\n"
+	if err := os.WriteFile(absPath, []byte(linkedContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := adapter.LinkViewMarkdown(ctx, 30, uuid.Nil, relPath); err != nil {
+		t.Fatal(err)
+	}
+	markdown, content, err := adapter.GetViewMarkdown(ctx, 30, uuid.Nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if markdown.GetIsManaged() {
+		t.Fatalf("managed = %v, want false", markdown.GetIsManaged())
+	}
+	if markdown.GetPath() != relPath {
+		t.Fatalf("path = %q, want %q", markdown.GetPath(), relPath)
+	}
+	if content != linkedContent {
+		t.Fatalf("content = %q, want %q", content, linkedContent)
+	}
+}
 func TestConnectorAdapterPreservesHandlesDefaultsAndViewFiltering(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	db := sqliteStore.DB()

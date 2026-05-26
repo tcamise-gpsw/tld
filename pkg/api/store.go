@@ -76,8 +76,13 @@ type Store interface {
 	GetViews(ctx context.Context, workspaceID uuid.UUID, parentViewID *int32, isRoot *bool, search string, limit, offset int) ([]*diagv1.View, int, error)
 	GetView(ctx context.Context, id int32, workspaceID uuid.UUID) (*diagv1.View, error)
 	GetProjectedViewContent(ctx context.Context, viewID int32, workspaceID uuid.UUID, densityOverride *int32) (*diagv1.ViewContent, error)
+	GetViewMarkdown(ctx context.Context, viewID int32, workspaceID uuid.UUID) (*diagv1.ViewMarkdownDocument, string, error)
 	CreateView(ctx context.Context, workspaceID uuid.UUID, ownerElementID *int32, name string, label *string, isRoot bool) (*diagv1.View, error)
 	UpdateView(ctx context.Context, id int32, workspaceID uuid.UUID, name string, description *string, label *string, tags []string) (*diagv1.View, error)
+	CreateViewMarkdown(ctx context.Context, viewID int32, workspaceID uuid.UUID, fileName *string, initialContent *string) (*diagv1.View, error)
+	LinkViewMarkdown(ctx context.Context, viewID int32, workspaceID uuid.UUID, path string) (*diagv1.View, error)
+	SaveViewMarkdown(ctx context.Context, viewID int32, workspaceID uuid.UUID, content string) (*diagv1.ViewMarkdownDocument, error)
+	UnlinkViewMarkdown(ctx context.Context, viewID int32, workspaceID uuid.UUID, deleteManagedFile bool) (*diagv1.View, error)
 	DeleteView(ctx context.Context, id int32, workspaceID uuid.UUID) error
 
 	// Elements

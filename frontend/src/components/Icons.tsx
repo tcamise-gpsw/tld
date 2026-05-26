@@ -230,6 +230,35 @@ export function GridIcon({ size = 12, strokeWidth = 2.5 }: { size?: number, stro
     </svg>
   )
 }
+
+export function ReloadIcon({ size = 14, strokeWidth = 2.2 }: { size?: number, strokeWidth?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <polyline points="21 3 21 9 15 9" />
+    </svg>
+  )
+}
+
+export function SaveIcon({ size = 14, strokeWidth = 2.1 }: { size?: number, strokeWidth?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3h11l3 3v15H5z" />
+      <path d="M8 3v6h8V3" />
+      <path d="M9 17h6" />
+    </svg>
+  )
+}
+
+export function CloseIcon({ size = 14, strokeWidth = 2.4 }: { size?: number, strokeWidth?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18" />
+      <path d="M6 6l12 12" />
+    </svg>
+  )
+}
+
 export function FocusIcon({ size = 14, strokeWidth = 2.5 }: { size?: number, strokeWidth?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">

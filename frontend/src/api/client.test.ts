@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeConnectorRouteStyle, normalizeLogoUrl, normalizeTechnologyConnectors } from './client'
+import { normalizeConnectorRouteStyle, normalizeLogoUrl, normalizeTechnologyConnectors } from './client-normalize'
 
 describe('normalizeConnectorRouteStyle', () => {
   it('keeps valid route styles', () => {

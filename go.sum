@@ -1,7 +1,7 @@
-buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.20.0-20260524123653-072738aa06fe.1 h1:etd6AENNnea881c1mUxOiJ3dHq9A+US4hzxB5s5qhgs=
-buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.20.0-20260524123653-072738aa06fe.1/go.mod h1:nO/j8sYj94ic7YJN66btN+gpY1FM7z46KJPCFADMou4=
-buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260524123653-072738aa06fe.1 h1:kTFiLfMTYvGfrMrBFbtbkY2O5fZWhDTHfkvJUP302cY=
-buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260524123653-072738aa06fe.1/go.mod h1:LAKkY9RBJgkdENcD9Hq6EBmfTMH7U6xhhQOu1M6sCHM=
+buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.20.0-20260526031504-0a16dcce736c.1 h1:j7S/fa5aAwO7H5f30pZe5zd1mmwNe7RlbStrsHBvkaM=
+buf.build/gen/go/tldiagramcom/diagram/connectrpc/go v1.20.0-20260526031504-0a16dcce736c.1/go.mod h1:gfX4lrmKXfLm+cVUw2B8PuXsEvVC2V+UocvnjzWg/pM=
+buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260526031504-0a16dcce736c.1 h1:myXxIElU65PL7jmJz39/svSVOUIF0oz4C4mHXwHGPK4=
+buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go v1.36.11-20260526031504-0a16dcce736c.1/go.mod h1:LAKkY9RBJgkdENcD9Hq6EBmfTMH7U6xhhQOu1M6sCHM=
 cel.dev/expr v0.25.1 h1:1KrZg61W6TWSxuNZ37Xy49ps13NUovb66QLprthtwi4=
 cel.dev/expr v0.25.1/go.mod h1:hrXvqGP6G6gyx8UAHSHJ5RGk//1Oj5nXQ2NI02Nrsg4=
 charm.land/bubbles/v2 v2.1.0 h1:YSnNh5cPYlYjPxRrzs5VEn3vwhtEn3jVGRBT3M7/I0g=

@@ -95,13 +95,13 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 		return nil, err
 	}
 
-	apiStore := store.NewAPIAdapter(sqliteStore)
+	apiStore := store.NewAPIAdapter(sqliteStore, dataDir)
 	views, elements, connectors, err := apiStore.GetWorkspaceResourceCounts(context.Background(), localWorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	srv, err := server.New(sqliteStore, staticFS, localWorkspaceID)
+	srv, err := server.New(sqliteStore, staticFS, localWorkspaceID, dataDir)
 	if err != nil {
 		return nil, err
 	}
