@@ -24,7 +24,8 @@ import {
   Tooltip,
   VStack,
 } from '@chakra-ui/react'
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, DeleteIcon, SearchIcon, SmallCloseIcon, TriangleDownIcon, TriangleUpIcon } from '@chakra-ui/icons'
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, DeleteIcon, EditIcon, SearchIcon, SmallCloseIcon, TriangleDownIcon, TriangleUpIcon } from '@chakra-ui/icons'
+import { ZoomInIcon } from '../components/Icons'
 import { api } from '../api/client'
 import { TYPE_COLORS } from '../types'
 import { resolveIconPath } from '../utils/url'
@@ -1087,8 +1088,8 @@ export default function Inventory() {
                         <IconButton
                           aria-label="Explore"
                           data-testid="inventory-action-explore"
-                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>}
-                          size="xs"
+                          icon={<ZoomInIcon size={15} strokeWidth={2.5} />}
+                          size="sm"
                           variant="ghost"
                           color="var(--accent)"
                           _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
@@ -1099,10 +1100,10 @@ export default function Inventory() {
                         <IconButton
                           aria-label="Open in Editor"
                           data-testid="inventory-action-editor"
-                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" /></svg>}
-                          size="xs"
+                          icon={<EditIcon boxSize="14px" />}
+                          size="sm"
                           variant="ghost"
-                          color="gray.400"
+                          color="var(--accent)"
                           _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
                           onClick={() => navigate(navigationUrls.editorUrl)}
                         />
@@ -1130,8 +1131,8 @@ export default function Inventory() {
                         <IconButton
                           aria-label="Explore"
                           data-testid="inventory-action-explore"
-                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>}
-                          size="xs"
+                          icon={<ZoomInIcon size={15} strokeWidth={2.5} />}
+                          size="sm"
                           variant="ghost"
                           color="var(--accent)"
                           _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
@@ -1142,10 +1143,10 @@ export default function Inventory() {
                         <IconButton
                           aria-label="Open in Editor"
                           data-testid="inventory-action-editor"
-                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" /></svg>}
-                          size="xs"
+                          icon={<EditIcon boxSize="14px" />}
+                          size="sm"
                           variant="ghost"
-                          color="gray.400"
+                          color="var(--accent)"
                           _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
                           onClick={() => navigate(navigationUrls.editorUrl)}
                         />
@@ -1172,8 +1173,8 @@ export default function Inventory() {
                         <IconButton
                           aria-label="Explore"
                           data-testid="inventory-action-explore"
-                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></svg>}
-                          size="xs"
+                          icon={<ZoomInIcon size={15} strokeWidth={2.5} />}
+                          size="sm"
                           variant="ghost"
                           color="var(--accent)"
                           _hover={{ bg: 'rgba(var(--accent-rgb), 0.15)' }}
@@ -1184,10 +1185,10 @@ export default function Inventory() {
                         <IconButton
                           aria-label="Open in Editor"
                           data-testid="inventory-action-editor"
-                          icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" /></svg>}
-                          size="xs"
+                          icon={<EditIcon boxSize="14px" />}
+                          size="sm"
                           variant="ghost"
-                          color="gray.400"
+                          color="var(--accent)"
                           _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
                           onClick={() => navigate(navigationUrls.editorUrl)}
                         />

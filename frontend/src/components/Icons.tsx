@@ -63,7 +63,7 @@ export function TrashIcon({ size = 13, strokeWidth = 2.5 }: { size?: number, str
   )
 }
 
-export function EditIcon({ size = 13, strokeWidth = 2.5 }: { size?: number, strokeWidth?: number }) {
+export function DrawIcon({ size = 13, strokeWidth = 2.5 }: { size?: number, strokeWidth?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">

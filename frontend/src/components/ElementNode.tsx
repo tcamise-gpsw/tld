@@ -7,7 +7,7 @@ import type { PlacedElement, ViewConnector, Tag } from '../types'
 import { ElementContainer } from './NodeContainer'
 import { ElementBody } from './NodeBody'
 import { resolveElementIconUrl } from '../utils/elementIcon'
-import { ZoomInIcon, ZoomOutIcon, TrashIcon as TrashSvg, EditIcon as EditSvg } from './Icons'
+import { ZoomInIcon, ZoomOutIcon, TrashIcon as TrashSvg, DrawIcon as EditSvg } from './Icons'
 import { vscodeBridge } from '../lib/vscodeBridge'
 import type { ExtensionToWebviewMessage } from '../types/vscode-messages'
 import {

@@ -4,7 +4,7 @@ import { CopyIcon } from '@chakra-ui/icons'
 import {
   AddElementIcon as AddElementSvg,
   TrashIcon as TrashSvg,
-  EditIcon as PencilSvg,
+  DrawIcon as PencilSvg,
   MoveSourceIcon as MoveSourceSvg,
   MoveTargetIcon as MoveTargetSvg,
   GridIcon as GridSvg,

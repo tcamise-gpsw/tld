@@ -6,7 +6,7 @@ import {
 } from '@chakra-ui/react'
 import { DownloadIcon } from '@chakra-ui/icons'
 import {
-  EditIcon as PencilSvg,
+  DrawIcon as PencilSvg,
   EyeIcon as EyeSvg,
   EyeOffIcon as EyeOffSvg,
   MarkdownIcon as MarkdownSvg,
