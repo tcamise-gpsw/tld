@@ -5135,8 +5135,7 @@ func TestRunnerRepresentationUpdatedClearsDiffsAfterDiscard(t *testing.T) {
 	runGit(t, repo, "add", ".")
 	runGit(t, repo, "commit", "-m", "initial")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	events := NewEventQueue()
 	ready := make(chan RunnerResult, 1)
 	done := make(chan error, 1)

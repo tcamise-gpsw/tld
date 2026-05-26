@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mertcikla/tld/v2/internal/app"
+	"github.com/mertcikla/tld/v2/pkg/app"
+	"github.com/uptrace/bun"
 )
 
 const (
@@ -66,19 +67,30 @@ func clampOverrideDelta(delta int) int {
 }
 
 func (s *SQLiteStore) ViewDensityLevel(ctx context.Context, viewID int64) (int, error) {
-	var level int
-	err := s.DB().QueryRowContext(ctx, `SELECT density_level FROM views WHERE id = ?`, viewID).Scan(&level)
+	var row struct {
+		DensityLevel int `bun:"density_level"`
+	}
+	err := s.legacy.BunDB().NewSelect().
+		Table("views").
+		Column("density_level").
+		Where("id = ?", viewID).
+		Scan(ctx, &row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	return level, err
+	return row.DensityLevel, err
 }
 
 func (s *SQLiteStore) SetViewDensityLevel(ctx context.Context, viewID int64, level int) error {
 	if err := ValidateDensityLevel(level); err != nil {
 		return err
 	}
-	res, err := s.DB().ExecContext(ctx, `UPDATE views SET density_level = ?, updated_at = ? WHERE id = ?`, level, nowString(), viewID)
+	res, err := s.legacy.BunDB().NewUpdate().
+		Table("views").
+		Set("density_level = ?", level).
+		Set("updated_at = ?", nowString()).
+		Where("id = ?", viewID).
+		Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -93,24 +105,20 @@ func (s *SQLiteStore) SetViewDensityLevel(ctx context.Context, viewID int64, lev
 }
 
 func (s *SQLiteStore) VisibilityOverrides(ctx context.Context, viewID int64) ([]VisibilityOverride, error) {
-	rows, err := s.DB().QueryContext(ctx, `
-		SELECT view_id, resource_type, resource_id, level_delta, created_at, updated_at
-		FROM view_visibility_overrides
-		WHERE view_id = ?
-		ORDER BY resource_type, resource_id`, viewID)
-	if err != nil {
+	var rows []visibilityOverrideModel
+	if err := s.legacy.BunDB().NewSelect().
+		Model(&rows).
+		Where("view_id = ?", viewID).
+		Order("resource_type").
+		Order("resource_id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]VisibilityOverride, 0)
-	for rows.Next() {
-		var item VisibilityOverride
-		if err := rows.Scan(&item.ViewID, &item.ResourceType, &item.ResourceID, &item.LevelDelta, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
+	out := make([]VisibilityOverride, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, visibilityOverrideFromModel(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *SQLiteStore) SetVisibilityOverride(ctx context.Context, viewID int64, resourceType string, resourceID int64, delta int) (VisibilityOverride, error) {
@@ -125,13 +133,13 @@ func (s *SQLiteStore) SetVisibilityOverride(ctx context.Context, viewID int64, r
 		return VisibilityOverride{ViewID: viewID, ResourceType: resourceType, ResourceID: resourceID, LevelDelta: 0}, nil
 	}
 	now := nowString()
-	_, err := s.DB().ExecContext(ctx, `
-		INSERT INTO view_visibility_overrides(view_id, resource_type, resource_id, level_delta, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(view_id, resource_type, resource_id) DO UPDATE SET
-		  level_delta = excluded.level_delta,
-		  updated_at = excluded.updated_at`,
-		viewID, resourceType, resourceID, delta, now, now)
+	row := &visibilityOverrideModel{ViewID: viewID, ResourceType: resourceType, ResourceID: resourceID, LevelDelta: delta, CreatedAt: now, UpdatedAt: now}
+	_, err := s.legacy.BunDB().NewInsert().
+		Model(row).
+		On("CONFLICT(view_id, resource_type, resource_id) DO UPDATE").
+		Set("level_delta = excluded.level_delta").
+		Set("updated_at = excluded.updated_at").
+		Exec(ctx)
 	if err != nil {
 		return VisibilityOverride{}, err
 	}
@@ -142,23 +150,30 @@ func (s *SQLiteStore) AdjustVisibilityOverride(ctx context.Context, viewID int64
 	if err := ValidateResourceType(resourceType); err != nil {
 		return VisibilityOverride{}, err
 	}
-	var current int
-	err := s.DB().QueryRowContext(ctx, `
-		SELECT level_delta FROM view_visibility_overrides
-		WHERE view_id = ? AND resource_type = ? AND resource_id = ?`, viewID, resourceType, resourceID).Scan(&current)
+	var row visibilityOverrideModel
+	err := s.legacy.BunDB().NewSelect().
+		Model(&row).
+		Column("level_delta").
+		Where("view_id = ?", viewID).
+		Where("resource_type = ?", resourceType).
+		Where("resource_id = ?", resourceID).
+		Scan(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return VisibilityOverride{}, err
 	}
-	return s.SetVisibilityOverride(ctx, viewID, resourceType, resourceID, current+step)
+	return s.SetVisibilityOverride(ctx, viewID, resourceType, resourceID, row.LevelDelta+step)
 }
 
 func (s *SQLiteStore) DeleteVisibilityOverride(ctx context.Context, viewID int64, resourceType string, resourceID int64) error {
 	if err := ValidateResourceType(resourceType); err != nil {
 		return err
 	}
-	_, err := s.DB().ExecContext(ctx, `
-		DELETE FROM view_visibility_overrides
-		WHERE view_id = ? AND resource_type = ? AND resource_id = ?`, viewID, resourceType, resourceID)
+	_, err := s.legacy.BunDB().NewDelete().
+		Model((*visibilityOverrideModel)(nil)).
+		Where("view_id = ?", viewID).
+		Where("resource_type = ?", resourceType).
+		Where("resource_id = ?", resourceID).
+		Exec(ctx)
 	return err
 }
 
@@ -166,62 +181,58 @@ func (s *SQLiteStore) DeleteResourceVisibilityOverrides(ctx context.Context, res
 	if err := ValidateResourceType(resourceType); err != nil {
 		return err
 	}
-	_, err := s.DB().ExecContext(ctx, `DELETE FROM view_visibility_overrides WHERE resource_type = ? AND resource_id = ?`, resourceType, resourceID)
+	_, err := s.legacy.BunDB().NewDelete().
+		Model((*visibilityOverrideModel)(nil)).
+		Where("resource_type = ?", resourceType).
+		Where("resource_id = ?", resourceID).
+		Exec(ctx)
 	return err
 }
 
 func (s *SQLiteStore) ExportDensityState(ctx context.Context) (map[int64]int, []VisibilityOverride, error) {
 	levels := map[int64]int{}
-	rows, err := s.DB().QueryContext(ctx, `SELECT id, density_level FROM views ORDER BY id`)
-	if err != nil {
+	var levelRows []struct {
+		ID           int64 `bun:"id"`
+		DensityLevel int   `bun:"density_level"`
+	}
+	if err := s.legacy.BunDB().NewSelect().
+		Table("views").
+		Column("id", "density_level").
+		Order("id").
+		Scan(ctx, &levelRows); err != nil {
 		return nil, nil, err
 	}
-	for rows.Next() {
-		var viewID int64
-		var level int
-		if err := rows.Scan(&viewID, &level); err != nil {
-			_ = rows.Close()
-			return nil, nil, err
+	for _, row := range levelRows {
+		if row.DensityLevel != 0 {
+			levels[row.ID] = row.DensityLevel
 		}
-		if level != 0 {
-			levels[viewID] = level
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return nil, nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
 	}
 
-	overrideRows, err := s.DB().QueryContext(ctx, `
-		SELECT view_id, resource_type, resource_id, level_delta, created_at, updated_at
-		FROM view_visibility_overrides
-		ORDER BY view_id, resource_type, resource_id`)
-	if err != nil {
+	var overrideRows []visibilityOverrideModel
+	if err := s.legacy.BunDB().NewSelect().
+		Model(&overrideRows).
+		Order("view_id").
+		Order("resource_type").
+		Order("resource_id").
+		Scan(ctx); err != nil {
 		return nil, nil, err
 	}
-	defer func() { _ = overrideRows.Close() }()
-	overrides := make([]VisibilityOverride, 0)
-	for overrideRows.Next() {
-		var item VisibilityOverride
-		if err := overrideRows.Scan(&item.ViewID, &item.ResourceType, &item.ResourceID, &item.LevelDelta, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, nil, err
-		}
-		overrides = append(overrides, item)
+	overrides := make([]VisibilityOverride, 0, len(overrideRows))
+	for _, row := range overrideRows {
+		overrides = append(overrides, visibilityOverrideFromModel(row))
 	}
-	return levels, overrides, overrideRows.Err()
+	return levels, overrides, nil
 }
 
 func (s *SQLiteStore) visibilityOverride(ctx context.Context, viewID int64, resourceType string, resourceID int64) (VisibilityOverride, error) {
-	var item VisibilityOverride
-	err := s.DB().QueryRowContext(ctx, `
-		SELECT view_id, resource_type, resource_id, level_delta, created_at, updated_at
-		FROM view_visibility_overrides
-		WHERE view_id = ? AND resource_type = ? AND resource_id = ?`, viewID, resourceType, resourceID).Scan(
-		&item.ViewID, &item.ResourceType, &item.ResourceID, &item.LevelDelta, &item.CreatedAt, &item.UpdatedAt,
-	)
-	return item, err
+	var row visibilityOverrideModel
+	err := s.legacy.BunDB().NewSelect().
+		Model(&row).
+		Where("view_id = ?", viewID).
+		Where("resource_type = ?", resourceType).
+		Where("resource_id = ?", resourceID).
+		Scan(ctx)
+	return visibilityOverrideFromModel(row), err
 }
 
 func (s *SQLiteStore) ProjectedViewContent(ctx context.Context, viewID int64, densityOverride *int) (ProjectedViewContent, error) {
@@ -409,69 +420,63 @@ func (s *SQLiteStore) densitySignals(ctx context.Context, placements []app.Place
 
 func (s *SQLiteStore) loadFilterSignals(ctx context.Context, signals densitySignals, resourceType string, resourceIDs []int64) error {
 	return queryIDChunks(resourceIDs, 450, func(ids []int64) error {
-		query, args := idInQuery(`
-		SELECT wm.resource_type, wm.resource_id, MAX(wfd.score), MIN(wfd.tier)
-		FROM watch_materialization wm
-		JOIN watch_filter_decisions wfd
-		  ON wfd.owner_type = wm.owner_type
-		 AND wfd.owner_key = wm.owner_key
-		WHERE wm.resource_type = ? AND wm.resource_id IN (%s)
-		GROUP BY wm.resource_type, wm.resource_id`, resourceType, ids)
-		rows, err := s.DB().QueryContext(ctx, query, args...)
-		if err != nil {
+		var rows []struct {
+			ResourceType string   `bun:"resource_type"`
+			ResourceID   int64    `bun:"resource_id"`
+			Score        *float64 `bun:"score"`
+			Tier         *int     `bun:"tier"`
+		}
+		if err := s.legacy.BunDB().NewSelect().
+			TableExpr("watch_materialization AS wm").
+			ColumnExpr("wm.resource_type").
+			ColumnExpr("wm.resource_id").
+			ColumnExpr("MAX(wfd.score) AS score").
+			ColumnExpr("MIN(wfd.tier) AS tier").
+			Join("JOIN watch_filter_decisions AS wfd ON wfd.owner_type = wm.owner_type AND wfd.owner_key = wm.owner_key").
+			Where("wm.resource_type = ?", resourceType).
+			Where("wm.resource_id IN (?)", bun.List(ids)).
+			Group("wm.resource_type").
+			Group("wm.resource_id").
+			Scan(ctx, &rows); err != nil {
 			return err
 		}
-		for rows.Next() {
-			var rowResourceType string
-			var resourceID int64
-			var score sql.NullFloat64
-			var tier sql.NullInt64
-			if err := rows.Scan(&rowResourceType, &resourceID, &score, &tier); err != nil {
-				_ = rows.Close()
-				return err
+		for _, row := range rows {
+			key := densitySignalKey{resourceType: row.ResourceType, resourceID: row.ResourceID}
+			if row.Score != nil {
+				signals.filterScore[key] = *row.Score
 			}
-			key := densitySignalKey{resourceType: rowResourceType, resourceID: resourceID}
-			if score.Valid {
-				signals.filterScore[key] = score.Float64
-			}
-			if tier.Valid {
-				signals.filterTier[key] = int(tier.Int64)
+			if row.Tier != nil {
+				signals.filterTier[key] = *row.Tier
 			}
 		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		return rows.Err()
+		return nil
 	})
 }
 
 func (s *SQLiteStore) loadArchitectureSignals(ctx context.Context, signals densitySignals, resourceType string, resourceIDs []int64) error {
 	return queryIDChunks(resourceIDs, 450, func(ids []int64) error {
-		query, args := idInQuery(`
-		SELECT target_resource_type, target_resource_id, MAX(confidence)
-		FROM watch_architecture_links
-		WHERE target_resource_type = ? AND target_resource_id IN (%s)
-		GROUP BY target_resource_type, target_resource_id`, resourceType, ids)
-		rows, err := s.DB().QueryContext(ctx, query, args...)
-		if err != nil {
+		var rows []struct {
+			ResourceType string   `bun:"target_resource_type"`
+			ResourceID   int64    `bun:"target_resource_id"`
+			Confidence   *float64 `bun:"confidence"`
+		}
+		if err := s.legacy.BunDB().NewSelect().
+			Table("watch_architecture_links").
+			Column("target_resource_type", "target_resource_id").
+			ColumnExpr("MAX(confidence) AS confidence").
+			Where("target_resource_type = ?", resourceType).
+			Where("target_resource_id IN (?)", bun.List(ids)).
+			Group("target_resource_type").
+			Group("target_resource_id").
+			Scan(ctx, &rows); err != nil {
 			return err
 		}
-		for rows.Next() {
-			var rowResourceType string
-			var resourceID int64
-			var confidence sql.NullFloat64
-			if err := rows.Scan(&rowResourceType, &resourceID, &confidence); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			if confidence.Valid {
-				signals.architectureConfidence[densitySignalKey{resourceType: rowResourceType, resourceID: resourceID}] = confidence.Float64
+		for _, row := range rows {
+			if row.Confidence != nil {
+				signals.architectureConfidence[densitySignalKey{resourceType: row.ResourceType, resourceID: row.ResourceID}] = *row.Confidence
 			}
 		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		return rows.Err()
+		return nil
 	})
 }
 
@@ -486,20 +491,6 @@ func queryIDChunks(ids []int64, size int, fn func([]int64) error) error {
 		}
 	}
 	return nil
-}
-
-func idInQuery(template string, resourceType string, ids []int64) (string, []any) {
-	placeholders := make([]byte, 0, len(ids)*2-1)
-	args := make([]any, 0, len(ids)+1)
-	args = append(args, resourceType)
-	for i, id := range ids {
-		if i > 0 {
-			placeholders = append(placeholders, ',')
-		}
-		placeholders = append(placeholders, '?')
-		args = append(args, id)
-	}
-	return fmt.Sprintf(template, string(placeholders)), args
 }
 
 type densityCaps struct {

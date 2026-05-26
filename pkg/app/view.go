@@ -69,32 +69,33 @@ type ViewLayer struct {
 }
 
 func (s *Store) listViewRows(ctx context.Context) ([]viewRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, owner_element_id, name, description, level_label, tags, level, created_at, updated_at FROM views ORDER BY id`)
-	if err != nil {
+	var rows []viewModel
+	if err := s.bun.NewSelect().Model(&rows).Order("id").Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []viewRow
-	for rows.Next() {
-		var row viewRow
-		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Tags, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, row)
+	out := make([]viewRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, viewRowFromModel(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) parentViewForOwner(ctx context.Context, ownerElementID int64, excludeViewID int64) (*int64, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT view_id FROM placements WHERE element_id = ? AND view_id != ? ORDER BY view_id LIMIT 1`, ownerElementID, excludeViewID)
-	var viewID int64
-	if err := row.Scan(&viewID); err != nil {
+	var placement elementPlacementModel
+	if err := s.bun.NewSelect().
+		Model(&placement).
+		Column("view_id").
+		Where("element_id = ?", ownerElementID).
+		Where("view_id != ?", excludeViewID).
+		Order("view_id").
+		Limit(1).
+		Scan(ctx); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &viewID, nil
+	return &placement.ViewID, nil
 }
 
 func (s *Store) parentViewMap(ctx context.Context, rows []viewRow) (map[int64]*int64, error) {
@@ -110,42 +111,48 @@ func (s *Store) parentViewMap(ctx context.Context, rows []viewRow) (map[int64]*i
 		return parentMap, nil
 	}
 
-	placementRows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT p.element_id, p.view_id
-		FROM placements p
-		JOIN views v ON v.owner_element_id = p.element_id
-		ORDER BY p.element_id, p.view_id`)
-	if err != nil {
+	var placementRows []struct {
+		ElementID int64 `bun:"element_id"`
+		ViewID    int64 `bun:"view_id"`
+	}
+	if err := s.bun.NewSelect().
+		TableExpr("placements AS p").
+		Distinct().
+		ColumnExpr("p.element_id, p.view_id").
+		Join("JOIN views AS v ON v.owner_element_id = p.element_id").
+		Order("p.element_id").
+		Order("p.view_id").
+		Scan(ctx, &placementRows); err != nil {
 		return nil, err
 	}
-	defer func() { _ = placementRows.Close() }()
-	for placementRows.Next() {
-		var elementID, parentID int64
-		if err := placementRows.Scan(&elementID, &parentID); err != nil {
-			return nil, err
-		}
-		for _, childID := range ownerViewIDs[elementID] {
-			if parentID == childID || parentMap[childID] != nil {
+	for _, row := range placementRows {
+		for _, childID := range ownerViewIDs[row.ElementID] {
+			if row.ViewID == childID || parentMap[childID] != nil {
 				continue
 			}
-			pid := parentID
+			pid := row.ViewID
 			parentMap[childID] = &pid
 		}
 	}
-	return parentMap, placementRows.Err()
+	return parentMap, nil
 }
 
 func (s *Store) childViewMeta(ctx context.Context, elementID int64) (bool, *string, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT level_label FROM views WHERE owner_element_id = ? ORDER BY id LIMIT 1`, elementID)
-	var label sql.NullString
-	if err := row.Scan(&label); err != nil {
+	var row viewModel
+	if err := s.bun.NewSelect().
+		Model(&row).
+		Column("level_label").
+		Where("owner_element_id = ?", elementID).
+		Order("id").
+		Limit(1).
+		Scan(ctx); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil, nil
 		}
 		return false, nil, err
 	}
-	if label.Valid {
-		return true, &label.String, nil
+	if row.LevelLabel != nil {
+		return true, row.LevelLabel, nil
 	}
 	return true, nil, nil
 }
@@ -156,29 +163,32 @@ type childViewMetaValue struct {
 }
 
 func (s *Store) childViewMetaMap(ctx context.Context) (map[int64]childViewMetaValue, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT owner_element_id, level_label FROM views WHERE owner_element_id IS NOT NULL ORDER BY id`)
-	if err != nil {
+	var rows []viewModel
+	if err := s.bun.NewSelect().
+		Model(&rows).
+		Column("owner_element_id", "level_label").
+		Where("owner_element_id IS NOT NULL").
+		Order("id").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 	out := map[int64]childViewMetaValue{}
-	for rows.Next() {
-		var elementID int64
-		var label sql.NullString
-		if err := rows.Scan(&elementID, &label); err != nil {
-			return nil, err
+	for _, row := range rows {
+		if row.OwnerElementID == nil {
+			continue
 		}
+		elementID := *row.OwnerElementID
 		if _, exists := out[elementID]; exists {
 			continue
 		}
 		meta := childViewMetaValue{hasView: true}
-		if label.Valid {
-			labelCopy := label.String
+		if row.LevelLabel != nil {
+			labelCopy := *row.LevelLabel
 			meta.label = &labelCopy
 		}
 		out[elementID] = meta
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func viewNodeFromRow(row viewRow, parentID *int64, depth int, markdown *ViewMarkdownDocument) ViewTreeNode {
@@ -322,11 +332,11 @@ func (s *Store) Views(ctx context.Context) ([]ViewSummary, error) {
 }
 
 func (s *Store) ViewByID(ctx context.Context, id int64) (ViewTreeNode, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, owner_element_id, name, description, level_label, tags, level, created_at, updated_at FROM views WHERE id = ?`, id)
-	var view viewRow
-	if err := row.Scan(&view.ID, &view.OwnerElementID, &view.Name, &view.Description, &view.LevelLabel, &view.Tags, &view.Level, &view.CreatedAt, &view.UpdatedAt); err != nil {
+	var model viewModel
+	if err := s.bun.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx); err != nil {
 		return ViewTreeNode{}, err
 	}
+	view := viewRowFromModel(model)
 	var parentID *int64
 	var err error
 	if view.OwnerElementID.Valid {
@@ -347,26 +357,25 @@ func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeN
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at
-		FROM views v
-		JOIN placements p ON p.element_id = v.owner_element_id
-		WHERE p.view_id = ? AND v.id != ?
-		ORDER BY v.id`, parentViewID, parentViewID)
-	if err != nil {
+	var rows []viewModel
+	if err := s.bun.NewSelect().
+		TableExpr("views AS v").
+		Distinct().
+		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at").
+		Join("JOIN placements AS p ON p.element_id = v.owner_element_id").
+		Where("p.view_id = ?", parentViewID).
+		Where("v.id != ?", parentViewID).
+		Order("v.id").
+		Scan(ctx, &rows); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 	out := []ViewTreeNode{}
-	for rows.Next() {
-		var row viewRow
-		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Tags, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
-			return nil, err
-		}
+	for _, model := range rows {
+		row := viewRowFromModel(model)
 		parentID := parentViewID
 		out = append(out, viewNodeFromRow(row, &parentID, 0, markdownByViewID[row.ID]))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
@@ -374,29 +383,20 @@ func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at
-		FROM views v
-		WHERE v.owner_element_id IS NULL
-		   OR NOT EXISTS (
-		     SELECT 1 FROM placements p
-		     WHERE p.element_id = v.owner_element_id
-		       AND p.view_id != v.id
-		   )
-		ORDER BY v.id`)
-	if err != nil {
+	var rows []viewModel
+	if err := s.bun.NewSelect().
+		TableExpr("views AS v").
+		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at").
+		Where("v.owner_element_id IS NULL OR NOT EXISTS (SELECT 1 FROM placements p WHERE p.element_id = v.owner_element_id AND p.view_id != v.id)").
+		Order("v.id").
+		Scan(ctx, &rows); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 	out := []ViewTreeNode{}
-	for rows.Next() {
-		var row viewRow
-		if err := rows.Scan(&row.ID, &row.OwnerElementID, &row.Name, &row.Description, &row.LevelLabel, &row.Tags, &row.Level, &row.CreatedAt, &row.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, viewNodeFromRow(row, nil, 0, markdownByViewID[row.ID]))
+	for _, model := range rows {
+		out = append(out, viewNodeFromRow(viewRowFromModel(model), nil, 0, markdownByViewID[model.ID]))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) CreateView(ctx context.Context, name string, levelLabel *string, ownerElementID *int64) (ViewSummary, error) {
@@ -411,13 +411,12 @@ func (s *Store) CreateView(ctx context.Context, name string, levelLabel *string,
 			}
 		}
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO views(owner_element_id, name, description, level_label, level, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?)`,
-		ownerElementID, strings.TrimSpace(name), levelLabel, level, now, now)
+	row := &viewModel{OwnerElementID: ownerElementID, Name: strings.TrimSpace(name), LevelLabel: levelLabel, Level: level, CreatedAt: now, UpdatedAt: now}
+	_, err := s.bun.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
 		return ViewSummary{}, err
 	}
-	id, _ := res.LastInsertId()
-	view, err := s.ViewByID(ctx, id)
+	view, err := s.ViewByID(ctx, row.ID)
 	if err != nil {
 		return ViewSummary{}, err
 	}
@@ -445,16 +444,27 @@ func (s *Store) UpdateView(ctx context.Context, id int64, name *string, descript
 	if description != nil {
 		nextDescription = description
 	}
-	tagJSON := jsonString(current.Tags, "[]")
+	var tagJSON any
 	if tags != nil {
 		if err := s.ensureTagColors(ctx, tags); err != nil {
 			return ViewSummary{}, err
 		}
 		tagJSON = jsonString(tags, "[]")
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE views SET name = ?, description = ?, level_label = ?, tags = ?, updated_at = ? WHERE id = ?`, nextName, nextDescription, levelLabel, tagJSON, nowString(), id)
+	res, err := s.bun.NewUpdate().
+		Model((*viewModel)(nil)).
+		Set("name = ?", nextName).
+		Set("description = ?", nextDescription).
+		Set("level_label = ?", levelLabel).
+		Set("tags = COALESCE(?, tags)", tagJSON).
+		Set("updated_at = ?", nowString()).
+		Where("id = ?", id).
+		Exec(ctx)
 	if err != nil {
 		return ViewSummary{}, err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return ViewSummary{}, sql.ErrNoRows
 	}
 	updated, err := s.ViewByID(ctx, id)
 	if err != nil {
@@ -472,71 +482,18 @@ func (s *Store) UpdateView(ctx context.Context, id int64, name *string, descript
 }
 
 func (s *Store) SetViewLevel(ctx context.Context, id int64, level int) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE views SET level = ?, updated_at = ? WHERE id = ?`, level, nowString(), id)
+	_, err := s.bun.NewUpdate().
+		Model((*viewModel)(nil)).
+		Set("level = ?", level).
+		Set("updated_at = ?", nowString()).
+		Where("id = ?", id).
+		Exec(ctx)
 	return err
 }
 
 func (s *Store) DeleteView(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM views WHERE id = ?`, id)
+	_, err := s.bun.NewDelete().Model((*viewModel)(nil)).Where("id = ?", id).Exec(ctx)
 	return err
-}
-
-func scanElement(row scanner, includeViewMeta bool, store *Store, ctx context.Context) (LibraryElement, error) {
-	var (
-		elem        LibraryElement
-		techRaw     string
-		tagRaw      string
-		kind        sql.NullString
-		description sql.NullString
-		technology  sql.NullString
-		url         sql.NullString
-		logoURL     sql.NullString
-		repo        sql.NullString
-		branch      sql.NullString
-		filePath    sql.NullString
-		language    sql.NullString
-	)
-	if err := row.Scan(&elem.ID, &elem.Name, &kind, &description, &technology, &url, &logoURL, &techRaw, &tagRaw, &repo, &branch, &filePath, &language, &elem.CreatedAt, &elem.UpdatedAt); err != nil {
-		return LibraryElement{}, err
-	}
-	if kind.Valid {
-		elem.Kind = &kind.String
-	}
-	if description.Valid {
-		elem.Description = &description.String
-	}
-	if technology.Valid {
-		elem.Technology = &technology.String
-	}
-	if url.Valid {
-		elem.URL = &url.String
-	}
-	if logoURL.Valid {
-		elem.LogoURL = &logoURL.String
-	}
-	if repo.Valid {
-		elem.Repo = &repo.String
-	}
-	if branch.Valid {
-		elem.Branch = &branch.String
-	}
-	if filePath.Valid {
-		elem.FilePath = &filePath.String
-	}
-	if language.Valid {
-		elem.Language = &language.String
-	}
-	elem.TechnologyConnectors = parseTechnologyConnectors(techRaw)
-	elem.Tags = parseStrings(tagRaw)
-	if includeViewMeta {
-		hasView, label, err := store.childViewMeta(ctx, elem.ID)
-		if err != nil {
-			return LibraryElement{}, err
-		}
-		elem.HasView = hasView
-		elem.ViewLabel = label
-	}
-	return elem, nil
 }
 
 func (s *Store) ListIncomingNavigations(ctx context.Context, viewID int64) ([]IncomingViewConnector, error) {

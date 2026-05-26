@@ -57,6 +57,7 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		return err
 	}
 	opts := resolveServeOptions(cfg, host, port)
+	opts.Config = cfg
 
 	app, err := localserver.Bootstrap(dataDir, opts)
 	if err != nil {

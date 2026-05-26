@@ -6,22 +6,31 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
-	sqlitevec "github.com/viant/sqlite-vec/vec"
-	_ "modernc.org/sqlite"
+	"github.com/mertcikla/tld/v2/pkg/dbrepo"
+	"github.com/uptrace/bun"
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	bun     *bun.DB
+	dialect dbrepo.Dialect
 }
 
 func (s *Store) DB() *sql.DB {
 	return s.db
+}
+
+func (s *Store) BunDB() *bun.DB {
+	return s.bun
+}
+
+func (s *Store) Dialect() dbrepo.Dialect {
+	return s.dialect
 }
 
 type TechnologyConnector struct {
@@ -93,26 +102,26 @@ type PlanConnector struct {
 	TargetHandle     *string `json:"target_handle"`
 }
 
+func NewStore(db *sql.DB, bunDB *bun.DB, dialect dbrepo.Dialect) *Store {
+	return &Store{db: db, bun: bunDB, dialect: dialect}
+}
+
 func OpenStore(dbPath string, migrations embed.FS) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	return OpenStoreWithOptions(context.Background(), dbrepo.DBOptions{
+		Dialect:    dbrepo.DialectSQLite,
+		SQLitePath: dbPath,
+		Migrations: migrations,
+	})
+}
+
+func OpenStoreWithOptions(ctx context.Context, opts dbrepo.DBOptions) (*Store, error) {
+	handle, err := dbrepo.Open(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := sqlitevec.Register(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("register sqlite-vec: %w", err)
-	}
-	if err := configureSQLiteDB(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := applyMigrations(db, migrations); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	store := &Store{db: db}
+	store := &Store{db: handle.DB, bun: handle.Bun, dialect: handle.Dialect}
 	if err := store.ensureBootstrapData(context.Background()); err != nil {
-		_ = db.Close()
+		_ = store.Close()
 		return nil, err
 	}
 	return store, nil
@@ -121,7 +130,6 @@ func OpenStore(dbPath string, migrations embed.FS) (*Store, error) {
 func configureSQLiteDB(db *sql.DB) error {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-
 	pragmas := []string{
 		`PRAGMA busy_timeout = 5000;`,
 		`PRAGMA journal_mode = WAL;`,
@@ -129,7 +137,7 @@ func configureSQLiteDB(db *sql.DB) error {
 		`PRAGMA foreign_keys = ON;`,
 	}
 	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
+		if _, err := db.ExecContext(context.Background(), pragma); err != nil {
 			return fmt.Errorf("configure sqlite %s: %w", pragma, err)
 		}
 	}
@@ -144,48 +152,23 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) ensureBootstrapData(ctx context.Context) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM views`).Scan(&count); err != nil {
+	count, err := s.bun.NewSelect().Model((*viewModel)(nil)).Count(ctx)
+	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	now := nowString()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO views(owner_element_id, name, description, level_label, level, created_at, updated_at)
-		VALUES (NULL, ?, ?, ?, 1, ?, ?)`,
-		"Workspace",
-		"Local offline workspace",
-		"Root",
-		now,
-		now,
-	)
+	_, err = s.bun.NewInsert().Model(&viewModel{
+		Name:        "Workspace",
+		Description: new("Local offline workspace"),
+		LevelLabel:  new("Root"),
+		Level:       1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}).Exec(ctx)
 	return err
-}
-
-func applyMigrations(db *sql.DB, migrations embed.FS) error {
-	entries, err := fs.ReadDir(migrations, "migrations")
-	if err != nil {
-		return err
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		sqlBytes, err := migrations.ReadFile("migrations/" + entry.Name())
-		if err != nil {
-			return err
-		}
-		if _, err := db.Exec(string(sqlBytes)); err != nil {
-			if strings.Contains(err.Error(), "duplicate column name") {
-				continue
-			}
-			return fmt.Errorf("apply migration %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
 }
 
 func nowString() string {
@@ -252,10 +235,6 @@ type viewRow struct {
 	Level          int
 	CreatedAt      string
 	UpdatedAt      string
-}
-
-type scanner interface {
-	Scan(dest ...any) error
 }
 
 func (s *Store) Explore(ctx context.Context) (ExploreData, error) {
@@ -334,9 +313,7 @@ func exploreNavigations(views []ViewTreeNode, placementsByView map[int64][]Place
 		}
 	}
 	for elementID := range placementViewsByElement {
-		sort.Slice(placementViewsByElement[elementID], func(i, j int) bool {
-			return placementViewsByElement[elementID][i] < placementViewsByElement[elementID][j]
-		})
+		slices.Sort(placementViewsByElement[elementID])
 	}
 
 	navs := make([]ViewConnector, 0)
@@ -365,10 +342,8 @@ func exploreNavigations(views []ViewTreeNode, placementsByView map[int64][]Place
 }
 
 func appendUniqueInt64(items []int64, item int64) []int64 {
-	for _, existing := range items {
-		if existing == item {
-			return items
-		}
+	if slices.Contains(items, item) {
+		return items
 	}
 	return append(items, item)
 }
@@ -387,19 +362,13 @@ func (s *Store) Dependencies(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, view_id, source_element_id, target_element_id, label, description, relationship, direction, style, url, source_handle, target_handle, tags, created_at, updated_at FROM connectors ORDER BY id`)
-	if err != nil {
+	var rows []connectorModel
+	if err := s.bun.NewSelect().Model(&rows).Order("id").Scan(ctx); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	connectors := []DependencyConnector{}
-	for rows.Next() {
-		var c Connector
-		var rawTags string
-		if err := rows.Scan(&c.ID, &c.ViewID, &c.SourceElementID, &c.TargetElementID, &c.Label, &c.Description, &c.Relationship, &c.Direction, &c.Style, &c.URL, &c.SourceHandle, &c.TargetHandle, &rawTags, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
-		}
-		c.Tags = parseStrings(rawTags)
+	connectors := make([]DependencyConnector, 0, len(rows))
+	for _, row := range rows {
+		c := connectorFromModel(row)
 		connectors = append(connectors, DependencyConnector{
 			ID:               fmt.Sprint(c.ID),
 			ViewID:           fmt.Sprint(c.ViewID),

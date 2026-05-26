@@ -33,11 +33,11 @@ func TestEventQueueDeliversBufferedEventsOnClose(t *testing.T) {
 func TestEventQueuePushCloseRaceDoesNotPanic(t *testing.T) {
 	queue := NewEventQueue()
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(worker int) {
 			defer wg.Done()
-			for j := 0; j < 1_000; j++ {
+			for j := range 1_000 {
 				queue.Push(Event{Type: fmt.Sprintf("%d:%d", worker, j)})
 			}
 		}(i)

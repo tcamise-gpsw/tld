@@ -53,6 +53,9 @@ func (s *Store) UpsertViewMarkdown(ctx context.Context, viewID int64, path strin
 	if updatedAt == "" {
 		updatedAt = nowString()
 	}
+	if err := s.ensureViewMarkdownTable(ctx); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO view_markdown_documents(view_id, path, is_managed, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -65,7 +68,27 @@ func (s *Store) UpsertViewMarkdown(ctx context.Context, viewID int64, path strin
 }
 
 func (s *Store) DeleteViewMarkdown(ctx context.Context, viewID int64) error {
+	if err := s.ensureViewMarkdownTable(ctx); err != nil {
+		if stringsContainsNoSuchTable(err) {
+			return nil
+		}
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM view_markdown_documents WHERE view_id = ?`, viewID)
+	return err
+}
+
+func (s *Store) ensureViewMarkdownTable(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS view_markdown_documents (
+			view_id INTEGER PRIMARY KEY,
+			path TEXT NOT NULL,
+			is_managed INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE
+		)
+	`)
 	return err
 }
 
