@@ -1,7 +1,11 @@
 const DEFAULT_WEB_BASE = "/"
 
 function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, "")
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') {
+    end--
+  }
+  return value.slice(0, end)
 }
 
 function trim(value: string | undefined): string | undefined {

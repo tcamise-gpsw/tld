@@ -1,7 +1,11 @@
 import { isNativeApp } from '../config/runtime'
 
 export function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, '')
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') {
+    end--
+  }
+  return value.slice(0, end)
 }
 
 export function trim(value: string | undefined): string | undefined {
@@ -19,7 +23,7 @@ export function resolveIconPath(path: string | null | undefined): string {
 
   // Absolute URLs and data URIs are returned as-is
   if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path
-  const vscodeServerUrl = typeof window !== 'undefined' ? window.__TLD_SERVER_URL__?.replace(/\/+$/, '') : undefined
+  const vscodeServerUrl = typeof window !== 'undefined' && window.__TLD_SERVER_URL__ ? trimTrailingSlash(window.__TLD_SERVER_URL__) : undefined
   const isVsCode = typeof window !== 'undefined' && !!window.__TLD_VSCODE__
   if (isVsCode && vscodeServerUrl) {
     const stripped = path.startsWith('/app/') ? path.slice('/app'.length) : path

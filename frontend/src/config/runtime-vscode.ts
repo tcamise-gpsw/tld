@@ -13,7 +13,11 @@ declare global {
 }
 
 function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, '')
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') {
+    end--
+  }
+  return value.slice(0, end)
 }
 
 const serverUrl = trimTrailingSlash(window.__TLD_SERVER_URL__ ?? 'http://127.0.0.1:8060')
