@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Badge,
   Box,
@@ -86,6 +86,7 @@ function formatUpdated(value: string) {
 }
 
 export default function Inventory() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [elements, setElements] = useState<LibraryElement[]>([])
@@ -207,6 +208,38 @@ export default function Inventory() {
     () => (selectedRowIndex >= 0 ? selectedObjectRow : null) ?? paginatedRows[0] ?? null,
     [paginatedRows, selectedObjectRow, selectedRowIndex],
   )
+  const navigationUrls = useMemo(() => {
+    if (!selectedRow) return { exploreUrl: '', editorUrl: '' }
+
+    if (selectedRow.objectType === 'view') {
+      return {
+        exploreUrl: `/views?view=explore&focus=${selectedRow.id}`,
+        editorUrl: `/views/${selectedRow.id}`,
+      }
+    }
+
+    if (selectedRow.objectType === 'element') {
+      const placementKeys = Object.keys(placementByViewElement)
+      const elementPlacementKey = placementKeys.find((k) => k.endsWith(`:${selectedRow.id}`))
+      const viewId = elementPlacementKey ? Number(elementPlacementKey.split(':')[0]) : null
+      const fallbackViewId = viewId || views[0]?.id || 1
+
+      return {
+        exploreUrl: `/views?view=explore&focus=${fallbackViewId}&element=${selectedRow.id}`,
+        editorUrl: `/views/${fallbackViewId}?element=${selectedRow.id}`,
+      }
+    }
+
+    if (selectedRow.objectType === 'connector' && selectedRow.connector) {
+      const conn = selectedRow.connector
+      return {
+        exploreUrl: `/views?view=explore&focus=${conn.view_id}&element=${conn.source_element_id}`,
+        editorUrl: `/views/${conn.view_id}`,
+      }
+    }
+
+    return { exploreUrl: '', editorUrl: '' }
+  }, [selectedRow, views, placementByViewElement])
   const selectedKeysOnPage = useMemo(
     () => paginatedRows.filter((row) => selectedKeys.has(row.key)).length,
     [paginatedRows, selectedKeys],
@@ -1036,53 +1069,106 @@ export default function Inventory() {
             />
           </Flex>
 
-          <Box w={{ base: '0', xl: '340px' }} display={{ base: 'none', xl: 'block' }} borderLeft="1px solid" borderColor="whiteAlpha.100" overflow="hidden" position="relative">
-            {selectedRow?.objectType === 'view' && (
-              <ViewPanel
-                isOpen={true}
-                onClose={() => { }}
-                view={selectedRow.view ?? null}
-                canEdit
-                onSave={() => refresh()}
-                availableTags={availableTags}
-                hasBackdrop={false}
-                isInline={true}
-              />
+          <Box w={{ base: '0', xl: '340px' }} display={{ base: 'none', xl: 'flex' }} flexDir="column" borderLeft="1px solid" borderColor="whiteAlpha.100" overflow="hidden" position="relative">
+            {selectedRow && (
+              <Box p={4} borderBottom="1px solid" borderColor="whiteAlpha.100" bg="rgba(15, 15, 20, 0.45)" backdropFilter="blur(12px)">
+                <Flex gap={2}>
+                  <Button
+                    data-testid="inventory-action-explore"
+                    leftIcon={
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+                      </svg>
+                    }
+                    size="sm"
+                    w="50%"
+                    bg="rgba(var(--accent-rgb), 0.12)"
+                    color="var(--accent)"
+                    border="1px solid"
+                    borderColor="rgba(var(--accent-rgb), 0.2)"
+                    _hover={{ bg: 'rgba(var(--accent-rgb), 0.18)', borderColor: 'rgba(var(--accent-rgb), 0.35)', transform: 'translateY(-1px)' }}
+                    _active={{ transform: 'translateY(0)' }}
+                    onClick={() => navigate(navigationUrls.exploreUrl)}
+                    fontWeight="semibold"
+                    borderRadius="lg"
+                    transition="all 0.15s ease"
+                  >
+                    Explore
+                  </Button>
+                  <Button
+                    data-testid="inventory-action-editor"
+                    leftIcon={
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
+                      </svg>
+                    }
+                    size="sm"
+                    w="50%"
+                    variant="outline"
+                    color="gray.200"
+                    borderColor="whiteAlpha.200"
+                    _hover={{ bg: 'whiteAlpha.100', borderColor: 'whiteAlpha.300', color: 'white', transform: 'translateY(-1px)' }}
+                    _active={{ transform: 'translateY(0)' }}
+                    onClick={() => navigate(navigationUrls.editorUrl)}
+                    fontWeight="semibold"
+                    borderRadius="lg"
+                    transition="all 0.15s ease"
+                  >
+                    Open in Editor
+                  </Button>
+                </Flex>
+              </Box>
             )}
-            {selectedRow?.objectType === 'element' && (
-              <ElementPanel
-                isOpen={true}
-                onClose={() => { }}
-                element={selectedRow.element ?? null}
-                onSave={() => refresh()}
-                onDelete={() => { setParam('object', ''); void refresh() }}
-                onPermanentDelete={() => { setParam('object', ''); void refresh() }}
-                availableTags={availableTags}
-                orgId=""
-                hasBackdrop={false}
-                isInline={true}
-                autoSave
-              />
-            )}
-            {selectedRow?.objectType === 'connector' && (
-              <ConnectorPanel
-                isOpen={true}
-                onClose={() => { }}
-                connector={selectedRow.connector ?? null}
-                orgId=""
-                onSave={() => refresh()}
-                onDelete={() => { setParam('object', ''); void refresh() }}
-                availableTags={availableTags}
-                hasBackdrop={false}
-                isInline={true}
-                autoSave
-              />
-            )}
-            {!selectedRow && (
-              <Flex h="100%" align="center" justify="center" color="gray.600" fontSize="sm">
-                No object selected.
-              </Flex>
-            )}
+            <Box flex={1} minH={0} overflow="auto" position="relative">
+              {selectedRow?.objectType === 'view' && (
+                <ViewPanel
+                  isOpen={true}
+                  onClose={() => { }}
+                  view={selectedRow.view ?? null}
+                  canEdit
+                  onSave={() => refresh()}
+                  availableTags={availableTags}
+                  hasBackdrop={false}
+                  isInline={true}
+                />
+              )}
+              {selectedRow?.objectType === 'element' && (
+                <ElementPanel
+                  isOpen={true}
+                  onClose={() => { }}
+                  element={selectedRow.element ?? null}
+                  onSave={() => refresh()}
+                  onDelete={() => { setParam('object', ''); void refresh() }}
+                  onPermanentDelete={() => { setParam('object', ''); void refresh() }}
+                  availableTags={availableTags}
+                  orgId=""
+                  hasBackdrop={false}
+                  isInline={true}
+                  autoSave
+                />
+              )}
+              {selectedRow?.objectType === 'connector' && (
+                <ConnectorPanel
+                  isOpen={true}
+                  onClose={() => { }}
+                  connector={selectedRow.connector ?? null}
+                  orgId=""
+                  onSave={() => refresh()}
+                  onDelete={() => { setParam('object', ''); void refresh() }}
+                  availableTags={availableTags}
+                  hasBackdrop={false}
+                  isInline={true}
+                  autoSave
+                />
+              )}
+              {!selectedRow && (
+                <Flex h="100%" align="center" justify="center" color="gray.600" fontSize="sm">
+                  No object selected.
+                </Flex>
+              )}
+            </Box>
           </Box>
         </Flex>
 
