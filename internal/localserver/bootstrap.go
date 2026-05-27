@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 	assets "github.com/mertcikla/tld/v2"
@@ -95,6 +96,10 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 		return nil, err
 	}
 
+	if err := seedLocalRootView(context.Background(), sqliteStore); err != nil {
+		return nil, err
+	}
+
 	apiStore := store.NewAPIAdapter(sqliteStore, dataDir)
 	views, elements, connectors, err := apiStore.GetWorkspaceResourceCounts(context.Background(), localWorkspaceID)
 	if err != nil {
@@ -137,4 +142,46 @@ func ResolveAddr(o ServeOptions) string {
 		port = o.Port
 	}
 	return host + ":" + port
+}
+
+func seedLocalRootView(ctx context.Context, sqliteStore *store.SQLiteStore) error {
+	var count int
+	err := sqliteStore.BunDB().
+		NewRaw("SELECT COUNT(*) FROM views WHERE org_id = ? AND owner_element_id IS NULL", localWorkspaceID.String()).
+		Scan(ctx, &count)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := sqliteStore.BunDB().
+		NewRaw(
+			"UPDATE views SET org_id = ?, updated_at = ? WHERE owner_element_id IS NULL AND org_id IS NULL",
+			localWorkspaceID.String(),
+			now,
+		).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected > 0 {
+		return nil
+	}
+
+	_, err = sqliteStore.BunDB().
+		NewRaw(
+			"INSERT INTO views(org_id, name, description, level_label, level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			localWorkspaceID.String(),
+			"Workspace",
+			"Local offline workspace",
+			"Root",
+			1,
+			now,
+			now,
+		).
+		Exec(ctx)
+	return err
 }

@@ -61,8 +61,8 @@ func TestBootstrapCreatesDatabaseAndReadyEndpoint(t *testing.T) {
 	if !body.OK {
 		t.Fatalf("ready response ok = false")
 	}
-	if body.Resources.Views < 0 || body.Resources.Elements < 0 || body.Resources.Connectors < 0 {
-		t.Fatalf("ready response contains negative resources: %+v", body.Resources)
+	if body.Resources.Views != 1 || body.Resources.Elements != 0 || body.Resources.Connectors != 0 {
+		t.Fatalf("ready resources = %+v, want seeded root view only", body.Resources)
 	}
 	if body.Resources.Views != app.Resources.Views || body.Resources.Elements != app.Resources.Elements || body.Resources.Connectors != app.Resources.Connectors {
 		t.Fatalf("ready resources = %+v, want bootstrap resources %+v", body.Resources, app.Resources)

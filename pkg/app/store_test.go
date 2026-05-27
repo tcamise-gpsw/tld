@@ -613,6 +613,31 @@ func TestStoreAutoTagColorsPreserveUserMetadata(t *testing.T) {
 	}
 }
 
+func TestStoreTenantTagColorsUseCoreNameConstraint(t *testing.T) {
+	store := openAppStore(t)
+	ctx := WithTenantOrgID(context.Background(), uuid.New())
+
+	description := "Tenant tag"
+	if err := store.UpdateTag(ctx, "runtime", "#123456", &description); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateElement(ctx, LibraryElement{Name: "API", Tags: []string{"runtime", "worker"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	tags, err := store.Tags(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := tags["runtime"]
+	if runtime.Color != "#123456" || runtime.Description == nil || *runtime.Description != description {
+		t.Fatalf("runtime tag = %+v, want tenant metadata preserved", runtime)
+	}
+	if tags["worker"].Color == "" {
+		t.Fatalf("worker tag = %+v, want generated color", tags["worker"])
+	}
+}
+
 func TestStoreAutoTagColorsGenerateUnusedColorsAfterSwatchesAreExhausted(t *testing.T) {
 	store := openAppStore(t)
 	ctx := context.Background()

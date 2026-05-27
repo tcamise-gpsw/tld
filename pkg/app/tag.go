@@ -162,12 +162,11 @@ func (s *Store) UpdateTag(ctx context.Context, name, color string, description *
 	row := &tagModel{Name: name, Color: color, Description: description}
 	query := s.bun.NewInsert().
 		Model(row).
+		On("CONFLICT(name) DO UPDATE").
 		Set("color = excluded.color").
 		Set("description = excluded.description")
 	if TenantOrgIDFromCtx(ctx) != uuid.Nil {
-		query = query.On("CONFLICT(org_id, name) DO UPDATE")
-	} else {
-		query = query.On("CONFLICT(name) DO UPDATE")
+		query = query.Value("org_id", "?", TenantOrgIDFromCtx(ctx).String())
 	}
 	_, err := query.Exec(ctx)
 	return err
@@ -347,11 +346,11 @@ func (s *Store) ensureTagColors(ctx context.Context, tags []string) error {
 }
 
 func (s *Store) insertTagIfMissing(ctx context.Context, name, color string) error {
-	query := s.bun.NewInsert().Model(&tagModel{Name: name, Color: color})
+	query := s.bun.NewInsert().
+		Model(&tagModel{Name: name, Color: color}).
+		On("CONFLICT (name) DO NOTHING")
 	if TenantOrgIDFromCtx(ctx) != uuid.Nil {
-		query = query.On("CONFLICT (org_id, name) DO NOTHING")
-	} else {
-		query = query.On("CONFLICT (name) DO NOTHING")
+		query = query.Value("org_id", "?", TenantOrgIDFromCtx(ctx).String())
 	}
 	_, err := query.Exec(ctx)
 	return err
