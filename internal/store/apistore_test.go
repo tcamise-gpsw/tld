@@ -219,6 +219,34 @@ func TestApplyPlanAutoLayoutsUnpositionedPlacements(t *testing.T) {
 	}
 }
 
+func TestApplyPlanCreatesMissingConnectorWithPlannedID(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	connectorID := int32(77)
+
+	resp, err := NewAPIAdapter(sqliteStore).ApplyPlan(context.Background(), uuid.Nil, &diagv1.ApplyPlanRequest{
+		Elements: []*diagv1.PlanElement{
+			{Ref: "api", Name: "API", Placements: []*diagv1.PlanViewPlacement{{ParentRef: "root"}}},
+			{Ref: "db", Name: "DB", Placements: []*diagv1.PlanViewPlacement{{ParentRef: "root"}}},
+		},
+		Connectors: []*diagv1.PlanConnector{{
+			Id:               &connectorID,
+			Ref:              "api-db",
+			ViewRef:          "root",
+			SourceElementRef: "api",
+			TargetElementRef: "db",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.GetConnectorResults()[0].GetId(); got != 77 {
+		t.Fatalf("connector result id = %d, want 77", got)
+	}
+	if _, err := NewAPIAdapter(sqliteStore).GetConnector(context.Background(), 77, uuid.Nil); err != nil {
+		t.Fatalf("connector 77 was not created: %v", err)
+	}
+}
+
 func TestApplyPlanPreservesExplicitPlacementCoordinates(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	x, y := 42.0, 84.0
