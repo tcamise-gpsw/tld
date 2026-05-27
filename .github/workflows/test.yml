@@ -139,18 +139,9 @@ jobs:
           DEBUG: pw:install
         run: |
           set -euo pipefail
-          for attempt in 1 2 3; do
-            echo "Installing Playwright Chromium (attempt ${attempt}/3)"
-            if timeout 8m npx playwright install chromium; then
-              npx playwright --version
-              exit 0
-            fi
-            status=$?
-            echo "Playwright Chromium install attempt ${attempt} failed with status ${status}"
-            rm -rf ~/.cache/ms-playwright/chromium-* ~/.cache/ms-playwright/chrome-*
-            sleep $((attempt * 5))
-          done
-          exit 1
+          npx playwright install chromium
+          npx playwright --version
+          du -sh ~/.cache/ms-playwright || true
 
       - name: Build E2E binary
         run: go build -o /tmp/tld-e2e ./cmd/tld
