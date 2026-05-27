@@ -1,4 +1,3 @@
-/* eslint-disable */
 export namespace main {
 	
 	export class DialogFilter {
@@ -47,3 +46,4 @@ export namespace main {
 	}
 
 }
+

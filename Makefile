@@ -1,6 +1,6 @@
 TASK = go tool task
 
-.PHONY: setup-hooks frontend-deps frontend-build lint-be lint-fe be fe dev dev-stop proto test build go run clean
+.PHONY: setup-hooks frontend-deps frontend-build lint-be lint-fe be fe dev dev-stop proto test build go run clean wails-build wails-dev
 
 setup-hooks:
 	$(TASK) setup-hooks
@@ -43,6 +43,12 @@ go:
 
 run:
 	$(TASK) run
+
+wails-build:
+	$(TASK) wails-build
+
+wails-dev:
+	$(TASK) wails-dev
 
 clean:
 	$(TASK) clean
