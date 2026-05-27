@@ -9,6 +9,10 @@ on:
   schedule:
     - cron: '15 22 * * *'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   checks: write
@@ -72,6 +76,7 @@ jobs:
 
   e2e-tests:
     name: Playwright E2E Tests
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -128,6 +133,7 @@ jobs:
 
   keploy-tests:
     name: Keploy API Replay Tests
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
