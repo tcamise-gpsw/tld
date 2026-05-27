@@ -1,6 +1,6 @@
 {
   "name": "@tldiagram/core-ui",
-  "version": "2.2.0-alpha.4",
+  "version": "2.2.0",
   "type": "module",
   "repository": {
     "type": "git",
