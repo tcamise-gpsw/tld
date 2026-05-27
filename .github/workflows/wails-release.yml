@@ -71,6 +71,7 @@ jobs:
           
           # Sign the app bundle using the Hardened Runtime
           codesign --force --deep --options runtime --sign "$IDENTITY_NAME" --timestamp cmd/tld-app/build/bin/tld.app
+          codesign --verify --deep --strict --verbose=2 cmd/tld-app/build/bin/tld.app
           
           # Extract Team ID dynamically from the identity string
           TEAM_ID=$(echo "$IDENTITY_NAME" | grep -oE '\([A-Z0-9]{10}\)' | tr -d '()')
@@ -79,24 +80,68 @@ jobs:
           echo "IDENTITY_NAME=$IDENTITY_NAME" >> $GITHUB_ENV
 
       - name: Notarize macOS App
+        timeout-minutes: 35
         run: |
           # Package the app into a zip for submission to Apple
           ditto -c -k --keepParent cmd/tld-app/build/bin/tld.app cmd/tld-app/build/bin/tld_mac.zip
           
-          # Submit to Apple's notarization service
-          xcrun notarytool submit cmd/tld-app/build/bin/tld_mac.zip \
+          # Submit to Apple's notarization service, then poll explicitly so CI
+          # prints useful status and can fetch Apple's log on failure.
+          SUBMISSION_JSON=$(xcrun notarytool submit cmd/tld-app/build/bin/tld_mac.zip \
             --apple-id "mertcikla@gmail.com" \
             --password "${{ secrets.APPLE_PASSWORD }}" \
             --team-id "${{ env.TEAM_ID }}" \
-            --wait
-            
+            --output-format json)
+          SUBMISSION_ID=$(echo "$SUBMISSION_JSON" | jq -r '.id')
+          if [ -z "$SUBMISSION_ID" ] || [ "$SUBMISSION_ID" = "null" ]; then
+            echo "Failed to read notarization submission ID."
+            echo "$SUBMISSION_JSON"
+            exit 1
+          fi
+          echo "Notarization submission ID: $SUBMISSION_ID"
+
+          for attempt in {1..60}; do
+            if ! INFO_JSON=$(xcrun notarytool info "$SUBMISSION_ID" \
+              --apple-id "mertcikla@gmail.com" \
+              --password "${{ secrets.APPLE_PASSWORD }}" \
+              --team-id "${{ env.TEAM_ID }}" \
+              --output-format json); then
+              echo "Unable to fetch notarization status ($attempt/60). Retrying..."
+              sleep 30
+              continue
+            fi
+            STATUS=$(echo "$INFO_JSON" | jq -r '.status')
+            echo "Notarization status ($attempt/60): $STATUS"
+
+            if [ "$STATUS" = "Accepted" ]; then
+              break
+            fi
+
+            if [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "Rejected" ]; then
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "mertcikla@gmail.com" \
+                --password "${{ secrets.APPLE_PASSWORD }}" \
+                --team-id "${{ env.TEAM_ID }}"
+              exit 1
+            fi
+
+            if [ "$attempt" -eq 60 ]; then
+              echo "Timed out waiting for notarization after 30 minutes."
+              echo "$INFO_JSON"
+              exit 1
+            fi
+
+            sleep 30
+          done
+
           # Staple the notarization ticket to the app bundle
           xcrun stapler staple cmd/tld-app/build/bin/tld.app
+          xcrun stapler validate cmd/tld-app/build/bin/tld.app
 
       - name: Package macOS App for Release
         run: |
           cd cmd/tld-app/build/bin
-          zip -r ../../../../tld-macos-universal.zip tld.app
+          ditto -c -k --keepParent tld.app ../../../../tld-macos-universal.zip
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
