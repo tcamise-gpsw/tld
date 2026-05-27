@@ -4,6 +4,21 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v* tag to publish release assets to
+        required: true
+        type: string
+      target:
+        description: Platform release job to run
+        required: true
+        default: windows
+        type: choice
+        options:
+          - windows
+          - macos
+          - all
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,13 +27,19 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+
 jobs:
   build-macos:
     name: Build & Sign macOS App
+    if: ${{ github.event_name == 'push' || github.event.inputs.target == 'macos' || github.event.inputs.target == 'all' }}
     runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -38,7 +59,7 @@ jobs:
 
       - name: Update Version in wails.json
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           echo "Updating wails.json version to $VERSION"
           jq --arg ver "$VERSION" '.info.productVersion = $ver' cmd/tld-app/wails.json > tmp.json && mv tmp.json cmd/tld-app/wails.json
 
@@ -146,6 +167,7 @@ jobs:
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: tld-macos-universal.zip
           fail_on_unmatched_files: true
         env:
@@ -153,10 +175,13 @@ jobs:
 
   build-windows:
     name: Build Windows App
+    if: ${{ github.event_name == 'push' || github.event.inputs.target == 'windows' || github.event.inputs.target == 'all' }}
     runs-on: windows-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -178,7 +203,7 @@ jobs:
       - name: Update Version in wails.json
         shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           echo "Updating wails.json version to $VERSION"
           jq --arg ver "$VERSION" '.info.productVersion = $ver' cmd/tld-app/wails.json > tmp.json && mv tmp.json cmd/tld-app/wails.json
 
@@ -190,10 +215,16 @@ jobs:
         shell: bash
         run: cd frontend && npm run build:app
 
+      - name: Install NSIS
+        shell: bash
+        run: choco install nsis -y --no-progress
+
       - name: Build Windows App
         shell: bash
         run: |
           cd cmd/tld-app
+          command -v makensis
+          makensis -VERSION
           wails build -platform windows/amd64 -nsis -s
 
       - name: Prepare Windows Release Asset
@@ -213,6 +244,7 @@ jobs:
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: tld-windows-amd64-installer.exe
           fail_on_unmatched_files: true
         env:
