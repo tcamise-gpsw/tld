@@ -68,11 +68,11 @@ jobs:
             exit 1
           fi
           echo "Using signing identity: $IDENTITY_NAME"
-          
+
           # Sign the app bundle using the Hardened Runtime
           codesign --force --deep --options runtime --sign "$IDENTITY_NAME" --timestamp cmd/tld-app/build/bin/tld.app
           codesign --verify --deep --strict --verbose=2 cmd/tld-app/build/bin/tld.app
-          
+
           # Extract Team ID dynamically from the identity string
           TEAM_ID=$(echo "$IDENTITY_NAME" | grep -oE '\([A-Z0-9]{10}\)' | tr -d '()')
           echo "Extracted Team ID: $TEAM_ID"
@@ -84,7 +84,7 @@ jobs:
         run: |
           # Package the app into a zip for submission to Apple
           ditto -c -k --keepParent cmd/tld-app/build/bin/tld.app cmd/tld-app/build/bin/tld_mac.zip
-          
+
           # Submit to Apple's notarization service, then poll explicitly so CI
           # prints useful status and can fetch Apple's log on failure.
           SUBMISSION_JSON=$(xcrun notarytool submit cmd/tld-app/build/bin/tld_mac.zip \
@@ -147,6 +147,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: tld-macos-universal.zip
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -195,9 +196,24 @@ jobs:
           cd cmd/tld-app
           wails build -platform windows/amd64 -nsis -s
 
+      - name: Prepare Windows Release Asset
+        shell: bash
+        run: |
+          echo "Wails build output:"
+          find cmd/tld-app/build/bin -maxdepth 1 -type f -print
+
+          mapfile -t installers < <(find cmd/tld-app/build/bin -maxdepth 1 -type f -iname '*installer*.exe' -print)
+          if [ "${#installers[@]}" -ne 1 ]; then
+            echo "Expected exactly one Windows installer, found ${#installers[@]}."
+            exit 1
+          fi
+
+          cp "${installers[0]}" tld-windows-amd64-installer.exe
+
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: cmd/tld-app/build/bin/tld-amd64-installer.exe
+          files: tld-windows-amd64-installer.exe
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
