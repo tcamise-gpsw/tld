@@ -38,6 +38,12 @@ jobs:
           echo "Updating wails.json version to $VERSION"
           jq --arg ver "$VERSION" '.info.productVersion = $ver' cmd/tld-app/wails.json > tmp.json && mv tmp.json cmd/tld-app/wails.json
 
+      - name: Install Frontend Dependencies
+        run: cd frontend && npm ci
+
+      - name: Build Frontend Assets
+        run: cd frontend && npm run build:app
+
       - name: Import Apple Certificates
         uses: apple-actions/import-codesign-certs@v3
         with:
@@ -47,7 +53,7 @@ jobs:
       - name: Build macOS App
         run: |
           cd cmd/tld-app
-          wails build -platform darwin/universal
+          wails build -platform darwin/universal -s
 
       - name: Sign macOS App
         run: |
@@ -126,11 +132,19 @@ jobs:
           echo "Updating wails.json version to $VERSION"
           jq --arg ver "$VERSION" '.info.productVersion = $ver' cmd/tld-app/wails.json > tmp.json && mv tmp.json cmd/tld-app/wails.json
 
+      - name: Install Frontend Dependencies
+        shell: bash
+        run: cd frontend && npm ci
+
+      - name: Build Frontend Assets
+        shell: bash
+        run: cd frontend && npm run build:app
+
       - name: Build Windows App
         shell: bash
         run: |
           cd cmd/tld-app
-          wails build -platform windows/amd64 -nsis
+          wails build -platform windows/amd64 -nsis -s
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2

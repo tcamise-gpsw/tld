@@ -118,12 +118,17 @@ tasks:
 
   wails-build:
     desc: Compile and package the Wails desktop application
+    deps:
+      - frontend-build
     cmds:
-      - cd cmd/tld-app && wails build
+      - cd cmd/tld-app && wails build -s
 
   wails-dev:
     desc: Run the Wails desktop application in development mode
+    deps:
+      - frontend-deps
     cmds:
+      - mkdir -p frontend/dist && touch frontend/dist/placeholder
       - cd cmd/tld-app && wails dev
 
   clean:
