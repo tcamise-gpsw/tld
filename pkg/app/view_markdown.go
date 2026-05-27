@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 )
 
 type ViewMarkdownDocument struct {
@@ -13,40 +14,38 @@ type ViewMarkdownDocument struct {
 }
 
 func (s *Store) viewMarkdownMap(ctx context.Context) (map[int64]*ViewMarkdownDocument, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT view_id, path, is_managed, updated_at FROM view_markdown_documents ORDER BY view_id`)
-	if err != nil {
+	if err := s.ensureViewMarkdownTable(ctx); err != nil {
+		return nil, err
+	}
+	var rows []viewMarkdownModel
+	if err := s.bun.NewSelect().Model(&rows).Order("view_id").Scan(ctx); err != nil {
 		if stringsContainsNoSuchTable(err) {
 			return map[int64]*ViewMarkdownDocument{}, nil
 		}
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make(map[int64]*ViewMarkdownDocument)
-	for rows.Next() {
-		var viewID int64
-		var doc ViewMarkdownDocument
-		if err := rows.Scan(&viewID, &doc.Path, &doc.IsManaged, &doc.UpdatedAt); err != nil {
-			return nil, err
-		}
-		docCopy := doc
-		out[viewID] = &docCopy
+	out := make(map[int64]*ViewMarkdownDocument, len(rows))
+	for _, row := range rows {
+		out[row.ViewID] = viewMarkdownDocumentFromModel(row)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) ViewMarkdownByViewID(ctx context.Context, viewID int64) (*ViewMarkdownDocument, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT path, is_managed, updated_at FROM view_markdown_documents WHERE view_id = ?`, viewID)
-	var doc ViewMarkdownDocument
-	if err := row.Scan(&doc.Path, &doc.IsManaged, &doc.UpdatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		if stringsContainsNoSuchTable(err) {
+	if err := s.ensureViewMarkdownTable(ctx); err != nil {
+		return nil, err
+	}
+	var row viewMarkdownModel
+	if err := s.bun.NewSelect().
+		Model(&row).
+		Where("view_id = ?", viewID).
+		Scan(ctx); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || stringsContainsNoSuchTable(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &doc, nil
+	return viewMarkdownDocumentFromModel(row), nil
 }
 
 func (s *Store) UpsertViewMarkdown(ctx context.Context, viewID int64, path string, isManaged bool, updatedAt string) error {
@@ -56,14 +55,20 @@ func (s *Store) UpsertViewMarkdown(ctx context.Context, viewID int64, path strin
 	if err := s.ensureViewMarkdownTable(ctx); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO view_markdown_documents(view_id, path, is_managed, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(view_id) DO UPDATE SET
-			path = excluded.path,
-			is_managed = excluded.is_managed,
-			updated_at = excluded.updated_at
-	`, viewID, path, isManaged, updatedAt, updatedAt)
+	row := &viewMarkdownModel{
+		ViewID:    viewID,
+		Path:      path,
+		IsManaged: isManaged,
+		CreatedAt: updatedAt,
+		UpdatedAt: updatedAt,
+	}
+	_, err := s.bun.NewInsert().
+		Model(row).
+		On("CONFLICT(view_id) DO UPDATE").
+		Set("path = EXCLUDED.path").
+		Set("is_managed = EXCLUDED.is_managed").
+		Set("updated_at = EXCLUDED.updated_at").
+		Exec(ctx)
 	return err
 }
 
@@ -74,22 +79,39 @@ func (s *Store) DeleteViewMarkdown(ctx context.Context, viewID int64) error {
 		}
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM view_markdown_documents WHERE view_id = ?`, viewID)
+	_, err := s.bun.NewDelete().
+		Model((*viewMarkdownModel)(nil)).
+		Where("view_id = ?", viewID).
+		Exec(ctx)
 	return err
 }
 
 func (s *Store) ensureViewMarkdownTable(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS view_markdown_documents (
 			view_id INTEGER PRIMARY KEY,
+			org_id TEXT NULL,
 			path TEXT NOT NULL,
 			is_managed INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			FOREIGN KEY (view_id) REFERENCES views(id) ON DELETE CASCADE
 		)
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE view_markdown_documents ADD COLUMN org_id TEXT NULL`); err != nil && !isDuplicateColumnError(err) {
+		return err
+	}
+	return nil
+}
+
+func viewMarkdownDocumentFromModel(row viewMarkdownModel) *ViewMarkdownDocument {
+	return &ViewMarkdownDocument{
+		Path:      row.Path,
+		IsManaged: row.IsManaged,
+		UpdatedAt: row.UpdatedAt,
+	}
 }
 
 func stringsContainsNoSuchTable(err error) bool {
@@ -97,6 +119,15 @@ func stringsContainsNoSuchTable(err error) bool {
 }
 
 func containsNoSuchTable(message string) bool {
-	return message == "SQL logic error: no such table: view_markdown_documents (1)" ||
-		message == "SQL logic error: no such table: view_markdown_documents"
+	return strings.Contains(message, "no such table: view_markdown_documents") ||
+		strings.Contains(message, `relation "view_markdown_documents" does not exist`)
+}
+
+func isDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "duplicate column name: org_id") ||
+		strings.Contains(message, `column "org_id" of relation "view_markdown_documents" already exists`)
 }

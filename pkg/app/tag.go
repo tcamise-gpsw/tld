@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/mertcikla/tld/v2/internal/tagcolors"
 	"github.com/uptrace/bun"
 )
@@ -159,12 +160,16 @@ func (s *Store) Tags(ctx context.Context) (map[string]Tag, error) {
 
 func (s *Store) UpdateTag(ctx context.Context, name, color string, description *string) error {
 	row := &tagModel{Name: name, Color: color, Description: description}
-	_, err := s.bun.NewInsert().
+	query := s.bun.NewInsert().
 		Model(row).
-		On("CONFLICT(name) DO UPDATE").
 		Set("color = excluded.color").
-		Set("description = excluded.description").
-		Exec(ctx)
+		Set("description = excluded.description")
+	if TenantOrgIDFromCtx(ctx) != uuid.Nil {
+		query = query.On("CONFLICT(org_id, name) DO UPDATE")
+	} else {
+		query = query.On("CONFLICT(name) DO UPDATE")
+	}
+	_, err := query.Exec(ctx)
 	return err
 }
 
@@ -310,5 +315,44 @@ func (s *Store) pickUnusedColor(ctx context.Context, usedColors []string) string
 }
 
 func (s *Store) ensureTagColors(ctx context.Context, tags []string) error {
-	return tagcolors.EnsureBun(ctx, s.bun, tags)
+	if len(tags) == 0 {
+		return nil
+	}
+	existingTags, err := s.Tags(ctx)
+	if err != nil {
+		return err
+	}
+	existing := map[string]struct{}{}
+	var usedColors []string
+	for name, tag := range existingTags {
+		existing[name] = struct{}{}
+		usedColors = append(usedColors, tag.Color)
+	}
+	for _, name := range tags {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := existing[name]; ok {
+			continue
+		}
+		color := tagcolors.PickUnusedColor(usedColors)
+		if err := s.insertTagIfMissing(ctx, name, color); err != nil {
+			return err
+		}
+		usedColors = append(usedColors, color)
+		existing[name] = struct{}{}
+	}
+	return nil
+}
+
+func (s *Store) insertTagIfMissing(ctx context.Context, name, color string) error {
+	query := s.bun.NewInsert().Model(&tagModel{Name: name, Color: color})
+	if TenantOrgIDFromCtx(ctx) != uuid.Nil {
+		query = query.On("CONFLICT (org_id, name) DO NOTHING")
+	} else {
+		query = query.On("CONFLICT (name) DO NOTHING")
+	}
+	_, err := query.Exec(ctx)
+	return err
 }

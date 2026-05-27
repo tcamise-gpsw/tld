@@ -12,6 +12,7 @@ import (
 
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"github.com/google/uuid"
+	"github.com/mertcikla/tld/v2/pkg/app"
 )
 
 // ErrUnimplemented is returned by Store methods that are not supported by a
@@ -31,7 +32,11 @@ func WorkspaceIDFromCtx(ctx context.Context) uuid.UUID {
 
 // WithWorkspaceID returns a context carrying the given org ID.
 func WithWorkspaceID(ctx context.Context, id uuid.UUID) context.Context {
-	return context.WithValue(ctx, ctxKeyWorkspaceID, id)
+	ctx = context.WithValue(ctx, ctxKeyWorkspaceID, id)
+	if id != uuid.Nil {
+		ctx = app.WithTenantOrgID(ctx, id)
+	}
+	return ctx
 }
 
 // ElementInput holds mutable fields for element create/update.

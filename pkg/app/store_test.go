@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	assets "github.com/mertcikla/tld/v2"
 	"github.com/mertcikla/tld/v2/internal/tagcolors"
 )
@@ -148,6 +149,102 @@ func TestStoreConnectorsPreserveHandlesAndPatchDefaults(t *testing.T) {
 
 	if _, err := store.UpdateConnector(ctx, 999999, Connector{Label: &updatedLabel}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing connector update error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestStoreTenantScopeInjectsOrgIDAndFiltersCoreModels(t *testing.T) {
+	store := openAppStore(t)
+	ctx := context.Background()
+
+	localView, err := store.CreateView(ctx, "Local", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var localOrgID sql.NullString
+	if err := store.DB().QueryRowContext(ctx, `SELECT org_id FROM views WHERE id = ?`, localView.ID).Scan(&localOrgID); err != nil {
+		t.Fatal(err)
+	}
+	if localOrgID.Valid {
+		t.Fatalf("local view org_id = %q, want NULL without tenant scope", localOrgID.String)
+	}
+
+	orgA := uuid.New()
+	orgB := uuid.New()
+	ctxA := WithTenantOrgID(ctx, orgA)
+	ctxB := WithTenantOrgID(ctx, orgB)
+
+	viewA, err := store.CreateView(ctxA, "Tenant A", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewB, err := store.CreateView(ctxB, "Tenant B", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elementA, err := store.CreateElement(ctxA, LibraryElement{Name: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetA, err := store.CreateElement(ctxA, LibraryElement{Name: "Target A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectorA, err := store.CreateConnector(ctxA, Connector{
+		ViewID:          viewA.ID,
+		SourceElementID: elementA.ID,
+		TargetElementID: targetA.ID,
+		Direction:       "forward",
+		Style:           "bezier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertOrgID := func(table string, id int64, want uuid.UUID) {
+		t.Helper()
+		var got string
+		if err := store.DB().QueryRowContext(ctx, `SELECT org_id FROM `+table+` WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want.String() {
+			t.Fatalf("%s id %d org_id = %q, want %q", table, id, got, want.String())
+		}
+	}
+	assertOrgID("views", viewA.ID, orgA)
+	assertOrgID("elements", elementA.ID, orgA)
+	assertOrgID("connectors", connectorA.ID, orgA)
+
+	viewsA, err := store.ViewTree(ctxA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flatA := flattenTree(viewsA)
+	if len(flatA) != 1 || flatA[0].ID != viewA.ID {
+		t.Fatalf("tenant A views = %+v, want only view %d", flatA, viewA.ID)
+	}
+	if _, err := store.ViewByID(ctxA, viewB.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("tenant A ViewByID(tenant B) err = %v, want sql.ErrNoRows", err)
+	}
+
+	if err := store.UpsertViewMarkdown(ctxA, viewA.ID, "a.md", true, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertViewMarkdown(ctxB, viewB.ID, "b.md", true, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	var markdownOrgID string
+	if err := store.DB().QueryRowContext(ctx, `SELECT org_id FROM view_markdown_documents WHERE view_id = ?`, viewA.ID).Scan(&markdownOrgID); err != nil {
+		t.Fatal(err)
+	}
+	if markdownOrgID != orgA.String() {
+		t.Fatalf("view markdown org_id = %q, want %q", markdownOrgID, orgA.String())
+	}
+	markdownA, err := store.viewMarkdownMap(ctxA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(markdownA) != 1 || markdownA[viewA.ID] == nil || markdownA[viewA.ID].Path != "a.md" {
+		t.Fatalf("tenant A markdown = %+v, want only a.md", markdownA)
 	}
 }
 

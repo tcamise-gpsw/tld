@@ -270,7 +270,7 @@ func (s *Store) ViewDensityLevel(ctx context.Context, viewID int64) (int, error)
 		DensityLevel int `bun:"density_level"`
 	}
 	err := s.bun.NewSelect().
-		Table("views").
+		Model((*viewModel)(nil)).
 		Column("density_level").
 		Where("id = ?", viewID).
 		Scan(ctx, &row)
@@ -285,7 +285,7 @@ func (s *Store) SetViewDensityLevel(ctx context.Context, viewID int64, level int
 		return err
 	}
 	res, err := s.bun.NewUpdate().
-		Table("views").
+		Model((*viewModel)(nil)).
 		Set("density_level = ?", level).
 		Set("updated_at = ?", nowString()).
 		Where("id = ?", viewID).

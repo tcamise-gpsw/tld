@@ -7,6 +7,8 @@ import (
 	"maps"
 	"sort"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type ViewTreeNode struct {
@@ -115,14 +117,17 @@ func (s *Store) parentViewMap(ctx context.Context, rows []viewRow) (map[int64]*i
 		ElementID int64 `bun:"element_id"`
 		ViewID    int64 `bun:"view_id"`
 	}
-	if err := s.bun.NewSelect().
+	query := s.bun.NewSelect().
 		TableExpr("placements AS p").
 		Distinct().
 		ColumnExpr("p.element_id, p.view_id").
 		Join("JOIN views AS v ON v.owner_element_id = p.element_id").
 		Order("p.element_id").
-		Order("p.view_id").
-		Scan(ctx, &placementRows); err != nil {
+		Order("p.view_id")
+	if orgID := TenantOrgIDFromCtx(ctx); orgID != uuid.Nil {
+		query = query.Where("v.org_id = ?", orgID)
+	}
+	if err := query.Scan(ctx, &placementRows); err != nil {
 		return nil, err
 	}
 	for _, row := range placementRows {
@@ -358,15 +363,16 @@ func (s *Store) ChildViews(ctx context.Context, parentViewID int64) ([]ViewTreeN
 		return nil, err
 	}
 	var rows []viewModel
-	if err := s.bun.NewSelect().
-		TableExpr("views AS v").
+	query := s.bun.NewSelect().
+		Model(&rows).
+		ModelTableExpr("views AS v").
 		Distinct().
 		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at").
 		Join("JOIN placements AS p ON p.element_id = v.owner_element_id").
 		Where("p.view_id = ?", parentViewID).
 		Where("v.id != ?", parentViewID).
-		Order("v.id").
-		Scan(ctx, &rows); err != nil {
+		Order("v.id")
+	if err := query.Scan(ctx); err != nil {
 		return nil, err
 	}
 	out := []ViewTreeNode{}
@@ -384,12 +390,13 @@ func (s *Store) RootViews(ctx context.Context) ([]ViewTreeNode, error) {
 		return nil, err
 	}
 	var rows []viewModel
-	if err := s.bun.NewSelect().
-		TableExpr("views AS v").
+	query := s.bun.NewSelect().
+		Model(&rows).
+		ModelTableExpr("views AS v").
 		ColumnExpr("v.id, v.owner_element_id, v.name, v.description, v.level_label, v.tags, v.level, v.created_at, v.updated_at").
 		Where("v.owner_element_id IS NULL OR NOT EXISTS (SELECT 1 FROM placements p WHERE p.element_id = v.owner_element_id AND p.view_id != v.id)").
-		Order("v.id").
-		Scan(ctx, &rows); err != nil {
+		Order("v.id")
+	if err := query.Scan(ctx); err != nil {
 		return nil, err
 	}
 	out := []ViewTreeNode{}

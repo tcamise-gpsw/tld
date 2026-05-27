@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type LibraryElement struct {
@@ -224,14 +226,17 @@ func (s *Store) DeleteElement(ctx context.Context, id int64) error {
 
 func (s *Store) ListElementPlacements(ctx context.Context, elementID int64) ([]ViewPlacement, error) {
 	var rows []ViewPlacement
-	if err := s.bun.NewSelect().
+	query := s.bun.NewSelect().
 		TableExpr("placements AS p").
 		ColumnExpr("p.view_id").
 		ColumnExpr("v.name AS view_name").
 		Join("JOIN views AS v ON v.id = p.view_id").
 		Where("p.element_id = ?", elementID).
-		Order("p.view_id").
-		Scan(ctx, &rows); err != nil {
+		Order("p.view_id")
+	if orgID := TenantOrgIDFromCtx(ctx); orgID != uuid.Nil {
+		query = query.Where("v.org_id = ?", orgID)
+	}
+	if err := query.Scan(ctx, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
