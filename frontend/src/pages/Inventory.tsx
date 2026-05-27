@@ -905,7 +905,7 @@ export default function Inventory() {
                 <Box minW="720px">
                   {/* Sortable header */}
                   <Flex
-                    h={selectedKeys.size > 0 ? '48px' : '48px'}
+                    h={selectedKeys.size > 0 ? '40px' : '40px'}
                     px={4}
                     align="center"
                     borderBottom="1px solid"
