@@ -58,13 +58,20 @@ jobs:
           go mod tidy
           git diff --exit-code
 
-      - name: Run unit tests with race detection
+      - name: Run Go unit tests
         run: |
           go install gotest.tools/gotestsum@latest
           gotestsum \
             --junitfile results.xml \
             --format testdox \
             ./...
+
+      - name: Run frontend unit tests
+        working-directory: frontend
+        run: npm run test
+
+      - name: Run targeted Go race tests
+        run: go test -race ./internal/server ./internal/watch ./pkg/api
 
       - name: Publish Test Results
         if: ${{ !cancelled() }}

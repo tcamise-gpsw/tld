@@ -1,4 +1,6 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type APIResponse, type Locator, type Page } from '@playwright/test'
+
+const e2eOrgId = '11111111-1111-1111-1111-111111111111'
 
 export const onboardingStorage = {
   editor: 'diagrameditor_tutorial_v1_core',
@@ -29,6 +31,12 @@ export function uniqueName(prefix: string) {
 }
 
 export async function createDiagram(page: Page, name = uniqueName('E2E Diagram')) {
+  const view = await createApiView(page, name)
+  await gotoView(page, view.id)
+  return { name, id: view.id }
+}
+
+export async function createDiagramFromGrid(page: Page, name = uniqueName('E2E Diagram')) {
   await page.goto('/views?view=hierarchy')
   await page.getByTestId('views-new-diagram-button').click()
   await page.getByTestId('views-new-diagram-name-input').fill(name)
@@ -237,9 +245,9 @@ export async function createPlacedElement(page: Page, viewId: number, data: Para
 
 export async function createApiView(page: Page, name = uniqueName('API Diagram'), ownerElementId?: number) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/CreateView', {
-    data: { name, ownerElementId },
+    data: { orgId: e2eOrgId, name, ownerElementId },
   })
-  expect(response.ok()).toBeTruthy()
+  await expectResponseOk(response, 'create view')
   const json = await response.json()
   return json.view as { id: number; name: string; ownerElementId?: number | null }
 }
@@ -264,9 +272,15 @@ export async function updateView(page: Page, viewId: number, data: { name?: stri
 
 export async function deleteView(page: Page, viewId: number) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/DeleteView', {
-    data: { viewId },
+    data: { orgId: e2eOrgId, viewId },
   })
   expect(response.ok()).toBeTruthy()
+}
+
+async function expectResponseOk(response: APIResponse, action: string) {
+  if (!response.ok()) {
+    throw new Error(`${action} failed with ${response.status()}: ${await response.text()}`)
+  }
 }
 
 export async function gotoView(page: Page, viewId: number) {

@@ -1,18 +1,14 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   addExistingNodeWithInlineSearch,
   addNodeWithToolbar,
   createDiagram,
   expectPlacement,
   listPlacements,
-  prepareStorage,
   removeNodeFromPanel,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('reuses an existing element in another diagram and removes only that placement', async ({ page }) => {
   const source = await createDiagram(page, uniqueName('Existing Source Diagram'))

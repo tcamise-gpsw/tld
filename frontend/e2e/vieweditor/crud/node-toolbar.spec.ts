@@ -1,16 +1,12 @@
-import { test } from '@playwright/test'
+import { test } from '../../fixtures'
 import {
   addNodeWithToolbar,
   createDiagram,
   deleteSelectedNodeWithKeyboard,
   expectPlacement,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('creates a diagram, adds a node with the toolbar, and deletes it with the keyboard', async ({ page }) => {
   await createDiagram(page, uniqueName('Toolbar CRUD Diagram'))

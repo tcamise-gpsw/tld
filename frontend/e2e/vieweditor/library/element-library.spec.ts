@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   createElement,
@@ -6,13 +6,9 @@ import {
   expectPlacement,
   libraryItemByName,
   nodeByName,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('searches the library and adds an existing catalog element to the canvas', async ({ page }) => {
   const { diagram } = await createAndLoadDiagramWithNodes(page, 0, 'Library Add')

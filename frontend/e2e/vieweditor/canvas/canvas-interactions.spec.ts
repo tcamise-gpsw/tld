@@ -1,17 +1,13 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   expectPlacement,
   listPlacements,
   nodeByName,
-  prepareStorage,
   reactFlowPaneBox,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('clicking the canvas deselects nodes and closes the element panel', async ({ page }) => {
   const { elements } = await createAndLoadDiagramWithNodes(page, 1, 'Canvas Select')

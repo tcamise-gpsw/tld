@@ -1,13 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../fixtures'
 import {
   createApiView,
-  prepareStorage,
   uniqueName,
 } from '../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('creates a diagram from the views grid and opens it', async ({ page }) => {
   await page.goto('/views?view=hierarchy')

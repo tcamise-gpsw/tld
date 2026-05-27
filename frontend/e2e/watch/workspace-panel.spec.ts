@@ -1,13 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   mockWatchRuntime,
-  prepareStorage,
 } from '../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 async function openWorkspacePanel(page: import('@playwright/test').Page) {
   const trigger = page.getByTestId('workspace-watch-trigger').or(page.getByTestId('workspace-versions-trigger')).first()

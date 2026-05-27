@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import { readFile } from 'node:fs/promises'
 import {
   addExistingFromLibrary,
@@ -12,13 +12,9 @@ import {
   listElements,
   nodeByName,
   openElementPanel,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('creates edits connects tags reloads and exports a small diagram', async ({ page }) => {
   const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 1, 'Full Workflow')

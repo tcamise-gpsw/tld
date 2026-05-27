@@ -1,12 +1,11 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '../fixtures'
+import type { Page } from '@playwright/test'
 import {
   createConnectorGraph,
-  prepareStorage,
   uniqueName,
 } from '../helpers/vieweditor'
 
 test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
   await page.addInitScript(() => {
     localStorage.setItem('diag:InventoryDrawer-expanded', 'true')
   })

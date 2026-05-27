@@ -70,6 +70,9 @@ export {
   normalizeTechnologyConnectors,
 } from './client-normalize'
 
+const localWorkspaceOrgId = '11111111-1111-1111-1111-111111111111'
+const orgIdOrLocal = (orgId?: string | null) => orgId || localWorkspaceOrgId
+
 export function watchWebSocketUrl(): string {
   const baseUrl = isWailsApp ? window.__TLD_SERVER_URL__ : window.location.href
   if (isWailsApp && !baseUrl) {
@@ -615,8 +618,8 @@ export const api = {
         return protoElementToLibrary(json.element ?? {})
       }),
 
-    delete: (_orgId: string, id: number): Promise<void> =>
-      rpc(async () => { await workspaceClient.deleteElement({ orgId: '', elementId: id }) }),
+    delete: (orgId: string, id: number): Promise<void> =>
+      rpc(async () => { await workspaceClient.deleteElement({ orgId: orgIdOrLocal(orgId), elementId: id }) }),
 
     merge: (sourceId: number, survivorId: number, resolved: Partial<{
       kind: string | null
@@ -809,6 +812,7 @@ export const api = {
       create: (data: { name: string; label?: string; parent_view_id?: number | null }): Promise<View> =>
         rpc(async () => {
           const res = await workspaceClient.createView({
+            orgId: localWorkspaceOrgId,
             name: data.name,
             levelLabel: data.label ?? undefined,
             ownerElementId: data.parent_view_id ?? undefined,
@@ -966,8 +970,8 @@ export const api = {
         },
       },
 
-      delete: (_orgId: string, id: number): Promise<void> =>
-        rpc(async () => { await workspaceClient.deleteView({ orgId: '', viewId: id }) }),
+      delete: (orgId: string, id: number): Promise<void> =>
+        rpc(async () => { await workspaceClient.deleteView({ orgId: orgIdOrLocal(orgId), viewId: id }) }),
 
       thumbnail: async (id: number): Promise<string | null> => {
         const res = await fetchApiAsset(apiUrl(`/views/${id}/thumbnail.svg`), {
@@ -1121,8 +1125,8 @@ export const api = {
           return protoConnector(json.connector ?? {})
         }),
 
-      delete: (_orgId: string, connectorId: number): Promise<void> =>
-        rpc(async () => { await workspaceClient.deleteConnector({ orgId: '', connectorId }) }),
+      delete: (orgId: string, connectorId: number): Promise<void> =>
+        rpc(async () => { await workspaceClient.deleteConnector({ orgId: orgIdOrLocal(orgId), connectorId }) }),
     },
   },
 
@@ -1271,7 +1275,7 @@ export const api = {
     resources: (orgId: string, data: { elements: PlanElement[]; connectors: PlanConnector[] }): Promise<{ view_id: number; view_url: string }> =>
       rpc(async () => {
         const res = await importClient.importResources({
-          orgId,
+          orgId: orgIdOrLocal(orgId),
           elements: data.elements,
           connectors: data.connectors,
         })

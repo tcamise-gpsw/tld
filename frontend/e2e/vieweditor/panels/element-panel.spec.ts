@@ -1,17 +1,13 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   expectPlacement,
   getElement,
   nodeByName,
   openElementPanel,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('edits element fields and persists them after reload', async ({ page }) => {
   const { elements } = await createAndLoadDiagramWithNodes(page, 1, 'Panel Edit')

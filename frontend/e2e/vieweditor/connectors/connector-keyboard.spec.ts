@@ -1,14 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   expectConnector,
   nodeByName,
-  prepareStorage,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('creates a connector with the E shortcut and target click flow', async ({ page }) => {
   const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 2, 'Keyboard Connector')

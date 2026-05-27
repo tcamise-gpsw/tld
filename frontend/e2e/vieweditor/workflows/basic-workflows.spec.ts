@@ -1,17 +1,13 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   addNodeWithToolbar,
   createAndLoadDiagramWithNodes,
   createDiagram,
   expectPlacement,
   nodeByName,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('empty editor shows a usable canvas and primary panels', async ({ page }) => {
   await createDiagram(page, uniqueName('Empty Editor'))

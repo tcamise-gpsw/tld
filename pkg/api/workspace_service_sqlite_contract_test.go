@@ -1,0 +1,235 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+
+	diagv1connect "buf.build/gen/go/tldiagramcom/diagram/connectrpc/go/diag/v1/diagv1connect"
+	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
+	"connectrpc.com/connect"
+	"github.com/google/uuid"
+	assets "github.com/mertcikla/tld/v2"
+	"github.com/mertcikla/tld/v2/pkg/app"
+)
+
+func TestWorkspaceServiceSQLiteCriticalPathRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	orgID := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	client := newSQLiteWorkspaceClient(t)
+
+	root, err := client.CreateView(ctx, connect.NewRequest(&diagv1.CreateViewRequest{
+		OrgId:      orgID.String(),
+		Name:       "Critical Path",
+		LevelLabel: ptr("System"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	apiElement, err := client.CreateElement(ctx, connect.NewRequest(&diagv1.CreateElementRequest{
+		Name:        "API",
+		Kind:        ptr("service"),
+		Description: ptr("Handles requests"),
+		TechnologyLinks: []*diagv1.TechnologyLink{{
+			Type:          "catalog",
+			Slug:          ptr("go"),
+			Label:         "Go",
+			IsPrimaryIcon: true,
+		}},
+		Tags: []string{"critical", "backend"},
+		Repo: ptr("mertcikla/tld"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbElement, err := client.CreateElement(ctx, connect.NewRequest(&diagv1.CreateElementRequest{
+		Name: "Database",
+		Kind: ptr("database"),
+		Tags: []string{"critical", "storage"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	childView, err := client.CreateView(ctx, connect.NewRequest(&diagv1.CreateViewRequest{
+		OrgId:          orgID.String(),
+		Name:           "API Internals",
+		OwnerElementId: ptr(apiElement.Msg.GetElement().GetId()),
+		LevelLabel:     ptr("Component"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if childView.Msg.GetView().GetOwnerElementId() != apiElement.Msg.GetElement().GetId() {
+		t.Fatalf("child owner = %d, want API element", childView.Msg.GetView().GetOwnerElementId())
+	}
+
+	if _, err := client.CreatePlacement(ctx, connect.NewRequest(&diagv1.CreatePlacementRequest{
+		ViewId:    root.Msg.GetView().GetId(),
+		ElementId: apiElement.Msg.GetElement().GetId(),
+		PositionX: 120,
+		PositionY: 140,
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CreatePlacement(ctx, connect.NewRequest(&diagv1.CreatePlacementRequest{
+		ViewId:    root.Msg.GetView().GetId(),
+		ElementId: dbElement.Msg.GetElement().GetId(),
+		PositionX: 460,
+		PositionY: 140,
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	connector, err := client.CreateConnector(ctx, connect.NewRequest(&diagv1.CreateConnectorRequest{
+		ViewId:          root.Msg.GetView().GetId(),
+		SourceElementId: apiElement.Msg.GetElement().GetId(),
+		TargetElementId: dbElement.Msg.GetElement().GetId(),
+		Label:           ptr("reads"),
+		Direction:       "forward",
+		Style:           "bezier",
+		Tags:            []string{"runtime"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedConnector, err := client.UpdateConnector(ctx, connect.NewRequest(&diagv1.UpdateConnectorRequest{
+		ConnectorId:  connector.Msg.GetConnector().GetId(),
+		Label:        ptr("writes"),
+		Relationship: ptr("SQL"),
+		Style:        "smoothstep",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedConnector.Msg.GetConnector().GetLabel() != "writes" || updatedConnector.Msg.GetConnector().GetStyle() != "smoothstep" {
+		t.Fatalf("updated connector = %+v, want label writes and smoothstep style", updatedConnector.Msg.GetConnector())
+	}
+
+	updatedElement, err := client.UpdateElement(ctx, connect.NewRequest(&diagv1.UpdateElementRequest{
+		ElementId:   apiElement.Msg.GetElement().GetId(),
+		Name:        "API Gateway",
+		Kind:        ptr("service"),
+		Description: ptr("Updated through the shared API"),
+		TechnologyLinks: []*diagv1.TechnologyLink{{
+			Type:          "catalog",
+			Slug:          ptr("go"),
+			Label:         "Go",
+			IsPrimaryIcon: true,
+		}},
+		Tags: []string{"critical", "edge"},
+		Url:  ptr("https://example.com/runbook"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedElement.Msg.GetElement().GetName() != "API Gateway" || updatedElement.Msg.GetElement().GetTags()[1] != "edge" {
+		t.Fatalf("updated element = %+v, want renamed element with tags", updatedElement.Msg.GetElement())
+	}
+
+	search, err := client.ListElements(ctx, connect.NewRequest(&diagv1.ListElementsRequest{Search: "gateway"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search.Msg.GetPagination().GetTotalCount() != 1 || search.Msg.GetElements()[0].GetId() != apiElement.Msg.GetElement().GetId() {
+		t.Fatalf("search response = %+v, want only updated API element", search.Msg)
+	}
+
+	reloaded, err := client.GetView(ctx, connect.NewRequest(&diagv1.GetViewRequest{
+		ViewId:         root.Msg.GetView().GetId(),
+		IncludeContent: true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Msg.GetContent().GetPlacements()) != 2 || len(reloaded.Msg.GetContent().GetConnectors()) != 1 {
+		t.Fatalf("reloaded content = %+v, want two placements and one connector", reloaded.Msg.GetContent())
+	}
+
+	workspace, err := client.GetWorkspace(ctx, connect.NewRequest(&diagv1.GetWorkspaceRequest{
+		OrgId:          orgID.String(),
+		IncludeContent: true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.Msg.GetTotalCount() < 2 || !workspaceHasView(workspace.Msg.GetViews(), root.Msg.GetView().GetId()) || !workspaceHasView(workspace.Msg.GetViews(), childView.Msg.GetView().GetId()) {
+		t.Fatalf("workspace response = %+v, want created root and child views", workspace.Msg)
+	}
+
+	if _, err := client.DeleteConnector(ctx, connect.NewRequest(&diagv1.DeleteConnectorRequest{
+		OrgId:       orgID.String(),
+		ConnectorId: connector.Msg.GetConnector().GetId(),
+	})); err != nil {
+		t.Fatal(err)
+	}
+	afterDelete, err := client.ListConnectors(ctx, connect.NewRequest(&diagv1.ListConnectorsRequest{
+		ViewId: root.Msg.GetView().GetId(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterDelete.Msg.GetConnectors()) != 0 {
+		t.Fatalf("connectors after delete = %+v, want none", afterDelete.Msg.GetConnectors())
+	}
+
+	if _, err := client.DeletePlacement(ctx, connect.NewRequest(&diagv1.DeletePlacementRequest{
+		ViewId:    root.Msg.GetView().GetId(),
+		ElementId: dbElement.Msg.GetElement().GetId(),
+	})); err != nil {
+		t.Fatal(err)
+	}
+	afterPlacementDelete, err := client.GetView(ctx, connect.NewRequest(&diagv1.GetViewRequest{
+		ViewId:         root.Msg.GetView().GetId(),
+		IncludeContent: true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterPlacementDelete.Msg.GetContent().GetPlacements()) != 1 {
+		t.Fatalf("placements after delete = %+v, want one remaining placement", afterPlacementDelete.Msg.GetContent().GetPlacements())
+	}
+	library, err := client.ListElements(ctx, connect.NewRequest(&diagv1.ListElementsRequest{Search: "Database"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if library.Msg.GetPagination().GetTotalCount() != 1 {
+		t.Fatalf("database library search total = %d, want element preserved after placement delete", library.Msg.GetPagination().GetTotalCount())
+	}
+}
+
+func newSQLiteWorkspaceClient(t *testing.T) diagv1connect.WorkspaceServiceClient {
+	t.Helper()
+
+	store, err := app.OpenStore(filepath.Join(t.TempDir(), "tld.db"), assets.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	path, handler := diagv1connect.NewWorkspaceServiceHandler(&WorkspaceService{
+		Store: NewAPIStore(store),
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/api"+path, http.StripPrefix("/api", handler))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	return diagv1connect.NewWorkspaceServiceClient(server.Client(), server.URL+"/api")
+}
+
+func workspaceHasView(views []*diagv1.View, id int32) bool {
+	for _, view := range views {
+		if view.GetId() == id || workspaceHasView(view.GetChildren(), id) {
+			return true
+		}
+	}
+	return false
+}
+
+func ptr[T any](value T) *T {
+	return &value
+}

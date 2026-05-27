@@ -1,15 +1,14 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '../fixtures'
+import type { Page } from '@playwright/test'
 import {
   createApiView,
   createConnector,
   createPlacedElement,
-  prepareStorage,
   uniqueName,
   updateView,
 } from '../helpers/vieweditor'
 
 test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
   await page.addInitScript(() => {
     localStorage.setItem('diag:InventoryDrawer-expanded', 'true')
   })

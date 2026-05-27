@@ -1,16 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   createApiView,
   gotoView,
   nodeByName,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('navigates to a child view from the node zoom control and back from the child node', async ({ page }) => {
   const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 1, 'Keyboard Nav')

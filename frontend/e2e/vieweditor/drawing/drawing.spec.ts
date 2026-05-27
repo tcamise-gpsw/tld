@@ -1,7 +1,6 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
-  prepareStorage,
 } from '../../helpers/vieweditor'
 
 async function drawStroke(page: import('@playwright/test').Page, from: { x: number; y: number }, to: { x: number; y: number }) {
@@ -40,9 +39,6 @@ async function drawStroke(page: import('@playwright/test').Page, from: { x: numb
   })
 }
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('draws a pencil path, hides it, shows it, and exits drawing mode', async ({ page }) => {
   await createAndLoadDiagramWithNodes(page, 0, 'Drawing Basic')

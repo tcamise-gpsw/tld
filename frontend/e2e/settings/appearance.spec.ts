@@ -1,9 +1,4 @@
-import { expect, test } from '@playwright/test'
-import { prepareStorage } from '../helpers/vieweditor'
-
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
+import { expect, test } from '../fixtures'
 
 test('appearance settings persist theme choices in local storage', async ({ page }) => {
   await page.goto('/settings/appearance')
