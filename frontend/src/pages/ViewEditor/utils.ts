@@ -1,4 +1,5 @@
 import type { Connector } from '../../types'
+import { saveBlobAs, saveDataUrlAs, type DialogFilter } from '../../lib/desktop'
 import type { Node as RFNode } from 'reactflow'
 
 // ── Domain-model conversion ────────────────────────────────────────────────
@@ -78,11 +79,17 @@ export function sanitizeExportFilename(value: string) {
   return trimmed.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ')
 }
 
-export function triggerDownload(dataUrl: string, filename: string) {
-  const link = document.createElement('a')
-  link.href = dataUrl
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+export const exportFilters: Record<string, DialogFilter[]> = {
+  mermaid: [{ displayName: 'Mermaid Files (*.mmd;*.mermaid)', pattern: '*.mmd;*.mermaid' }],
+  svg: [{ displayName: 'SVG Files (*.svg)', pattern: '*.svg' }],
+  png: [{ displayName: 'PNG Files (*.png)', pattern: '*.png' }],
+  markdown: [{ displayName: 'Markdown Files (*.md)', pattern: '*.md' }],
+}
+
+export function triggerDownload(dataUrl: string, filename: string, format?: string) {
+  return saveDataUrlAs(dataUrl, filename, format ? exportFilters[format] : undefined)
+}
+
+export function triggerBlobDownload(blob: Blob, filename: string, format?: string) {
+  return saveBlobAs(blob, filename, format ? exportFilters[format] : undefined)
 }

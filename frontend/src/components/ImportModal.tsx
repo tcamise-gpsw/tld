@@ -1,8 +1,9 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import {
   Button,
   FormControl,
   FormLabel,
+  HStack,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -24,6 +25,9 @@ import {
 import { parseMermaidAsync, ParsedImport } from '../pkg/importer/mermaid'
 import { api } from '../api/client'
 import type { PlanConnector, PlanElement } from '@buf/tldiagramcom_diagram.bufbuild_es/diag/v1/workspace_service_pb'
+import { isWailsApp } from '../config/runtime'
+import { mermaidImportFilters, onFileDrop, openTextFile, readTextFile } from '../lib/desktop'
+import { inferImportFileFormat, unsupportedImportFileMessage } from './importFile'
 
 interface Props {
   isOpen: boolean
@@ -52,6 +56,7 @@ function ImportModal({ isOpen, onClose, isImporting, onImport }: Props) {
   const [parsed, setParsed] = useState<ParsedImport | null>(null)
   const [parseError, setParseError] = useState<string | null>(null)
   const [isParsing, setIsParsing] = useState(false)
+  const [isOpeningFile, setIsOpeningFile] = useState(false)
 
   useEffect(() => {
     if (!isOpen) return
@@ -66,6 +71,53 @@ function ImportModal({ isOpen, onClose, isImporting, onImport }: Props) {
     setCode('')
     setParseError(null)
   }
+
+  const loadFileContent = useCallback((path: string, content: string) => {
+    const message = unsupportedImportFileMessage(path)
+    if (message) {
+      setParseError(message)
+      return
+    }
+    const nextFormat = inferImportFileFormat(path)
+    setFormat(nextFormat === 'structurizr' ? 'structurizr' : 'mermaid')
+    setCode(content)
+    setStep('input')
+    setParsed(null)
+    setParseError(null)
+  }, [])
+
+  const handleOpenFile = useCallback(async () => {
+    if (!isWailsApp) return
+    setIsOpeningFile(true)
+    try {
+      const result = await openTextFile(mermaidImportFilters)
+      if (result.canceled) return
+      loadFileContent(result.path, result.content)
+    } catch (error) {
+      setParseError(error instanceof Error ? error.message : 'Failed to open file')
+    } finally {
+      setIsOpeningFile(false)
+    }
+  }, [loadFileContent])
+
+  useEffect(() => {
+    if (!isOpen || !isWailsApp) return undefined
+    return onFileDrop((_x, _y, paths) => {
+      const path = paths[0]
+      if (!path) return
+      void (async () => {
+        setIsOpeningFile(true)
+        try {
+          const result = await readTextFile(path)
+          loadFileContent(result.path, result.content)
+        } catch (error) {
+          setParseError(error instanceof Error ? error.message : 'Failed to open dropped file')
+        } finally {
+          setIsOpeningFile(false)
+        }
+      })()
+    }) ?? undefined
+  }, [isOpen, loadFileContent])
 
   const handleNext = async () => {
     if (!code.trim()) return
@@ -120,8 +172,15 @@ function ImportModal({ isOpen, onClose, isImporting, onImport }: Props) {
         <ModalCloseButton />
         <ModalBody>
           <VStack spacing={4} align="stretch">
+            {step === 'input' && isWailsApp && (
+              <HStack justify="flex-end">
+                <Button size="sm" variant="outline" onClick={handleOpenFile} isLoading={isOpeningFile}>
+                  Open File
+                </Button>
+              </HStack>
+            )}
             {step === 'input' ? (
-              <Tabs onChange={handleTabChange} size="sm" variant="enclosed">
+              <Tabs index={format === 'mermaid' ? 0 : 1} onChange={handleTabChange} size="sm" variant="enclosed">
                 <TabList>
                   <Tab>Mermaid</Tab>
                   <Tab>Structurizr DSL</Tab>

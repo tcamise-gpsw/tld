@@ -9,6 +9,7 @@ import { ElementBody } from './NodeBody'
 import { resolveElementIconUrl } from '../utils/elementIcon'
 import { ZoomInIcon, ZoomOutIcon, TrashIcon as TrashSvg, DrawIcon as EditSvg } from './Icons'
 import { vscodeBridge } from '../lib/vscodeBridge'
+import { openExternalUrl } from '../lib/desktop'
 import type { ExtensionToWebviewMessage } from '../types/vscode-messages'
 import {
   getVisualHandleId,
@@ -778,7 +779,7 @@ function ElementNode({ data, selected }: Props) {
                   if (data.repo) {
                     data.onOpenCodePreview?.(data.element_id)
                   } else if (data.url) {
-                    window.open(data.url, '_blank', 'noopener,noreferrer')
+                    openExternalUrl(data.url)
                   }
                 }}
                 onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}

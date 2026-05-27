@@ -57,7 +57,7 @@ import {
   ListTagColorsResponseSchema,
 } from '@buf/tldiagramcom_diagram.bufbuild_es/diag/v1/org_service_pb'
 import { transport } from './transport'
-import { apiUrl, fetchApiAsset } from '../config/runtime'
+import { apiUrl, fetchApiAsset, isWailsApp } from '../config/runtime'
 import {
   normalizeConnectorRouteStyle,
   normalizeLogoUrl,
@@ -69,6 +69,16 @@ export {
   normalizeLogoUrl,
   normalizeTechnologyConnectors,
 } from './client-normalize'
+
+export function watchWebSocketUrl(): string {
+  const baseUrl = isWailsApp ? window.__TLD_SERVER_URL__ : window.location.href
+  if (isWailsApp && !baseUrl) {
+    throw new Error('Desktop server URL is not configured')
+  }
+  const url = new URL(apiUrl('/watch/ws'), baseUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
 
 async function responseError(res: Response, fallback: string): Promise<Error> {
   const body = await res.json().catch(() => null) as { error?: string; message?: string } | null
@@ -1292,15 +1302,7 @@ export const api = {
       if (!res.ok) throw new Error(`Failed to load watch status: ${res.statusText}`)
       return res.json()
     },
-    websocketUrl: (): string => {
-      let baseUrl = window.location.href
-      if (baseUrl.startsWith('wails://')) {
-        baseUrl = window.__TLD_SERVER_URL__ ?? 'http://127.0.0.1:8060'
-      }
-      const url = new URL(apiUrl('/watch/ws'), baseUrl)
-      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-      return url.toString()
-    },
+    websocketUrl: watchWebSocketUrl,
     repositories: async (): Promise<WatchRepository[]> => {
       const res = await fetch(apiUrl('/watch/repositories'))
       if (!res.ok) throw new Error(`Failed to load watch repositories: ${res.statusText}`)

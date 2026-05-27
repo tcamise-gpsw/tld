@@ -19,6 +19,7 @@ import { getGithubRepoVisibility } from '../utils/githubApi'
 import { parseRepoSlug } from '../utils/url'
 import { useSourceEditor } from '../utils/sourceEditor'
 import { toast } from '../utils/toast'
+import { openExternalUrl } from '../lib/desktop'
 import type { PlacedElement } from '../types'
 
 const GithubIcon = (props: SVGProps<SVGSVGElement>) => (
@@ -302,10 +303,7 @@ export default function CodePreviewPanel({ isOpen, onClose, element, hasBackdrop
           {element?.url && (
             <Tooltip label="Open URL" placement="bottom">
               <Button
-                as="a"
-                href={element.url}
-                target="_blank"
-                rel="noopener noreferrer"
+                onClick={() => openExternalUrl(element.url ?? '')}
                 aria-label="Open URL"
                 leftIcon={<ExternalLinkIcon w="12px" h="12px" />}
                 size="xs"
@@ -338,10 +336,9 @@ export default function CodePreviewPanel({ isOpen, onClose, element, hasBackdrop
           {githubUrl && (
             <Tooltip label="Open in GitHub" placement="bottom">
               <Button
-                as="a"
-                href={isPrivateRepo ? undefined : githubUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+                onClick={() => {
+                  if (!isPrivateRepo && githubUrl) openExternalUrl(githubUrl)
+                }}
                 aria-label="Open in GitHub"
                 leftIcon={<Icon as={GithubIcon} boxSize="13px" />}
                 size="xs"

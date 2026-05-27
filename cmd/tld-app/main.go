@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -62,10 +63,17 @@ func main() {
 		log.Fatalf("failed to sub frontend/dist: %v", err)
 	}
 
+	desktopBridge := NewDesktopBridge()
 	err = wails.Run(&options.App{
 		Title:  "tlDiagram",
 		Width:  1200,
 		Height: 800,
+		OnStartup: func(ctx context.Context) {
+			desktopBridge.startup(ctx)
+		},
+		Bind: []interface{}{
+			desktopBridge,
+		},
 		AssetServer: &assetserver.Options{
 			Assets:  distFS,
 			Handler: app.Handler,

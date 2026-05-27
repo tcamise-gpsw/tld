@@ -27,6 +27,7 @@ import {
 import '@mdxeditor/editor/style.css'
 import { CloseIcon, ReloadIcon, SaveIcon } from './Icons'
 import type { ViewMarkdownDocument } from '../types'
+import { isWailsApp } from '../config/runtime'
 
 interface Props {
   isOpen: boolean
@@ -41,6 +42,7 @@ interface Props {
   isDirty?: boolean
   onChange: (markdown: string) => void
   onSave: (markdown: string) => Promise<void> | void
+  onSaveAs?: (markdown: string) => Promise<void> | void
   onReload?: () => Promise<void> | void
 }
 
@@ -56,6 +58,7 @@ function ViewMarkdownPanel({
   isDirty = false,
   onChange,
   onSave,
+  onSaveAs,
   onReload,
 }: Props) {
   const editorRef = useRef<MDXEditorMethods>(null)
@@ -119,6 +122,20 @@ function ViewMarkdownPanel({
                   />
                 </Box>
               </Tooltip>
+              {isWailsApp && onSaveAs && (
+                <Tooltip label="Save As" hasArrow openDelay={200}>
+                  <Box as="span">
+                    <IconButton
+                      aria-label="Save As"
+                      size="xs"
+                      className="tld-markdown-toolbar-action"
+                      icon={<SaveIcon />}
+                      onClick={() => { void onSaveAs(editorRef.current?.getMarkdown() ?? latestContentRef.current) }}
+                      isDisabled={isLoading || !markdown}
+                    />
+                  </Box>
+                </Tooltip>
+              )}
               <Tooltip label="Close" hasArrow openDelay={200}>
                 <Box as="span">
                   <IconButton
@@ -138,7 +155,7 @@ function ViewMarkdownPanel({
     ]
 
     return base
-  }, [canEdit, isDirty, isLoading, isSaving, markdown, onClose, onReload, onSave])
+  }, [canEdit, isDirty, isLoading, isSaving, markdown, onClose, onReload, onSave, onSaveAs])
 
   if (!isOpen) return null
 

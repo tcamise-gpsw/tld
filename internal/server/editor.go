@@ -68,7 +68,7 @@ func openInEditor(ctx context.Context, store *watch.Store, req openEditorRequest
 
 	cmdPath, err := lookPath(cmdName)
 	if err != nil {
-		return fmt.Errorf("%s command not found in PATH", cmdName)
+		return fmt.Errorf("%s command not found; install the editor command-line tool or add it to PATH", cmdName)
 	}
 	cmd := exec.Command(cmdPath, args...)
 	if err := cmd.Start(); err != nil {
@@ -113,7 +113,7 @@ func resolveEditorPath(ctx context.Context, store repositoryFetcher, repoValue s
 	}
 
 	if len(repos) == 0 {
-		return "", errors.New("no watched repositories are available to resolve this relative file path")
+		return "", errors.New("no watched repositories are configured; add a repository in the Workspace panel before opening source files")
 	}
 
 	repo, ok := matchRepository(repos, repoValue)
@@ -184,8 +184,30 @@ func lookPath(name string) (string, error) {
 				return candidate, nil
 			}
 		}
+		for _, candidate := range darwinAppCommandCandidates(name) {
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+				return candidate, nil
+			}
+		}
 	}
 	return "", exec.ErrNotFound
+}
+
+func darwinAppCommandCandidates(name string) []string {
+	switch name {
+	case "code":
+		return []string{
+			"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+			filepath.Join(os.Getenv("HOME"), "Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"),
+		}
+	case "zed":
+		return []string{
+			"/Applications/Zed.app/Contents/MacOS/cli",
+			filepath.Join(os.Getenv("HOME"), "Applications/Zed.app/Contents/MacOS/cli"),
+		}
+	default:
+		return nil
+	}
 }
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {

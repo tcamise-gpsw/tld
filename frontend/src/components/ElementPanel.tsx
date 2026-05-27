@@ -40,6 +40,7 @@ import { getTechnologyCatalogIndex, getTechnologyCatalogItemBySlug, resolveWithB
 import { ZoomInIcon, ZoomOutIcon } from './Icons'
 import ScrollIndicatorWrapper from './ScrollIndicatorWrapper'
 import TagUpsert from './TagUpsert'
+import { openExternalUrl } from '../lib/desktop'
 
 import { useViewEditorContext } from '../pages/ViewEditor/context'
 
@@ -980,7 +981,7 @@ function ElementPanel({
                                 <Text fontSize="sm" color="white" fontWeight="semibold">{meta?.name || link.label}</Text>
                                 <Text fontSize="xs" color="gray.400">{link.type === 'custom' ? 'Custom technology' : (meta?.provider || 'General')}</Text>
                                 {sourceUrl && (
-                                  <Text as="a" href={sourceUrl} target="_blank" rel="noreferrer" fontSize="xs" color="blue.300" textDecoration="underline" pointerEvents="auto">
+                                  <Text as="button" type="button" onClick={() => openExternalUrl(sourceUrl)} fontSize="xs" color="blue.300" textDecoration="underline" pointerEvents="auto" textAlign="left">
                                     {sourceUrl}
                                   </Text>
                                 )}
