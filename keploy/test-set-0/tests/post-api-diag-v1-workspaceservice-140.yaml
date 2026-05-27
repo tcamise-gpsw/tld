@@ -44,7 +44,7 @@ spec:
       Content-Type: application/json
       Date: Mon, 18 May 2026 08:50:38 GMT
       Vary: Origin
-    body: '{"view":{"id":3, "orgId":"11111111-1111-1111-1111-111111111111", "name":"B", "parentViewId":1, "createdAt":"2026-05-18T08:49:39Z", "updatedAt":"2026-05-18T08:50:38Z", "level":2, "ownerElementId":2}, "content":{"placements":[{"id":8, "viewId":3, "elementId":8, "positionX":93.6140236647727, "positionY":-140.43852181818193, "name":"middleware"}, {"id":9, "viewId":3, "elementId":9, "positionX":-60.38140033522724, "positionY":-409.6103618181819, "name":"logging"}]}}'
+    body: '{"view":{"id":3, "orgId":"00000000-0000-0000-0000-000000000000", "name":"B", "parentViewId":1, "createdAt":"2026-05-18T08:49:39Z", "updatedAt":"2026-05-18T08:50:38Z", "level":2, "ownerElementId":2}, "content":{"placements":[{"id":8, "viewId":3, "elementId":8, "positionX":93.6140236647727, "positionY":-140.43852181818193, "name":"middleware"}, {"id":9, "viewId":3, "elementId":9, "positionX":-60.38140033522724, "positionY":-409.6103618181819, "name":"logging"}]}}'
     status_message: OK
     proto_major: 0
     proto_minor: 0

@@ -44,7 +44,7 @@ spec:
       Content-Type: application/json
       Date: Mon, 18 May 2026 08:51:46 GMT
       Vary: Origin
-    body: '{"view":{"id":4, "orgId":"11111111-1111-1111-1111-111111111111", "name":"middleware", "parentViewId":3, "createdAt":"2026-05-18T08:51:26Z", "updatedAt":"2026-05-18T08:51:26Z", "level":3, "ownerElementId":8}, "content":{"placements":[{"id":14, "viewId":4, "elementId":11, "positionX":133.61826163636363, "positionY":-624.9843015340908, "name":"jwt"}, {"id":16, "viewId":4, "elementId":13, "positionX":66.38690163636363, "positionY":-244.50382153409095, "name":"redis"}]}}'
+    body: '{"view":{"id":4, "orgId":"00000000-0000-0000-0000-000000000000", "name":"middleware", "parentViewId":3, "createdAt":"2026-05-18T08:51:26Z", "updatedAt":"2026-05-18T08:51:26Z", "level":3, "ownerElementId":8}, "content":{"placements":[{"id":14, "viewId":4, "elementId":11, "positionX":133.61826163636363, "positionY":-624.9843015340908, "name":"jwt"}, {"id":16, "viewId":4, "elementId":13, "positionX":66.38690163636363, "positionY":-244.50382153409095, "name":"redis"}]}}'
     status_message: OK
     proto_major: 0
     proto_minor: 0

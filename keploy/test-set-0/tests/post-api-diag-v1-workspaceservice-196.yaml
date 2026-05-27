@@ -44,7 +44,7 @@ spec:
       Content-Type: application/json
       Date: Mon, 18 May 2026 08:51:41 GMT
       Vary: Origin
-    body: '{"elements":[{"id":11, "orgId":"11111111-1111-1111-1111-111111111111", "name":"jwt", "createdAt":"2026-05-18T08:51:29Z", "updatedAt":"2026-05-18T08:51:29Z"}], "pagination":{"totalCount":1}}'
+    body: '{"elements":[{"id":11, "orgId":"00000000-0000-0000-0000-000000000000", "name":"jwt", "createdAt":"2026-05-18T08:51:29Z", "updatedAt":"2026-05-18T08:51:29Z"}], "pagination":{"totalCount":1}}'
     status_message: OK
     proto_major: 0
     proto_minor: 0

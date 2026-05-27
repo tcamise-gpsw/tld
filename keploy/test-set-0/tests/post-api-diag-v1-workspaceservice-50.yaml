@@ -44,7 +44,7 @@ spec:
       Content-Type: application/json
       Date: Mon, 18 May 2026 08:49:14 GMT
       Vary: Origin
-    body: '{"view":{"id":2, "orgId":"11111111-1111-1111-1111-111111111111", "name":"A", "parentViewId":1, "createdAt":"2026-05-18T08:49:14Z", "updatedAt":"2026-05-18T08:49:14Z", "level":2, "ownerElementId":1}, "content":{}}'
+    body: '{"view":{"id":2, "orgId":"00000000-0000-0000-0000-000000000000", "name":"A", "parentViewId":1, "createdAt":"2026-05-18T08:49:14Z", "updatedAt":"2026-05-18T08:49:14Z", "level":2, "ownerElementId":1}, "content":{}}'
     status_message: OK
     proto_major: 0
     proto_minor: 0
