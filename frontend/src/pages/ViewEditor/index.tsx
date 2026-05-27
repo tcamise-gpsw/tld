@@ -1728,6 +1728,7 @@ function ViewEditorInner({
     openLibrary: useCallback(() => setLibraryOpen(true), []),
     toggleLibrary: useCallback(() => setLibraryOpen((v) => !v), []),
     toggleExplorer: handleToggleExplorer,
+    toggleMarkdown: handleToggleMarkdown,
     onFitView: safeFitView,
     setSnapToGrid,
   })
