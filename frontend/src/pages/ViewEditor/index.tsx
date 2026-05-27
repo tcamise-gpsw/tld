@@ -2525,7 +2525,8 @@ function ViewEditorInner({
   return (
     <ViewEditorContext.Provider value={{
       viewId, canEdit, isOwner, isFreePlan, snapToGrid, setSnapToGrid,
-      selectedElement, selectedConnector: selectedEdge
+      selectedElement, selectedConnector: selectedEdge,
+      isMarkdownOpen, markdownPaneWidth
     }}>
       <Box h="100%" display="flex" flexDir="column">
         <Flex ref={editorSplitRef} flex={1} overflow="hidden">

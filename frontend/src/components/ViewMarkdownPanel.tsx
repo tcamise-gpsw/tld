@@ -86,13 +86,13 @@ function ViewMarkdownPanel({
         toolbarContents: () => (
           <>
             {canEdit && (
-              <>
+              <Box className="tld-markdown-toolbar-formatting" display="flex" flex="0 1 auto" minW={0} overflow="hidden" gap={1.5} alignItems="center">
                 <UndoRedo />
                 <BoldItalicUnderlineToggles />
                 <BlockTypeSelect />
                 <ListsToggle />
                 <CreateLink />
-              </>
+              </Box>
             )}
             <Box className="tld-markdown-toolbar-spacer" />
             <HStack className="tld-markdown-toolbar-actions" spacing={1.5}>
@@ -212,12 +212,23 @@ function ViewMarkdownPanel({
             color: '#dbe6f5',
           },
           '.tld-markdown-toolbar': {
+            display: 'flex',
+            flexWrap: 'nowrap',
+            alignItems: 'center',
             borderBottom: '1px solid rgba(148, 163, 184, 0.18)',
             background: 'var(--basePageBg)',
             color: '#dbe6f5',
             paddingInline: '0.5rem',
             minHeight: '48px',
             flexShrink: 0,
+          },
+          '.tld-markdown-toolbar-formatting': {
+            display: 'flex',
+            flexWrap: 'nowrap',
+            alignItems: 'center',
+            flex: '0 1 auto',
+            minWidth: 0,
+            overflow: 'hidden',
           },
           '.tld-markdown-toolbar-spacer': {
             flex: '1 1 auto',

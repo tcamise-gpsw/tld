@@ -35,10 +35,10 @@ function AppLayout() {
       flexDirection="column"
       bg="var(--bg-canvas)"
       overflow="hidden"
-      style={{
-        "--topbar-h": isWailsApp ? "52px" : "40px",
-        "--topbar-h-total": isWailsApp ? "52px" : "var(--topbar-h-total)",
-      } as React.CSSProperties}
+      style={isWailsApp ? {
+        "--topbar-h": "52px",
+        "--topbar-h-total": "52px",
+      } as React.CSSProperties : undefined}
     >
       {!hideTopBar && (
         <>
