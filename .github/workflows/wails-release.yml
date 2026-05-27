@@ -69,6 +69,12 @@ jobs:
       - name: Build Frontend Assets
         run: cd frontend && npm run build:app
 
+      - name: Prepare Wails App Icon
+        run: |
+          mkdir -p cmd/tld-app/build
+          cp frontend/logo/macos/Icon-iOS-Default-1024x1024@1x.png cmd/tld-app/build/appicon.png
+          rm -f cmd/tld-app/build/windows/icon.ico
+
       - name: Import Apple Certificates
         uses: apple-actions/import-codesign-certs@v3
         with:
@@ -170,6 +176,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           files: tld-macos-universal.zip
           fail_on_unmatched_files: true
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -215,15 +222,29 @@ jobs:
         shell: bash
         run: cd frontend && npm run build:app
 
+      - name: Prepare Wails App Icon
+        shell: bash
+        run: |
+          mkdir -p cmd/tld-app/build
+          cp frontend/logo/macos/Icon-iOS-Default-1024x1024@1x.png cmd/tld-app/build/appicon.png
+          rm -f cmd/tld-app/build/windows/icon.ico
+
       - name: Install NSIS
         shell: bash
-        run: choco install nsis -y --no-progress
+        run: |
+          choco install nsis -y --no-progress
+          echo "/c/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
 
       - name: Build Windows App
         shell: bash
         run: |
           cd cmd/tld-app
-          command -v makensis
+          export PATH="/c/Program Files (x86)/NSIS:$PATH"
+          if ! command -v makensis; then
+            echo "makensis was not found on PATH after installing NSIS."
+            find "/c/Program Files (x86)" -maxdepth 3 -iname makensis.exe -print || true
+            exit 1
+          fi
           makensis -VERSION
           wails build -platform windows/amd64 -nsis -s
 
@@ -247,5 +268,6 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           files: tld-windows-amd64-installer.exe
           fail_on_unmatched_files: true
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

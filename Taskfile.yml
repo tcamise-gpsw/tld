@@ -136,10 +136,22 @@ tasks:
     cmds:
       - go run ./cmd/tld serve
 
+  wails-icon:
+    desc: Prepare the Wails desktop app icon
+    sources:
+      - frontend/logo/macos/Icon-iOS-Default-1024x1024@1x.png
+    generates:
+      - cmd/tld-app/build/appicon.png
+    cmds:
+      - mkdir -p cmd/tld-app/build
+      - cp frontend/logo/macos/Icon-iOS-Default-1024x1024@1x.png cmd/tld-app/build/appicon.png
+      - rm -f cmd/tld-app/build/windows/icon.ico
+
   wails-build:
     desc: Compile and package the Wails desktop application
     deps:
       - frontend-build
+      - wails-icon
     cmds:
       - cd cmd/tld-app && wails build -s
 
@@ -147,6 +159,7 @@ tasks:
     desc: Run the Wails desktop application in development mode
     deps:
       - frontend-deps
+      - wails-icon
     cmds:
       - mkdir -p frontend/dist && touch frontend/dist/placeholder
       - cd cmd/tld-app && wails dev
