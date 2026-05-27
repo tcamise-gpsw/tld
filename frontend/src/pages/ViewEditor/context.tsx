@@ -11,6 +11,8 @@ export interface ViewEditorContextValue {
   setSnapToGrid: (snap: boolean) => void
   selectedElement: LibraryElement | null
   selectedConnector: Connector | null
+  isMarkdownOpen?: boolean
+  markdownPaneWidth?: number
 }
 
 export const ViewEditorContext = createContext<ViewEditorContextValue | null>(null)

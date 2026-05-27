@@ -17,6 +17,7 @@ import { WorkspaceVersionProvider } from './context/WorkspaceVersionContext'
 import { initializeTheme, ThemeProvider } from './context/ThemeContext'
 import { platform } from './platform/local'
 import { HomeRedirect } from './components/HomeRedirect'
+import { isWailsApp } from './config/runtime'
 
 initializeTheme()
 
@@ -28,7 +29,17 @@ function AppLayout() {
   const { experimental } = useExperimental()
 
   return (
-    <Box h="100dvh" display="flex" flexDirection="column" bg="var(--bg-canvas)" overflow="hidden">
+    <Box
+      h="100dvh"
+      display="flex"
+      flexDirection="column"
+      bg="var(--bg-canvas)"
+      overflow="hidden"
+      style={isWailsApp ? {
+        "--topbar-h": "52px",
+        "--topbar-h-total": "52px",
+      } as React.CSSProperties : undefined}
+    >
       {!hideTopBar && (
         <>
           <TopMenuBar hideMobileBar={hideMobileBar} rightSlot={experimental.watchEnabled ? <WorkspacePanel /> : undefined}>

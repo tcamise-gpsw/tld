@@ -37,6 +37,7 @@ import { getParser, extractSymbols, detectLanguage, type SupportedLanguage, type
 import { githubCache } from '../utils/githubCache'
 import { parseRepoSlug } from '../utils/url'
 import { githubRequest } from '../utils/githubApi'
+import { openExternalUrl } from '../lib/desktop'
 import type { LibraryElement } from '../types'
 
 interface Props {
@@ -683,9 +684,7 @@ export default function GitSourceLinker({ element, isReadOnly, onUpdate }: Props
                   )}
                   {element.repo && (
                     <Button
-                      as="a"
-                      href={`https://github.com/${parseRepoSlug(element.repo)}/blob/${element.branch || 'main'}/${parseExistingLink(element).basePath}`}
-                      target="_blank" rel="noopener noreferrer"
+                      onClick={() => openExternalUrl(`https://github.com/${parseRepoSlug(element.repo ?? '')}/blob/${element.branch || 'main'}/${parseExistingLink(element).basePath}`)}
                       size="xs" variant="ghost" leftIcon={<ExternalLinkIcon />}
                       justifyContent="flex-start" px={0} mt={0.5} h="auto" py={1}
                       color="blue.400" _hover={{ color: 'blue.200', bg: 'transparent' }}>

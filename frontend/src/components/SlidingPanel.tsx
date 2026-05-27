@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { Box, FocusLock } from '@chakra-ui/react'
+import { Box, FocusLock, useBreakpointValue } from '@chakra-ui/react'
 import { type ReactNode, useRef, useEffect } from 'react'
+import { useViewEditorContext } from '../pages/ViewEditor/context'
 
 const EASE = [0.25, 0.46, 0.45, 0.94]
 
@@ -48,6 +49,15 @@ export default function SlidingPanel({
     el.addEventListener('wheel', handler, { passive: true })
     return () => el.removeEventListener('wheel', handler)
   }, [isOpen])
+
+  const context = useViewEditorContext()
+  const isMarkdownOpen = context?.isMarkdownOpen ?? false
+  const markdownPaneWidth = context?.markdownPaneWidth ?? 0
+
+  const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
+  const rightOffset = (!isMobileLayout && isMarkdownOpen && side === 'right')
+    ? `${markdownPaneWidth + 10}px`
+    : '0px'
 
   if (isInline) {
     return (
@@ -101,7 +111,8 @@ export default function SlidingPanel({
             transition={{ duration: 0.2, ease: EASE }}
             style={{
               position: 'fixed',
-              [side]: '1rem',
+              left: side === 'left' ? '1rem' : undefined,
+              right: side === 'right' ? `calc(1rem + ${rightOffset})` : undefined,
               top: 0,
               bottom: 0,
               display: 'flex',

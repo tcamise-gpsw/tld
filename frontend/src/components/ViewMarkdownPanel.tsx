@@ -27,6 +27,7 @@ import {
 import '@mdxeditor/editor/style.css'
 import { CloseIcon, ReloadIcon, SaveIcon } from './Icons'
 import type { ViewMarkdownDocument } from '../types'
+import { isWailsApp } from '../config/runtime'
 
 interface Props {
   isOpen: boolean
@@ -41,6 +42,7 @@ interface Props {
   isDirty?: boolean
   onChange: (markdown: string) => void
   onSave: (markdown: string) => Promise<void> | void
+  onSaveAs?: (markdown: string) => Promise<void> | void
   onReload?: () => Promise<void> | void
 }
 
@@ -56,6 +58,7 @@ function ViewMarkdownPanel({
   isDirty = false,
   onChange,
   onSave,
+  onSaveAs,
   onReload,
 }: Props) {
   const editorRef = useRef<MDXEditorMethods>(null)
@@ -83,13 +86,13 @@ function ViewMarkdownPanel({
         toolbarContents: () => (
           <>
             {canEdit && (
-              <>
+              <Box className="tld-markdown-toolbar-formatting" display="flex" flex="0 1 auto" minW={0} overflow="hidden" gap={1.5} alignItems="center">
                 <UndoRedo />
                 <BoldItalicUnderlineToggles />
                 <BlockTypeSelect />
                 <ListsToggle />
                 <CreateLink />
-              </>
+              </Box>
             )}
             <Box className="tld-markdown-toolbar-spacer" />
             <HStack className="tld-markdown-toolbar-actions" spacing={1.5}>
@@ -119,6 +122,20 @@ function ViewMarkdownPanel({
                   />
                 </Box>
               </Tooltip>
+              {isWailsApp && onSaveAs && (
+                <Tooltip label="Save As" hasArrow openDelay={200}>
+                  <Box as="span">
+                    <IconButton
+                      aria-label="Save As"
+                      size="xs"
+                      className="tld-markdown-toolbar-action"
+                      icon={<SaveIcon />}
+                      onClick={() => { void onSaveAs(editorRef.current?.getMarkdown() ?? latestContentRef.current) }}
+                      isDisabled={isLoading || !markdown}
+                    />
+                  </Box>
+                </Tooltip>
+              )}
               <Tooltip label="Close" hasArrow openDelay={200}>
                 <Box as="span">
                   <IconButton
@@ -138,7 +155,7 @@ function ViewMarkdownPanel({
     ]
 
     return base
-  }, [canEdit, isDirty, isLoading, isSaving, markdown, onClose, onReload, onSave])
+  }, [canEdit, isDirty, isLoading, isSaving, markdown, onClose, onReload, onSave, onSaveAs])
 
   if (!isOpen) return null
 
@@ -195,12 +212,23 @@ function ViewMarkdownPanel({
             color: '#dbe6f5',
           },
           '.tld-markdown-toolbar': {
+            display: 'flex',
+            flexWrap: 'nowrap',
+            alignItems: 'center',
             borderBottom: '1px solid rgba(148, 163, 184, 0.18)',
             background: 'var(--basePageBg)',
             color: '#dbe6f5',
             paddingInline: '0.5rem',
             minHeight: '48px',
             flexShrink: 0,
+          },
+          '.tld-markdown-toolbar-formatting': {
+            display: 'flex',
+            flexWrap: 'nowrap',
+            alignItems: 'center',
+            flex: '0 1 auto',
+            minWidth: 0,
+            overflow: 'hidden',
           },
           '.tld-markdown-toolbar-spacer': {
             flex: '1 1 auto',
@@ -267,7 +295,7 @@ function ViewMarkdownPanel({
             flex: '1 1 auto',
             minHeight: 0,
           },
-          '.tld-markdown-editor__content[contenteditable="true"]': {
+          '.tld-markdown-editor__content': {
             flex: '1 1 auto',
             minHeight: 0,
             width: '100%',
@@ -278,32 +306,97 @@ function ViewMarkdownPanel({
             background: 'var(--bg-canvas)',
             outline: 'none',
             boxShadow: 'none',
+            overflowY: 'auto',
           },
-          '.tld-markdown-editor__content[contenteditable="true"] p': {
+          '.tld-markdown-editor__content p': {
             color: '#dbe6f5',
+            marginBottom: '1rem',
           },
-          '.tld-markdown-editor__content[contenteditable="true"] h1, .tld-markdown-editor__content[contenteditable="true"] h2, .tld-markdown-editor__content[contenteditable="true"] h3, .tld-markdown-editor__content[contenteditable="true"] h4, .tld-markdown-editor__content[contenteditable="true"] h5, .tld-markdown-editor__content[contenteditable="true"] h6': {
+          '.tld-markdown-editor__content h1': {
             color: '#f8fbff',
+            fontSize: '1.75em',
+            fontWeight: 700,
+            marginTop: '1.5rem',
+            marginBottom: '0.75rem',
+            lineHeight: 1.25,
           },
-          '.tld-markdown-editor__content[contenteditable="true"] a': {
+          '.tld-markdown-editor__content h2': {
+            color: '#f8fbff',
+            fontSize: '1.4em',
+            fontWeight: 700,
+            marginTop: '1.4rem',
+            marginBottom: '0.6rem',
+            lineHeight: 1.3,
+          },
+          '.tld-markdown-editor__content h3': {
+            color: '#f8fbff',
+            fontSize: '1.2em',
+            fontWeight: 600,
+            marginTop: '1.3rem',
+            marginBottom: '0.5rem',
+            lineHeight: 1.35,
+          },
+          '.tld-markdown-editor__content h4': {
+            color: '#f8fbff',
+            fontSize: '1.1em',
+            fontWeight: 600,
+            marginTop: '1.2rem',
+            marginBottom: '0.4rem',
+          },
+          '.tld-markdown-editor__content h5': {
+            color: '#f8fbff',
+            fontSize: '1.05em',
+            fontWeight: 600,
+            marginTop: '1.1rem',
+            marginBottom: '0.4rem',
+          },
+          '.tld-markdown-editor__content h6': {
+            color: '#f8fbff',
+            fontSize: '1em',
+            fontWeight: 600,
+            marginTop: '1rem',
+            marginBottom: '0.4rem',
+          },
+          '.tld-markdown-editor__content a': {
             color: '#93c5fd',
           },
-          '.tld-markdown-editor__content[contenteditable="true"] blockquote': {
+          '.tld-markdown-editor__content blockquote': {
+            borderLeft: '4px solid',
             borderLeftColor: 'rgba(96, 165, 250, 0.45)',
             color: '#cbd5e1',
+            paddingLeft: '1rem',
+            marginInline: '0',
+            marginBottom: '1rem',
+            fontStyle: 'italic',
           },
-          '.tld-markdown-editor__content[contenteditable="true"] code': {
+          '.tld-markdown-editor__content code': {
             background: 'rgba(30, 41, 59, 0.9)',
             color: '#bfdbfe',
+            padding: '0.2rem 0.4rem',
+            borderRadius: '0.25rem',
+            fontSize: '0.875em',
           },
-          '.tld-markdown-editor__content[contenteditable="true"] pre': {
+          '.tld-markdown-editor__content pre': {
             background: '#020817',
             color: '#dbe6f5',
+            padding: '1rem',
+            borderRadius: '0.5rem',
+            overflowX: 'auto',
+            marginBottom: '1rem',
           },
-          '.tld-markdown-editor__content:not([contenteditable])': {
-            color: 'rgba(219, 230, 245, 0.42)',
+          '.tld-markdown-editor__content pre code': {
             background: 'transparent',
-            padding: '1.25rem 1.5rem 0',
+            padding: 0,
+            borderRadius: 0,
+            color: 'inherit',
+            fontSize: 'inherit',
+          },
+          '.tld-markdown-editor__content ul, .tld-markdown-editor__content ol': {
+            paddingLeft: '1.5rem',
+            marginBottom: '1rem',
+          },
+          '.tld-markdown-editor__content li': {
+            marginBottom: '0.25rem',
           },
         }}
       >

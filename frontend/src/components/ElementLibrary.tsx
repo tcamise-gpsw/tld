@@ -361,6 +361,14 @@ function ElementLibrary({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setSearch('')
+                setFocusedIdx(-1)
+                ;(e.target as HTMLInputElement).blur()
+                return
+              }
+
               if (filtered.length === 0) return
               if (e.key === 'ArrowDown') {
                 e.preventDefault()
@@ -379,9 +387,6 @@ function ElementLibrary({
                   onFindElement(target.id)
                   if (isMobile) onClose()
                 }
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                ;(e.target as HTMLInputElement).blur()
               }
             }}
           />

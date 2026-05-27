@@ -226,6 +226,7 @@ interface CanvasInteractionOptions {
   openLibrary?: () => void
   toggleLibrary?: () => void
   toggleExplorer?: () => void
+  toggleMarkdown?: () => void
   onFitView?: () => void
   setSnapToGrid?: (snap: boolean) => void
 }
@@ -319,6 +320,7 @@ export function useCanvasInteractions({
   openLibrary,
   toggleLibrary,
   toggleExplorer,
+  toggleMarkdown,
   onFitView,
   setSnapToGrid: setGlobalSnapToGrid,
 }: CanvasInteractionOptions) {
@@ -1447,7 +1449,7 @@ export function useCanvasInteractions({
         return
       }
       const key = e.key.toLowerCase()
-      if (!['w', 'a', 's', 'd', 'c', 'e', 'backspace', 'delete', 'r', 'f', 'g', '+', '=', '-', '/'].includes(key)) return
+      if (!['w', 'a', 's', 'd', 'm', 'c', 'e', 'backspace', 'delete', 'r', 'f', 'g', '+', '=', '-', '/'].includes(key)) return
       if (e.ctrlKey || e.altKey || (e.metaKey && key !== 'z')) return
       if (key === 'c' && e.shiftKey) return
 
@@ -1605,6 +1607,12 @@ export function useCanvasInteractions({
         toggleExplorer?.()
         return
       }
+
+      if (key === 'm') {
+        e.preventDefault()
+        toggleMarkdown?.()
+        return
+      }
       const cid = viewIdRef.current
       if (!cid) return
       const incoming = incomingLinksRef.current
@@ -1669,7 +1677,7 @@ export function useCanvasInteractions({
     }
     window.addEventListener('keydown', handler, { capture: true })
     return () => window.removeEventListener('keydown', handler, { capture: true })
-  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, onSelectionRemoveFromView, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, clickConnectMode, setClickConnectMode, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef, interactionSourceIdRef, multiConnectionSourceIdsRef, clearConnectionSourceRefs, onFitView, setGlobalSnapToGrid, snapToGrid, libraryOpen, openLibrary, toggleLibrary, toggleExplorer, zoomIn, zoomOut])
+  }, [canEdit, refreshGrid, selectedElement, selectedConnector, connectors, viewId, stableOnRemoveElement, handleConnectorDeleted, handleElementPermanentlyDeleted, onConnectorDeleted, onSelectionRemoveFromView, closeElementPanel, closeConnectorPanel, closeProxyConnectorPanel, clickConnectMode, setClickConnectMode, viewIdRef, incomingLinksRef, treeDataRef, navigateRef, rfNodesRef, viewElementsRef, setLinksMap, showAddingElementAt, setSelectedElement, setSelectedEdge, containerRef, linksMapRef, interactionSourceIdRef, multiConnectionSourceIdsRef, clearConnectionSourceRefs, onFitView, setGlobalSnapToGrid, snapToGrid, libraryOpen, openLibrary, toggleLibrary, toggleExplorer, toggleMarkdown, zoomIn, zoomOut])
 
   // ── DnD handlers ──────────────────────────────────────────────────────────
   const onDragOver = useCallback((e: React.DragEvent) => {

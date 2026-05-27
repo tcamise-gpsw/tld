@@ -102,42 +102,51 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           paddingTop: "env(safe-area-inset-top, 0px)",
           paddingLeft: "max(env(safe-area-inset-left, 0px), 8px)",
           paddingRight: "max(env(safe-area-inset-right, 0px), 8px)",
+          "--wails-draggable": isWailsApp ? "drag" : "no-drag",
         } as React.CSSProperties}
         sx={{
           containerType: "inline-size",
           containerName: "topbar",
         }}
       >
-        <HStack spacing={0} h="full" flexShrink={0} display={{ base: "none", sm: "flex" }}>
-          <HStack
-            as={RouterLink}
-            to="/"
-            spacing={2}
-            mr={4}
-            cursor="pointer"
-            px={2}
-            py={1}
-            borderRadius="xl"
-            transition="all 0.2s"
-            _hover={{
-              bg: "whiteAlpha.100",
-              "& .logo-mark": {
-                transform: "translateY(-4px) rotateX(10deg) rotateY(-10deg)",
-                filter: "drop-shadow(0 8px 8px rgba(0,0,0,0.4))",
-              },
-            }}
-            sx={{ perspective: "1000px" }}
-          >
-            <Box
-              as="img"
-              src={logoMarkUrl}
-              alt=""
-              height="30px"
-              display="block"
-              className="logo-mark"
-              transition="all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)"
-            />
-            {!isWailsApp && (
+        <HStack
+          spacing={0}
+          h="full"
+          flexShrink={0}
+          display={{ base: "none", sm: "flex" }}
+          style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
+        >
+          {isWailsApp ? (
+            <Box w="80px" h="full" />
+          ) : (
+            <HStack
+              as={RouterLink}
+              to="/"
+              spacing={2}
+              mr={4}
+              cursor="pointer"
+              px={2}
+              py={1}
+              borderRadius="xl"
+              transition="all 0.2s"
+              _hover={{
+                bg: "whiteAlpha.100",
+                "& .logo-mark": {
+                  transform: "translateY(-4px) rotateX(10deg) rotateY(-10deg)",
+                  filter: "drop-shadow(0 8px 8px rgba(0,0,0,0.4))",
+                },
+              }}
+              sx={{ perspective: "1000px" }}
+            >
+              <Box
+                as="img"
+                src={logoMarkUrl}
+                alt=""
+                height="30px"
+                display="block"
+                className="logo-mark"
+                transition="all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)"
+              />
               <Text
                 fontFamily="heading"
                 fontWeight="700"
@@ -151,10 +160,10 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
               >
                 tlDiagram
               </Text>
-            )}
-          </HStack>
+            </HStack>
+          )}
 
-          <HStack spacing={2} h="full" align="center">
+          <HStack spacing={2} h="full" align="center" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
             {NAV_ITEMS.map((item) => {
               const active = isActive(item.path)
               const Icon = item.icon
@@ -229,7 +238,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
               },
             }}
           >
-            <Box pointerEvents="auto">
+            <Box pointerEvents="auto" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
               {children}
             </Box>
           </Flex>
@@ -238,7 +247,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
         {/* Spacer to push right-side content */}
         <Box flex={1} minW={0} display={{ base: "none", sm: "block" }} />
 
-        <HStack spacing={2} ml="auto" flexShrink={0} display="flex">
+        <HStack spacing={2} ml="auto" flexShrink={0} display="flex" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
           {rightSlot}
           {userControlsSlot}
 

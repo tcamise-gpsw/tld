@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 func main() {
@@ -62,10 +64,17 @@ func main() {
 		log.Fatalf("failed to sub frontend/dist: %v", err)
 	}
 
+	desktopBridge := NewDesktopBridge()
 	err = wails.Run(&options.App{
 		Title:  "tlDiagram",
 		Width:  1200,
 		Height: 800,
+		OnStartup: func(ctx context.Context) {
+			desktopBridge.startup(ctx)
+		},
+		Bind: []interface{}{
+			desktopBridge,
+		},
 		AssetServer: &assetserver.Options{
 			Assets:  distFS,
 			Handler: app.Handler,
@@ -120,6 +129,9 @@ func main() {
 			},
 		},
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
+		Mac: &mac.Options{
+			TitleBar: mac.TitleBarHiddenInset(),
+		},
 	})
 
 	if err != nil {

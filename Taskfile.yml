@@ -116,6 +116,16 @@ tasks:
     cmds:
       - go run ./cmd/tld serve
 
+  wails-build:
+    desc: Compile and package the Wails desktop application
+    cmds:
+      - cd cmd/tld-app && wails build
+
+  wails-dev:
+    desc: Run the Wails desktop application in development mode
+    cmds:
+      - cd cmd/tld-app && wails dev
+
   clean:
     desc: Clean build artifacts
     cmds:

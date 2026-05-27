@@ -90,7 +90,7 @@ import { applyNodeChangesWithStructuralSharing, useCanvasInteractions } from './
 import { useViewEditHistory } from './hooks/useViewEditHistory'
 import { useOverlapDetection } from './hooks/useOverlapDetection'
 import { removeCollisions } from '../../utils/layout'
-import { connectorToConnector, findClosestHandles, sanitizeExportFilename, triggerDownload } from './utils'
+import { connectorToConnector, findClosestHandles, sanitizeExportFilename, triggerBlobDownload, triggerDownload } from './utils'
 import { pickUnusedColor } from '../../components/ViewExplorer/utils'
 
 import { EmptyCanvasState } from './components/EmptyCanvasState'
@@ -981,6 +981,21 @@ function ViewEditorInner({
     }
   }, [toast, viewId, viewMarkdown])
 
+  const handleSaveMarkdownAs = useCallback(async (markdown: string) => {
+    const baseName = sanitizeExportFilename(view?.name || 'view-notes')
+    try {
+      const result = await triggerBlobDownload(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), `${baseName}.md`, 'markdown')
+      if (result.canceled) return
+      toast({ status: 'success', title: 'Notes exported', description: result.path ? `Saved ${result.path}` : undefined })
+    } catch (error) {
+      toast({
+        status: 'error',
+        title: 'Failed to export notes',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [toast, view?.name])
+
   const handleElementPermanentlyDeletedEverywhere = useCallback((elementId: number) => {
     handleElementPermanentlyDeleted(elementId)
     setDeletedLibraryElementIds((prev) => prev.includes(elementId) ? prev : [...prev, elementId])
@@ -1713,6 +1728,7 @@ function ViewEditorInner({
     openLibrary: useCallback(() => setLibraryOpen(true), []),
     toggleLibrary: useCallback(() => setLibraryOpen((v) => !v), []),
     toggleExplorer: handleToggleExplorer,
+    toggleMarkdown: handleToggleMarkdown,
     onFitView: safeFitView,
     setSnapToGrid,
   })
@@ -2375,11 +2391,14 @@ function ViewEditorInner({
       setIsExporting(true)
       if (options.format === 'mermaid') {
         const code = serializeViewToMermaid(viewElements, connectors)
-        triggerDownload(URL.createObjectURL(new Blob([code], { type: 'text/plain;charset=utf-8' })), downloadName)
+        const result = await triggerBlobDownload(new Blob([code], { type: 'text/plain;charset=utf-8' }), downloadName, options.format)
+        if (result.canceled) return
       } else if (options.format === 'svg') {
-        triggerDownload(await toSvg(flowRoot, { cacheBust: true, filter: filterNode }), downloadName)
+        const result = await triggerDownload(await toSvg(flowRoot, { cacheBust: true, filter: filterNode }), downloadName, options.format)
+        if (result.canceled) return
       } else {
-        triggerDownload(await toPng(flowRoot, { cacheBust: true, pixelRatio: options.scale, filter: filterNode }), downloadName)
+        const result = await triggerDownload(await toPng(flowRoot, { cacheBust: true, pixelRatio: options.scale, filter: filterNode }), downloadName, options.format)
+        if (result.canceled) return
       }
       closeExportModalRef.current()
       toast({ status: 'success', title: 'Export complete', description: `Saved ${downloadName}` })
@@ -2507,7 +2526,8 @@ function ViewEditorInner({
   return (
     <ViewEditorContext.Provider value={{
       viewId, canEdit, isOwner, isFreePlan, snapToGrid, setSnapToGrid,
-      selectedElement, selectedConnector: selectedEdge
+      selectedElement, selectedConnector: selectedEdge,
+      isMarkdownOpen, markdownPaneWidth
     }}>
       <Box h="100%" display="flex" flexDir="column">
         <Flex ref={editorSplitRef} flex={1} overflow="hidden">
@@ -2925,6 +2945,7 @@ function ViewEditorInner({
                   isDirty={markdownDirty}
                   onChange={setViewMarkdownContent}
                   onSave={handleSaveMarkdown}
+                  onSaveAs={handleSaveMarkdownAs}
                   onReload={handleReloadMarkdown}
                 />
               </Box>

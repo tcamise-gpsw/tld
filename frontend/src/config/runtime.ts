@@ -32,7 +32,7 @@ declare global {
 }
 
 export const isNativeApp = false
-export const isWailsApp = typeof window !== 'undefined' && !!window.__TLD_APP__
+export const isWailsApp = typeof window !== 'undefined' && (!!window.__TLD_APP__ || !!(window as any).runtime || !!(window as any).wails)
 
 const defaultApiBase = typeof window !== 'undefined' && window.__TLD_SERVER_URL__ ? `${window.__TLD_SERVER_URL__.replace(/\/$/, "")}/api` : "/api"
 
