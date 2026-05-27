@@ -56,13 +56,19 @@ import ViewExplorer from '../../components/ViewExplorer'
 import ViewMarkdownPanel from '../../components/ViewMarkdownPanel'
 import ViewPanel from '../../components/ViewPanel'
 import { useSetHeader } from '../../components/HeaderContext'
+import { usePlatform } from '../../platform/context'
+import type {
+  RealtimeUserPresence,
+  ViewRealtimeConnection,
+  ViewRealtimeHandlers,
+} from '../../platform/types'
 import InlineElementAdder from '../../components/InlineElementAdder'
 import ExportModal, { type ExportOptions } from '../../components/ExportModal'
 import ImportModal from '../../components/ImportModal'
 import { KbdHint } from '../../components/PanelUI'
 import ViewHeaderButton from '../../components/ViewHeaderButton'
 import ViewEditorOnboarding from '../../components/ViewEditorOnboarding'
-import DrawingCanvas, { type DrawingCanvasHandle } from '../../components/DrawingCanvas'
+import DrawingCanvas, { type DrawingCanvasHandle, type DrawingPath } from '../../components/DrawingCanvas'
 import ViewFloatingMenu from '../../components/ViewFloatingMenu'
 import ViewDrawMenu from '../../components/ViewDrawMenu'
 import ViewBezierConnector from '../../components/ViewBezierConnector'
@@ -137,6 +143,13 @@ const VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE = 260
 const VIEW_EDITOR_MARKDOWN_RESIZE_HANDLE_WIDTH = 10
 const VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR = '--topbar-notch-left'
 const SNAP_GRID: [number, number] = [30, 30]
+
+type CollaborationHeaderState = {
+  viewers: RealtimeUserPresence[]
+  collaborators: RealtimeUserPresence[]
+  followUserId: string | null
+  onAvatarClick?: (userId: string) => void
+}
 
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
 
@@ -408,6 +421,7 @@ function ViewEditorInner({
   const [searchParams, setSearchParams] = useSearchParams()
   const viewId = parseNumericId(viewIdParam)
   const navigate = useNavigate()
+  const platform = usePlatform()
   const navigateRef = useRef(navigate)
   navigateRef.current = navigate
 
@@ -422,6 +436,19 @@ function ViewEditorInner({
     redo: redoViewEdit,
   } = useViewEditHistory()
   const setHeader = useSetHeader()
+  const realtimeRef = useRef<ViewRealtimeConnection | null>(null)
+  const realtimeClockRef = useRef(0)
+  const [collaboration, setCollaboration] = useState<CollaborationHeaderState>({
+    viewers: [],
+    collaborators: [],
+    followUserId: null,
+  })
+  const handleCollaborationAvatarClick = useCallback((userId: string) => {
+    setCollaboration((prev) => ({
+      ...prev,
+      followUserId: prev.followUserId === userId ? null : userId,
+    }))
+  }, [])
   const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
   const [densityLevel, setDensityLevel] = useState(0)
   const [visibilityOverrides, setVisibilityOverrides] = useState<VisibilityOverride[]>([])
@@ -522,6 +549,7 @@ function ViewEditorInner({
   const setStoreSnapToGrid = useStore((state) => state.setSnapToGrid)
   const upsertStoreConnector = useStore((state) => state.upsertConnector)
   const removeStoreConnector = useStore((state) => state.removeConnector)
+  const updateStoreElementPosition = useStore((state) => state.updateElementPosition)
   const mergeElementsInto = useStore((state) => state.mergeElementsInto)
   const refreshElementsRef = useRef<() => Promise<void>>(async () => { })
   const setSnapToGrid = useCallback((snap: boolean) => {
@@ -554,6 +582,7 @@ function ViewEditorInner({
   const [activeTags, setActiveTags] = useState<string[]>([])
   const activeTagsRef = useRef<string[]>([])
   activeTagsRef.current = activeTags
+  const applyingRemoteVisibilityRef = useRef(false)
   const { preview: versionPreview, followTarget: versionFollowTarget } = useWorkspaceVersionPreview()
   const [tagColors, setTagColors] = useState<Record<string, Tag>>({})
 
@@ -669,7 +698,7 @@ function ViewEditorInner({
   const drawing = useDrawingEngine(viewId)
   const {
     drawingMode, setDrawingMode, drawingVisible, setDrawingVisible,
-    drawingPaths, setDrawingPaths: _setDrawingPaths, drawingTool, setDrawingTool,
+    drawingPaths, setDrawingPaths, drawingTool, setDrawingTool,
     drawingColor, setDrawingColor, drawingWidth, setDrawingWidth,
     textEditorState, setTextEditorState, commitDrawingText,
     drawingHistoryRef, drawingRedoStackRef,
@@ -751,6 +780,173 @@ function ViewEditorInner({
     handleElementDeleted, handleElementPermanentlyDeleted, handleElementSaved: applyElementSaved,
   } = data
   refreshElementsRef.current = refreshElements
+
+  const realtimeHandlers = useMemo<ViewRealtimeHandlers>(() => ({
+    onSnapshot: (snapshot) => {
+      setCollaboration({
+        viewers: snapshot.viewers,
+        collaborators: snapshot.collaborators,
+        followUserId: null,
+      })
+      applyingRemoteVisibilityRef.current = true
+      setActiveTags(snapshot.canvas_visibility.active_tags)
+      setHiddenLayerTags(snapshot.canvas_visibility.hidden_layer_tags)
+      window.setTimeout(() => { applyingRemoteVisibilityRef.current = false }, 0)
+      setDrawingPaths(snapshot.drawings.reduce<DrawingPath[]>((paths, drawing) => {
+        if (!drawing.path_id) return paths
+        paths.push({
+          id: drawing.path_id,
+          points: drawing.points ?? [],
+          color: drawing.color ?? '#38bdf8',
+          width: drawing.width ?? 3,
+          text: drawing.text,
+          fontSize: drawing.font_size,
+        })
+        return paths
+      }, []))
+      snapshot.crdt_elements.forEach((state) => {
+        updateStoreElementPosition(state.element_id, state.x, state.y)
+      })
+      snapshot.crdt_connectors.forEach((state) => {
+        if (state.deleted) {
+          removeStoreConnector(state.connector_id)
+        } else if (state.connector) {
+          upsertStoreConnector(state.connector)
+        }
+      })
+    },
+    onPresenceJoin: (viewer) => {
+      setCollaboration((prev) => {
+        const viewers = prev.viewers.some((item) => item.user_id === viewer.user_id)
+          ? prev.viewers.map((item) => item.user_id === viewer.user_id ? { ...viewer, online: true } : item)
+          : [...prev.viewers, { ...viewer, online: true }]
+        const collaborators = prev.collaborators.some((item) => item.user_id === viewer.user_id)
+          ? prev.collaborators.map((item) => item.user_id === viewer.user_id ? { ...viewer, online: true } : item)
+          : [...prev.collaborators, { ...viewer, online: true }]
+        return { ...prev, viewers, collaborators }
+      })
+    },
+    onPresenceLeave: (userId) => {
+      setCollaboration((prev) => ({
+        ...prev,
+        viewers: prev.viewers.filter((viewer) => viewer.user_id !== userId),
+        collaborators: prev.collaborators.map((viewer) => viewer.user_id === userId ? { ...viewer, online: false } : viewer),
+        followUserId: prev.followUserId === userId ? null : prev.followUserId,
+      }))
+    },
+    onCursor: () => { },
+    onSelection: () => { },
+    onViewport: () => { },
+    onCanvasVisibility: (visibility) => {
+      applyingRemoteVisibilityRef.current = true
+      setActiveTags(visibility.active_tags)
+      setHiddenLayerTags(visibility.hidden_layer_tags)
+      window.setTimeout(() => { applyingRemoteVisibilityRef.current = false }, 0)
+    },
+    onDrawing: (drawing) => {
+      if (!drawing.path_id) return
+      const next: DrawingPath = {
+        id: drawing.path_id,
+        points: drawing.points ?? [],
+        color: drawing.color ?? '#38bdf8',
+        width: drawing.width ?? 3,
+        text: drawing.text,
+        fontSize: drawing.font_size,
+      }
+      setDrawingPaths((prev) => {
+        const exists = prev.some((path) => path.id === next.id)
+        return exists ? prev.map((path) => path.id === next.id ? next : path) : [...prev, next]
+      })
+    },
+    onDrawingDelete: (pathId) => {
+      setDrawingPaths((prev) => prev.filter((path) => path.id !== pathId))
+    },
+    onCRDTElementPosition: (state) => {
+      updateStoreElementPosition(state.element_id, state.x, state.y)
+    },
+    onCRDTConnectorUpsert: (state) => {
+      if (state.connector) upsertStoreConnector(state.connector)
+    },
+    onCRDTConnectorDelete: (state) => {
+      removeStoreConnector(state.connector_id)
+    },
+    onViewElementAdd: (element) => {
+      setViewElements((prev) => prev.some((item) => item.element_id === element.element_id)
+        ? prev.map((item) => item.element_id === element.element_id ? element : item)
+        : [...prev, element])
+      void refreshGrid()
+    },
+    onViewElementRemove: (elementId) => {
+      handleElementDeleted(elementId)
+      void refreshGrid()
+    },
+    onElementUpdate: (element) => {
+      applyElementSaved(element)
+    },
+    onThreadUpsert: () => { },
+    onThreadResolve: () => { },
+    onCommentCreate: () => { },
+    onReactionsSnapshot: () => { },
+    onClose: () => {
+      realtimeRef.current = null
+    },
+    onRoomFull: () => {
+      toast({ status: 'warning', title: 'Collaboration room is full' })
+    },
+  }), [
+    applyElementSaved,
+    handleElementDeleted,
+    refreshGrid,
+    removeStoreConnector,
+    setDrawingPaths,
+    setViewElements,
+    toast,
+    updateStoreElementPosition,
+    upsertStoreConnector,
+  ])
+
+  useEffect(() => {
+    realtimeRef.current?.disconnect()
+    realtimeRef.current = null
+    setCollaboration({ viewers: [], collaborators: [], followUserId: null })
+
+    if (viewId === null || isFreePlan || !platform.connectRealtime) return
+    realtimeRef.current = platform.connectRealtime(viewId, realtimeHandlers)
+
+    return () => {
+      realtimeRef.current?.disconnect()
+      realtimeRef.current = null
+    }
+  }, [isFreePlan, platform, realtimeHandlers, viewId])
+
+  useEffect(() => {
+    if (applyingRemoteVisibilityRef.current) return
+    realtimeRef.current?.sendCanvasVisibility(activeTags, hiddenLayerTags)
+  }, [activeTags, hiddenLayerTags])
+
+  useEffect(() => {
+    realtimeRef.current?.sendSelection(selectedElement?.id ?? null, selectedEdge?.id ?? null)
+  }, [selectedEdge?.id, selectedElement?.id])
+
+  const handleRealtimePathComplete = useCallback((path: DrawingPath) => {
+    onPathComplete(path)
+    realtimeRef.current?.sendDrawing(path.id, path.points, path.color, path.width, path.text, path.fontSize)
+  }, [onPathComplete])
+
+  const handleRealtimePathDelete = useCallback((pathId: string) => {
+    onPathDelete(pathId)
+    realtimeRef.current?.sendDrawingDelete(pathId)
+  }, [onPathDelete])
+
+  const handleRealtimePathUpdate = useCallback((path: DrawingPath) => {
+    onPathUpdate(path)
+    realtimeRef.current?.sendDrawing(path.id, path.points, path.color, path.width, path.text, path.fontSize)
+  }, [onPathUpdate])
+
+  const handleRealtimeElementPositionPreview = useCallback((elementId: number, x: number, y: number) => {
+    realtimeClockRef.current += 1
+    realtimeRef.current?.sendCRDTElementPosition(elementId, x, y, realtimeClockRef.current)
+  }, [])
 
   const [viewMarkdown, setViewMarkdown] = useState<ViewMarkdownDocument | null>(null)
   const [viewMarkdownContent, setViewMarkdownContent] = useState('')
@@ -1716,6 +1912,7 @@ function ViewEditorInner({
     }, [removeStoreConnector, viewId]),
     onPlacementMoved: pushPlacementMoveAction,
     onPlacementsMoved: pushPlacementMoveBatchAction,
+    onElementPositionPreview: handleRealtimeElementPositionPreview,
     onPlacementRemoved: pushPlacementRemoveAction,
     onConnectorUpdated: pushConnectorEditAction,
     onConnectorDeleted: pushConnectorDeleteAction,
@@ -2027,6 +2224,17 @@ function ViewEditorInner({
     handleConfirmNewElement, handleConfirmExistingElement, handleConfirmConnectExistingElement,
   } = canvas
 
+  const handleRealtimePaneMouseMove = useCallback((event: React.MouseEvent) => {
+    onPaneMouseMove(event)
+    const flowPos = screenToFlowPositionRef.current({ x: event.clientX, y: event.clientY })
+    realtimeRef.current?.sendCursor(flowPos.x, flowPos.y)
+  }, [onPaneMouseMove])
+
+  const handleRealtimeMove = useCallback((event: unknown, viewport: { x: number; y: number; zoom: number }) => {
+    onMove(event, viewport)
+    realtimeRef.current?.sendViewport(viewport.x, viewport.y, viewport.zoom)
+  }, [onMove])
+
   // ── FitView ────────────────────────────────────────────────────────────────
   const fitViewRef = useRef(safeFitView)
   fitViewRef.current = safeFitView
@@ -2258,7 +2466,16 @@ function ViewEditorInner({
     }
   }, [])
 
-  useEffect(() => () => setHeader(null), [setHeader])
+  useEffect(() => {
+    setHeader({
+      node: null,
+      collaboration: {
+        ...collaboration,
+        onAvatarClick: handleCollaborationAvatarClick,
+      },
+    })
+    return () => setHeader(null)
+  }, [collaboration, handleCollaborationAvatarClick, setHeader])
   // ── Share ──────────────────────────────────────────────────────────────────
   const onShare = useCallback(() => { }, [])
 
@@ -2645,8 +2862,8 @@ function ViewEditorInner({
                 onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
                 onEdgeClick={onEdgeClick} onEdgeContextMenu={onEdgeContextMenu}
                 onPaneContextMenu={onPaneContextMenu} onPaneClick={onPaneClick}
-                onPaneMouseMove={onPaneMouseMove}
-                onMoveStart={onMoveStart} onMove={onMove} onMoveEnd={onMoveEnd}
+                onPaneMouseMove={handleRealtimePaneMouseMove}
+                onMoveStart={onMoveStart} onMove={handleRealtimeMove} onMoveEnd={onMoveEnd}
                 translateExtent={computedTranslateExtent} nodeExtent={computedTranslateExtent} minZoom={computedMinZoom} maxZoom={4}
                 onReconnect={onReconnect} onReconnectStart={onReconnectStart} onReconnectEnd={onReconnectEnd}
                 nodeTypes={nodeTypesMemo} edgeTypes={edgeTypesMemo}
@@ -2747,7 +2964,7 @@ function ViewEditorInner({
               paths={drawingPaths}
               isDrawing={drawingMode} isVisible={drawingVisible}
               strokeColor={drawingColor} strokeWidth={drawingWidth} mode={drawingTool}
-              onPathComplete={onPathComplete} onPathDelete={onPathDelete} onPathUpdate={onPathUpdate}
+              onPathComplete={handleRealtimePathComplete} onPathDelete={handleRealtimePathDelete} onPathUpdate={handleRealtimePathUpdate}
               onTextPositionSelected={(canvasX, canvasY, flowX, flowY) => setTextEditorState({ canvasX, canvasY, flowX, flowY })}
             />
 

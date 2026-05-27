@@ -50,7 +50,7 @@ func (s *Store) CreateConnector(ctx context.Context, input Connector) (Connector
 
 	var existingID int64
 	err := s.bun.NewSelect().
-		Table("connectors").
+		Model((*connectorModel)(nil)).
 		Column("id").
 		Where("view_id = ?", input.ViewID).
 		Where("((source_element_id = ? AND target_element_id = ?) OR (source_element_id = ? AND target_element_id = ?))", input.SourceElementID, input.TargetElementID, input.TargetElementID, input.SourceElementID).

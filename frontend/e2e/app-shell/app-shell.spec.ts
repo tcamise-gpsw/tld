@@ -1,14 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../fixtures'
 import {
   createApiView,
   createDiagram,
-  prepareStorage,
   uniqueName,
 } from '../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('home redirects to the first available root diagram', async ({ page }) => {
   await createApiView(page, uniqueName('Home Redirect Root'))

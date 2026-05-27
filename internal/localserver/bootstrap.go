@@ -15,7 +15,7 @@ import (
 	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
-var localWorkspaceID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
+var localWorkspaceID = uuid.Nil
 
 type App struct {
 	Addr            string

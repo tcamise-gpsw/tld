@@ -21,9 +21,9 @@ import (
 // SaaS wrappers can embed this struct and override methods that need multi-tenant
 // awareness (tags, view layers, markdown, versioning).
 type APIStore struct {
-	Store  *app.Store
-	sqlDB  *sql.DB
-	bunDB  *bun.DB
+	Store *app.Store
+	sqlDB *sql.DB
+	bunDB *bun.DB
 }
 
 // NewAPIStore creates a public api.Store implementation backed by *app.Store.
@@ -571,19 +571,81 @@ var _ = []any{
 type workspaceVersionModel struct {
 	bun.BaseModel `bun:"table:workspace_versions"`
 
-	ID              int64   `bun:"id,pk,autoincrement"`
-	VersionID       string  `bun:"version_id"`
-	Source          string  `bun:"source"`
-	ParentVersionID *int64  `bun:"parent_version_id"`
-	ViewCount       int64   `bun:"view_count"`
-	ElementCount    int64   `bun:"element_count"`
-	ConnectorCount  int64   `bun:"connector_count"`
-	Description     *string `bun:"description"`
-	WorkspaceHash   *string `bun:"workspace_hash"`
-	CreatedAt       string  `bun:"created_at"`
+	ID              int64      `bun:"id,pk,autoincrement"`
+	OrgID           *uuid.UUID `bun:"org_id,nullzero"`
+	VersionID       string     `bun:"version_id"`
+	Source          string     `bun:"source"`
+	ParentVersionID *int64     `bun:"parent_version_id"`
+	ViewCount       int64      `bun:"view_count"`
+	ElementCount    int64      `bun:"element_count"`
+	ConnectorCount  int64      `bun:"connector_count"`
+	Description     *string    `bun:"description"`
+	WorkspaceHash   *string    `bun:"workspace_hash"`
+	CreatedAt       string     `bun:"created_at"`
+}
+
+func (m *workspaceVersionModel) BeforeAppendModel(ctx context.Context, query bun.Query) error {
+	orgID := app.TenantOrgIDFromCtx(ctx)
+	if orgID == uuid.Nil {
+		return nil
+	}
+	if _, ok := query.(*bun.InsertQuery); ok && m != nil && m.OrgID == nil {
+		m.OrgID = &orgID
+	}
+	return nil
+}
+
+func (m *workspaceVersionModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyAPIStoreTenantWhere(ctx, query)
+}
+
+func (m *workspaceVersionModel) BeforeUpdate(ctx context.Context, query *bun.UpdateQuery) error {
+	return applyAPIStoreTenantWhere(ctx, query)
+}
+
+func (m *workspaceVersionModel) BeforeDelete(ctx context.Context, query *bun.DeleteQuery) error {
+	return applyAPIStoreTenantWhere(ctx, query)
+}
+
+type workspaceVersionSettingsModel struct {
+	bun.BaseModel `bun:"table:workspace_version_settings"`
+
+	ID                   int `bun:"id,pk"`
+	CLIVersioningEnabled int `bun:"cli_versioning_enabled"`
+}
+
+type apiStoreViewCountModel struct {
+	bun.BaseModel `bun:"table:views"`
+
+	ID int64 `bun:"id,pk"`
+}
+
+func (m *apiStoreViewCountModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyAPIStoreTenantWhere(ctx, query)
+}
+
+type apiStoreElementCountModel struct {
+	bun.BaseModel `bun:"table:elements"`
+
+	ID int64 `bun:"id,pk"`
+}
+
+func (m *apiStoreElementCountModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyAPIStoreTenantWhere(ctx, query)
+}
+
+type apiStoreConnectorCountModel struct {
+	bun.BaseModel `bun:"table:connectors"`
+
+	ID int64 `bun:"id,pk"`
+}
+
+func (m *apiStoreConnectorCountModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyAPIStoreTenantWhere(ctx, query)
 }
 
 func (a *APIStore) ListVersions(ctx context.Context, workspaceID uuid.UUID, limit int) ([]*diagv1.WorkspaceVersionInfo, error) {
+	ctx = app.WithTenantOrgID(ctx, workspaceID)
 	if limit <= 0 {
 		limit = 50
 	}
@@ -599,6 +661,7 @@ func (a *APIStore) ListVersions(ctx context.Context, workspaceID uuid.UUID, limi
 }
 
 func (a *APIStore) GetLatestVersion(ctx context.Context, workspaceID uuid.UUID) (*diagv1.WorkspaceVersionInfo, error) {
+	ctx = app.WithTenantOrgID(ctx, workspaceID)
 	var row workspaceVersionModel
 	if err := a.bunDB.NewSelect().Model(&row).Order("id DESC").Limit(1).Scan(ctx); err != nil {
 		return nil, ErrUnimplemented
@@ -607,6 +670,7 @@ func (a *APIStore) GetLatestVersion(ctx context.Context, workspaceID uuid.UUID) 
 }
 
 func (a *APIStore) CreateVersion(ctx context.Context, workspaceID uuid.UUID, versionID, source string, parentID *int32, viewCount, elementCount, connectorCount int, description, workspaceHash *string) (*diagv1.WorkspaceVersionInfo, error) {
+	ctx = app.WithTenantOrgID(ctx, workspaceID)
 	var parent *int64
 	if parentID != nil {
 		value := int64(*parentID)
@@ -630,11 +694,11 @@ func (a *APIStore) CreateVersion(ctx context.Context, workspaceID uuid.UUID, ver
 }
 
 func (a *APIStore) GetVersioningEnabled(ctx context.Context, workspaceID uuid.UUID) (bool, error) {
-	var enabled int
-	if err := a.bunDB.NewSelect().Table("workspace_version_settings").Column("cli_versioning_enabled").Where("id = 1").Scan(ctx, &enabled); err != nil {
+	var row workspaceVersionSettingsModel
+	if err := a.bunDB.NewSelect().Model(&row).Column("cli_versioning_enabled").Where("id = 1").Scan(ctx); err != nil {
 		return true, nil
 	}
-	return enabled == 1, nil
+	return row.CLIVersioningEnabled == 1, nil
 }
 
 func (a *APIStore) SetVersioningEnabled(ctx context.Context, workspaceID uuid.UUID, enabled bool) error {
@@ -642,11 +706,7 @@ func (a *APIStore) SetVersioningEnabled(ctx context.Context, workspaceID uuid.UU
 	if enabled {
 		value = 1
 	}
-	_, err := a.bunDB.NewInsert().Model(&struct {
-		bun.BaseModel         `bun:"table:workspace_version_settings"`
-		ID                  int `bun:"id,pk"`
-		CLIVersioningEnabled int `bun:"cli_versioning_enabled"`
-	}{ID: 1, CLIVersioningEnabled: value}).
+	_, err := a.bunDB.NewInsert().Model(&workspaceVersionSettingsModel{ID: 1, CLIVersioningEnabled: value}).
 		On("CONFLICT(id) DO UPDATE").
 		Set("cli_versioning_enabled = excluded.cli_versioning_enabled").
 		Exec(ctx)
@@ -654,19 +714,48 @@ func (a *APIStore) SetVersioningEnabled(ctx context.Context, workspaceID uuid.UU
 }
 
 func (a *APIStore) GetWorkspaceResourceCounts(ctx context.Context, workspaceID uuid.UUID) (views, elements, connectors int, err error) {
-	views, err = a.bunDB.NewSelect().Model((*app.ViewTreeNode)(nil)).Table("views").Count(ctx)
+	ctx = app.WithTenantOrgID(ctx, workspaceID)
+	viewQuery := a.bunDB.NewSelect().Model((*apiStoreViewCountModel)(nil))
+	if workspaceID != uuid.Nil {
+		viewQuery = viewQuery.Where("org_id = ?", workspaceID)
+	}
+	views, err = viewQuery.Count(ctx)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	elements, err = a.bunDB.NewSelect().Model((*app.LibraryElement)(nil)).Table("elements").Count(ctx)
+	elementQuery := a.bunDB.NewSelect().Model((*apiStoreElementCountModel)(nil))
+	if workspaceID != uuid.Nil {
+		elementQuery = elementQuery.Where("org_id = ?", workspaceID)
+	}
+	elements, err = elementQuery.Count(ctx)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	connectors, err = a.bunDB.NewSelect().Model((*app.Connector)(nil)).Table("connectors").Count(ctx)
+	connectorQuery := a.bunDB.NewSelect().Model((*apiStoreConnectorCountModel)(nil))
+	if workspaceID != uuid.Nil {
+		connectorQuery = connectorQuery.Where("org_id = ?", workspaceID)
+	}
+	connectors, err = connectorQuery.Count(ctx)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	return views, elements, connectors, nil
+}
+
+func applyAPIStoreTenantWhere(ctx context.Context, query any) error {
+	orgID := app.TenantOrgIDFromCtx(ctx)
+	if orgID == uuid.Nil {
+		return nil
+	}
+	switch q := query.(type) {
+	case *bun.SelectQuery:
+		q.Where("org_id = ?", orgID)
+	case *bun.UpdateQuery:
+		q.Where("org_id = ?", orgID)
+	case *bun.DeleteQuery:
+		q.Where("org_id = ?", orgID)
+	}
+	return nil
 }
 
 // ─── Conversion helpers ──────────────────────────────────────────────────────

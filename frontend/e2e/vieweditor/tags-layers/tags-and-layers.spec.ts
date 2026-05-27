@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   createTag,
@@ -7,13 +7,9 @@ import {
   listLayers,
   nodeByName,
   openElementPanel,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('shows a tag in the explorer and applies it to an element from the panel', async ({ page }) => {
   const { elements } = await createAndLoadDiagramWithNodes(page, 1, 'Tag Toggle')

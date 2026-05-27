@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 
 	"github.com/google/uuid"
@@ -26,6 +27,26 @@ type tagModel struct {
 	Name        string     `bun:"name,pk"`
 	Color       string     `bun:"color"`
 	Description *string    `bun:"description"`
+}
+
+func (m *tagModel) BeforeAppendModel(ctx context.Context, query bun.Query) error {
+	return applyTenantScope(ctx, query, func(orgID uuid.UUID) {
+		if m != nil && m.OrgID == nil {
+			m.OrgID = &orgID
+		}
+	})
+}
+
+func (m *tagModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *tagModel) BeforeUpdate(ctx context.Context, query *bun.UpdateQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *tagModel) BeforeDelete(ctx context.Context, query *bun.DeleteQuery) error {
+	return applyTenantWhere(ctx, query)
 }
 
 type elementPlacementModel struct {
@@ -61,6 +82,26 @@ type connectorModel struct {
 	UpdatedAt       string     `bun:"updated_at"`
 }
 
+func (m *connectorModel) BeforeAppendModel(ctx context.Context, query bun.Query) error {
+	return applyTenantScope(ctx, query, func(orgID uuid.UUID) {
+		if m != nil && m.OrgID == nil {
+			m.OrgID = &orgID
+		}
+	})
+}
+
+func (m *connectorModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *connectorModel) BeforeUpdate(ctx context.Context, query *bun.UpdateQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *connectorModel) BeforeDelete(ctx context.Context, query *bun.DeleteQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
 type elementModel struct {
 	bun.BaseModel `bun:"table:elements"`
 
@@ -82,6 +123,26 @@ type elementModel struct {
 	UpdatedAt            string     `bun:"updated_at"`
 }
 
+func (m *elementModel) BeforeAppendModel(ctx context.Context, query bun.Query) error {
+	return applyTenantScope(ctx, query, func(orgID uuid.UUID) {
+		if m != nil && m.OrgID == nil {
+			m.OrgID = &orgID
+		}
+	})
+}
+
+func (m *elementModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *elementModel) BeforeUpdate(ctx context.Context, query *bun.UpdateQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *elementModel) BeforeDelete(ctx context.Context, query *bun.DeleteQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
 type viewModel struct {
 	bun.BaseModel `bun:"table:views"`
 
@@ -98,6 +159,57 @@ type viewModel struct {
 	UpdatedAt      string     `bun:"updated_at"`
 }
 
+func (m *viewModel) BeforeAppendModel(ctx context.Context, query bun.Query) error {
+	return applyTenantScope(ctx, query, func(orgID uuid.UUID) {
+		if m != nil && m.OrgID == nil {
+			m.OrgID = &orgID
+		}
+	})
+}
+
+func (m *viewModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *viewModel) BeforeUpdate(ctx context.Context, query *bun.UpdateQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *viewModel) BeforeDelete(ctx context.Context, query *bun.DeleteQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+type viewMarkdownModel struct {
+	bun.BaseModel `bun:"table:view_markdown_documents"`
+
+	ViewID    int64      `bun:"view_id,pk"`
+	OrgID     *uuid.UUID `bun:"org_id,nullzero"`
+	Path      string     `bun:"path"`
+	IsManaged bool       `bun:"is_managed"`
+	CreatedAt string     `bun:"created_at"`
+	UpdatedAt string     `bun:"updated_at"`
+}
+
+func (m *viewMarkdownModel) BeforeAppendModel(ctx context.Context, query bun.Query) error {
+	return applyTenantScope(ctx, query, func(orgID uuid.UUID) {
+		if m != nil && m.OrgID == nil {
+			m.OrgID = &orgID
+		}
+	})
+}
+
+func (m *viewMarkdownModel) BeforeSelect(ctx context.Context, query *bun.SelectQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *viewMarkdownModel) BeforeUpdate(ctx context.Context, query *bun.UpdateQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
+func (m *viewMarkdownModel) BeforeDelete(ctx context.Context, query *bun.DeleteQuery) error {
+	return applyTenantWhere(ctx, query)
+}
+
 type visibilityOverrideModel struct {
 	bun.BaseModel `bun:"table:view_visibility_overrides"`
 
@@ -107,6 +219,34 @@ type visibilityOverrideModel struct {
 	LevelDelta   int    `bun:"level_delta"`
 	CreatedAt    string `bun:"created_at"`
 	UpdatedAt    string `bun:"updated_at"`
+}
+
+func applyTenantScope(ctx context.Context, query bun.Query, setOrgID func(uuid.UUID)) error {
+	orgID := TenantOrgIDFromCtx(ctx)
+	if orgID == uuid.Nil {
+		return nil
+	}
+	switch query.(type) {
+	case *bun.InsertQuery:
+		setOrgID(orgID)
+	}
+	return nil
+}
+
+func applyTenantWhere(ctx context.Context, query any) error {
+	orgID := TenantOrgIDFromCtx(ctx)
+	if orgID == uuid.Nil {
+		return nil
+	}
+	switch q := query.(type) {
+	case *bun.SelectQuery:
+		q.Where("org_id = ?", orgID)
+	case *bun.UpdateQuery:
+		q.Where("org_id = ?", orgID)
+	case *bun.DeleteQuery:
+		q.Where("org_id = ?", orgID)
+	}
+	return nil
 }
 
 func viewLayerFromModel(row viewLayerModel) ViewLayer {

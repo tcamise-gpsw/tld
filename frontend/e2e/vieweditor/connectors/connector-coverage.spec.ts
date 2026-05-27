@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   createConnector,
@@ -6,12 +6,8 @@ import {
   listConnectors,
   nodeByName,
   openConnectorPanelFromFirstEdge,
-  prepareStorage,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('delete confirmation can be canceled without removing the connector', async ({ page }) => {
   const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 2, 'Connector Cancel Delete')

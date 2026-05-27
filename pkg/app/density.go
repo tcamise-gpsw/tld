@@ -12,8 +12,8 @@ import (
 const (
 	MinDensityLevel  = -2
 	MaxDensityLevel  = 2
-	MinOverrideDelta = -4
-	MaxOverrideDelta = 4
+	MinOverrideDelta = -2
+	MaxOverrideDelta = 2
 )
 
 type DensitySignalKey struct {
@@ -107,9 +107,9 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 	for _, override := range overrides {
 		switch override.ResourceType {
 		case "element":
-			elementDeltas[override.ResourceID] = override.LevelDelta
+			elementDeltas[override.ResourceID] = ClampOverrideDelta(override.LevelDelta)
 		case "connector":
-			connectorDeltas[override.ResourceID] = override.LevelDelta
+			connectorDeltas[override.ResourceID] = ClampOverrideDelta(override.LevelDelta)
 		}
 	}
 
@@ -151,9 +151,6 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 		elementLimit = len(rankedElements)
 	}
 	for _, ranked := range rankedElements {
-		if ranked.delta <= -4 || (caps.Full && ranked.delta < 0) {
-			continue
-		}
 		if !caps.Full && len(visibleElements) >= elementLimit && ranked.delta <= 0 {
 			continue
 		}
@@ -186,9 +183,6 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 	}
 	for _, ranked := range rankedConnectors {
 		connector := ranked.item
-		if ranked.delta <= -4 || (caps.Full && ranked.delta < 0) {
-			continue
-		}
 		if ranked.delta > 0 {
 			visibleElements[connector.SourceElementID] = struct{}{}
 			visibleElements[connector.TargetElementID] = struct{}{}
@@ -270,7 +264,7 @@ func (s *Store) ViewDensityLevel(ctx context.Context, viewID int64) (int, error)
 		DensityLevel int `bun:"density_level"`
 	}
 	err := s.bun.NewSelect().
-		Table("views").
+		Model((*viewModel)(nil)).
 		Column("density_level").
 		Where("id = ?", viewID).
 		Scan(ctx, &row)
@@ -285,7 +279,7 @@ func (s *Store) SetViewDensityLevel(ctx context.Context, viewID int64, level int
 		return err
 	}
 	res, err := s.bun.NewUpdate().
-		Table("views").
+		Model((*viewModel)(nil)).
 		Set("density_level = ?", level).
 		Set("updated_at = ?", nowString()).
 		Where("id = ?", viewID).
@@ -319,7 +313,7 @@ func (s *Store) VisibilityOverrides(ctx context.Context, viewID int64) ([]Visibi
 			ViewID:       row.ViewID,
 			ResourceType: row.ResourceType,
 			ResourceID:   row.ResourceID,
-			LevelDelta:   row.LevelDelta,
+			LevelDelta:   ClampOverrideDelta(row.LevelDelta),
 			CreatedAt:    row.CreatedAt,
 			UpdatedAt:    row.UpdatedAt,
 		})
@@ -410,7 +404,7 @@ func (s *Store) visibilityOverride(ctx context.Context, viewID int64, resourceTy
 		ViewID:       row.ViewID,
 		ResourceType: row.ResourceType,
 		ResourceID:   row.ResourceID,
-		LevelDelta:   row.LevelDelta,
+		LevelDelta:   ClampOverrideDelta(row.LevelDelta),
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
 	}, nil

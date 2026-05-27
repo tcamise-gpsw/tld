@@ -1,16 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import { readFile } from 'node:fs/promises'
 import {
   createAndLoadDiagramWithNodes,
   createConnector,
-  prepareStorage,
   reactFlowPaneBox,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('exported Mermaid download contains node names and edge syntax', async ({ page }) => {
   const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 2, 'Export Content')

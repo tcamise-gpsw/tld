@@ -1,11 +1,11 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '../fixtures'
+import type { Page } from '@playwright/test'
 import {
   createApiView,
   createConnector,
   createLayer,
   createPlacedElement,
   createTag,
-  prepareStorage,
   uniqueName,
 } from '../helpers/vieweditor'
 
@@ -22,9 +22,6 @@ declare global {
   }
 }
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 async function canvasPixelStats(page: Page, region?: CanvasRect) {
   return page.locator('canvas').evaluate((canvas: HTMLCanvasElement, sample?: CanvasRect) => {

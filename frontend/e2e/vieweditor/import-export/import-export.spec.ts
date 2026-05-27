@@ -1,16 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   createConnector,
   currentViewId,
   nodeByName,
-  prepareStorage,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('imports a Mermaid diagram through the import modal', async ({ page }) => {
   await createAndLoadDiagramWithNodes(page, 0, 'Import Host')

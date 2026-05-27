@@ -148,9 +148,9 @@ func TestServerInjectsWorkspaceIDIntoConnectRPCResponses(t *testing.T) {
 	workspaceID := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 	sqliteStore, routes := newTestServer(t, workspaceID, nil)
 	if _, err := sqliteStore.DB().Exec(`
-		INSERT INTO elements(id, name, tags, technology_connectors, created_at, updated_at)
-		VALUES (10, 'API', '[]', '[]', 'now', 'now');
-	`); err != nil {
+		INSERT INTO elements(id, org_id, name, tags, technology_connectors, created_at, updated_at)
+		VALUES (10, ?, 'API', '[]', '[]', 'now', 'now');
+	`, workspaceID.String()); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(routes)

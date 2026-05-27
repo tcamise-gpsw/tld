@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   addPlacement,
   createAndLoadDiagramWithNodes,
@@ -7,14 +7,10 @@ import {
   getElement,
   listPlacements,
   openElementPanel,
-  prepareStorage,
   updateElement,
   uniqueName,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('adds and removes a custom technology chip', async ({ page }) => {
   const { elements } = await createAndLoadDiagramWithNodes(page, 1, 'Tech Chip')

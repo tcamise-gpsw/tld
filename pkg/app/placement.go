@@ -1,6 +1,10 @@
 package app
 
-import "context"
+import (
+	"context"
+
+	"github.com/google/uuid"
+)
 
 type placementJoinRow struct {
 	ID                   int64   `bun:"id"`
@@ -24,14 +28,17 @@ type placementJoinRow struct {
 
 func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, error) {
 	var scanned []placementJoinRow
-	if err := s.bun.NewSelect().
+	query := s.bun.NewSelect().
 		TableExpr("placements AS p").
 		ColumnExpr("p.id, p.view_id, p.element_id, p.position_x, p.position_y").
 		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language").
 		Join("JOIN elements AS e ON e.id = p.element_id").
 		Where("p.view_id = ?", viewID).
-		Order("p.id").
-		Scan(ctx, &scanned); err != nil {
+		Order("p.id")
+	if orgID := TenantOrgIDFromCtx(ctx); orgID != uuid.Nil {
+		query = query.Where("e.org_id = ?", orgID)
+	}
+	if err := query.Scan(ctx, &scanned); err != nil {
 		return nil, err
 	}
 	viewMeta, err := s.childViewMetaMap(ctx)
@@ -53,14 +60,17 @@ func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, 
 
 func (s *Store) AllPlacements(ctx context.Context) ([]PlacedElement, error) {
 	var scanned []placementJoinRow
-	if err := s.bun.NewSelect().
+	query := s.bun.NewSelect().
 		TableExpr("placements AS p").
 		ColumnExpr("p.id, p.view_id, p.element_id, p.position_x, p.position_y").
 		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language").
 		Join("JOIN elements AS e ON e.id = p.element_id").
 		Order("p.view_id").
-		Order("p.id").
-		Scan(ctx, &scanned); err != nil {
+		Order("p.id")
+	if orgID := TenantOrgIDFromCtx(ctx); orgID != uuid.Nil {
+		query = query.Where("e.org_id = ?", orgID)
+	}
+	if err := query.Scan(ctx, &scanned); err != nil {
 		return nil, err
 	}
 	viewMeta, err := s.childViewMetaMap(ctx)

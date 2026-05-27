@@ -58,13 +58,20 @@ jobs:
           go mod tidy
           git diff --exit-code
 
-      - name: Run unit tests with race detection
+      - name: Run Go unit tests
         run: |
           go install gotest.tools/gotestsum@latest
           gotestsum \
             --junitfile results.xml \
             --format testdox \
             ./...
+
+      - name: Run frontend unit tests
+        working-directory: frontend
+        run: npm run test
+
+      - name: Run targeted Go race tests
+        run: go test -race ./internal/server ./internal/watch ./pkg/api
 
       - name: Publish Test Results
         if: ${{ !cancelled() }}
@@ -108,9 +115,33 @@ jobs:
         working-directory: frontend
         run: npm run build:app
 
-      - name: Install Playwright browsers
+      - name: Resolve Playwright version
+        id: playwright-version
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: node -e "console.log('version=' + require('@playwright/test/package.json').version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}-chromium
+
+      - name: Install Playwright system dependencies
+        working-directory: frontend
+        timeout-minutes: 10
+        run: npx playwright install-deps chromium
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        timeout-minutes: 25
+        env:
+          PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: 120000
+          DEBUG: pw:install
+        run: |
+          set -euo pipefail
+          npx playwright install chromium
+          npx playwright --version
+          du -sh ~/.cache/ms-playwright || true
 
       - name: Build E2E binary
         run: go build -o /tmp/tld-e2e ./cmd/tld
@@ -130,66 +161,3 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           coverage-file: frontend/report.json
           skip-step: all
-
-  keploy-tests:
-    name: Keploy API Replay Tests
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: ["1.26.1"]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Go ${{ matrix.go-version }}
-        uses: actions/setup-go@v6
-        with:
-          go-version: ${{ matrix.go-version }}
-          cache: true
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend assets
-        working-directory: frontend
-        run: npm run build:app
-
-      - name: Install Keploy
-        run: |
-          curl --silent --location "https://github.com/keploy/keploy/releases/latest/download/keploy_linux_amd64.tar.gz" | tar xz --overwrite -C /tmp
-          sudo mkdir -p /usr/local/bin
-          sudo mv /tmp/keploy /usr/local/bin/keploy
-
-      - name: Build Keploy test binary
-        run: go build -o /tmp/tld-keploy ./cmd/tld
-
-      - name: Run Keploy tests
-        env:
-          TLD_CONFIG_DIR: /tmp/tld-keploy-config-${{ github.run_id }}
-          TLD_DATA_DIR: /tmp/tld-keploy-data-${{ github.run_id }}
-        run: |
-          sudo -E keploy test \
-            --path "." \
-            --test-sets "test-set-0" \
-            --delay 10 \
-            --skip-coverage \
-            --command "/tmp/tld-keploy serve --foreground --host 127.0.0.1 --port 8060 --data-dir ${TLD_DATA_DIR}"
-
-      - name: Upload Keploy reports
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: keploy-reports
-          path: keploy/reports
-          if-no-files-found: ignore

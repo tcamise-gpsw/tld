@@ -236,7 +236,7 @@ type duplicateGroup struct {
 func deduplicateConnectors(ctx context.Context, tx bun.Tx, survivorID int64) error {
 	var groups []duplicateGroup
 	if err := tx.NewSelect().
-		Table("connectors").
+		Model((*connectorModel)(nil)).
 		Column("view_id", "source_element_id", "target_element_id").
 		ColumnExpr("MIN(id) AS survivor_id").
 		Where("source_element_id = ? OR target_element_id = ?", survivorID, survivorID).

@@ -213,6 +213,7 @@ interface CanvasInteractionOptions {
   handleConnectorDeleted: (id: number) => void
   onPlacementMoved?: (before: PlacedElement, after: PlacedElement) => void
   onPlacementsMoved?: (before: PlacedElement[], after: PlacedElement[]) => void
+  onElementPositionPreview?: (elementId: number, x: number, y: number) => void
   onPlacementRemoved?: (placement: PlacedElement) => void
   onConnectorUpdated?: (before: Connector, after: Connector) => void
   onConnectorDeleted?: (connector: Connector) => void
@@ -307,6 +308,7 @@ export function useCanvasInteractions({
   handleConnectorDeleted,
   onPlacementMoved,
   onPlacementsMoved,
+  onElementPositionPreview,
   onPlacementRemoved,
   onConnectorUpdated,
   onConnectorDeleted,
@@ -822,11 +824,19 @@ export function useCanvasInteractions({
     })
   }, [canEdit, rfNodesRef, viewId])
 
-  const onNodeDrag: NodeDragHandler = useCallback(() => {
+  const onNodeDrag: NodeDragHandler = useCallback((_e, node) => {
     // React Flow already updates rfNodes via onNodesChange while dragging.
     // Mirroring into viewElements here forces every derived edge/node to rebuild
     // on each pointer frame, so persist to app state only on drag stop.
-  }, [])
+    if (!canEdit || !onElementPositionPreview) return
+    const selectedElementNodes = node.selected
+      ? rfNodesRef.current.filter((candidate) => candidate.selected && candidate.type === 'elementNode' && parseNumericId(candidate.id) !== null)
+      : [node]
+    selectedElementNodes.forEach((candidate) => {
+      const elementId = parseNumericId(candidate.id)
+      if (elementId !== null) onElementPositionPreview(elementId, candidate.position.x, candidate.position.y)
+    })
+  }, [canEdit, onElementPositionPreview, rfNodesRef])
 
   const positionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const dragStartPositionsRef = useRef<Record<string, { x: number; y: number }>>({})

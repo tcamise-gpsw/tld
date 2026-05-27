@@ -4,6 +4,7 @@ const port = Number(process.env.TLD_E2E_PORT ?? 8060)
 const baseURL = process.env.TLD_E2E_BASE_URL ?? `http://127.0.0.1:${port}`
 const dataDir = process.env.TLD_E2E_DATA_DIR ?? `/tmp/tld-playwright-${process.env.GITHUB_RUN_ID ?? 'local'}`
 const binary = process.env.TLD_E2E_BINARY ?? 'tld'
+const shouldReuseServer = !process.env.CI && !process.env.TLD_E2E_BINARY
 
 export default defineConfig({
   testDir: './e2e',
@@ -31,7 +32,7 @@ export default defineConfig({
     command: `${binary} serve --foreground --host 127.0.0.1 --port ${port} --data-dir ${dataDir}`,
     url: `${baseURL}/api/ready`,
     timeout: 30_000,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: shouldReuseServer,
     cwd: '..',
   },
 })

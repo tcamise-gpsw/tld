@@ -1,15 +1,11 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../fixtures'
 import {
   createApiView,
   deleteView,
   getView,
-  prepareStorage,
   uniqueName,
 } from '../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 async function openNodeMenu(page: import('@playwright/test').Page, name: string) {
   await page.getByTestId('views-search-input').fill(name)

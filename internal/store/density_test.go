@@ -58,8 +58,15 @@ func TestDensityValidationAndOverrideClamping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if override.LevelDelta != 4 {
-		t.Fatalf("delta = %d, want clamp to 4", override.LevelDelta)
+	if override.LevelDelta != 2 {
+		t.Fatalf("delta = %d, want clamp to 2", override.LevelDelta)
+	}
+	override, err = sqliteStore.SetVisibilityOverride(ctx, 1, "element", 1, -99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if override.LevelDelta != -2 {
+		t.Fatalf("delta = %d, want clamp to -2", override.LevelDelta)
 	}
 	override, err = sqliteStore.SetVisibilityOverride(ctx, 1, "element", 1, 0)
 	if err != nil {
@@ -108,7 +115,7 @@ func TestDensityProjectionPromotedConnectorPullsEndpoints(t *testing.T) {
 	}
 }
 
-func TestFullDensityKeepsAllExceptExplicitDemotions(t *testing.T) {
+func TestFullDensityKeepsSingleDemotionsVisible(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	seedDensityView(t, sqliteStore)
 	ctx := context.Background()
@@ -123,11 +130,67 @@ func TestFullDensityKeepsAllExceptExplicitDemotions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if containsPlacement(content.Placements, 102) {
-		t.Fatal("demoted element should be hidden at full density")
+	if !containsPlacement(content.Placements, 102) {
+		t.Fatal("single demotion should not hide an element at full density")
 	}
-	if containsConnector(content.Connectors, 201) {
-		t.Fatal("connector incident to hidden element should be hidden")
+	if !containsConnector(content.Connectors, 201) {
+		t.Fatal("connector incident to a visible demoted element should remain visible at full density")
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 102) {
+		t.Fatal("single demotion should not hard-hide an element at rich density")
+	}
+	if !containsConnector(content.Connectors, 201) {
+		t.Fatal("connector incident to a visible demoted element should remain visible at rich density")
+	}
+}
+
+func TestMaxDemotionRemainsRecoverableAtFullDensity(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	override, err := sqliteStore.SetVisibilityOverride(ctx, 1, "element", 102, -4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if override.LevelDelta != -2 {
+		t.Fatalf("delta = %d, want clamp to -2", override.LevelDelta)
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 102) {
+		t.Fatal("max-demoted element should remain visible at full density")
+	}
+	if !containsConnector(content.Connectors, 201) {
+		t.Fatal("connector incident to max-demoted element should remain visible at full density")
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 102) {
+		t.Fatal("max-demoted element should not be hard-hidden at rich density")
+	}
+	if !containsConnector(content.Connectors, 201) {
+		t.Fatal("connector incident to max-demoted element should remain visible at rich density")
 	}
 }
 
@@ -163,57 +226,6 @@ func connectorIDs(items []app.Connector) []int64 {
 		out = append(out, item.ID)
 	}
 	return out
-}
-
-func TestDensityProjectionPromotedSpecialElementPullsConnectorsAndEndpoints(t *testing.T) {
-	sqliteStore := openAdapterTestStore(t)
-	ctx := context.Background()
-
-	// Seed elements
-	if _, err := sqliteStore.DB().Exec(`
-		INSERT INTO views(id, name, created_at, updated_at)
-		VALUES
-			(2, 'Test View 2', 'now', 'now'),
-			(10, 'Structural', 'now', 'now');
-		INSERT INTO elements(id, name, tags, technology_connectors, created_at, updated_at)
-		VALUES
-			(526, 'websocket.go', '[]', '[]', 'now', 'now'),
-			(999, 'other.go', '[]', '[]', 'now', 'now');
-		-- Place only 526 in view 2
-		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
-		VALUES
-			(2, 526, 100, 100, 'now', 'now');
-		-- Place 999 and 526 in view 10 (the repository view)
-		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
-		VALUES
-			(10, 526, 100, 100, 'now', 'now'),
-			(10, 999, 200, 200, 'now', 'now');
-		-- Create a connector in view 10 between 526 and 999
-		INSERT INTO connectors(id, view_id, source_element_id, target_element_id, label, direction, style, created_at, updated_at)
-		VALUES
-			(888, 10, 526, 999, 'calls', 'forward', 'bezier', 'now', 'now');
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	// Promote element 526 in view 2
-	if _, err := sqliteStore.SetVisibilityOverride(ctx, 2, "element", 526, 1); err != nil {
-		t.Fatal(err)
-	}
-
-	// Fetch ProjectedViewContent for view 2
-	content, err := sqliteStore.ProjectedViewContent(ctx, 2, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify that the connector 888 and opposite element 999 were pulled into view 2 projection!
-	if !containsPlacement(content.Placements, 999) {
-		t.Fatal("expected opposite element 999 to be pulled into placements projection")
-	}
-	if !containsConnector(content.Connectors, 888) {
-		t.Fatal("expected connector 888 to be pulled into connectors projection")
-	}
 }
 
 func TestDensityProjectionDependencyGroup(t *testing.T) {

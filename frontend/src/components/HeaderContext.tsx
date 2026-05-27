@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState } from 'react'
 
-type HeaderPayload = { node: React.ReactNode | null; hideMobileBar?: boolean } | React.ReactNode | null
+type HeaderPayload = { node: React.ReactNode | null; hideMobileBar?: boolean; collaboration?: unknown } | React.ReactNode | null
 type HeaderSetter = (payload: HeaderPayload) => void
 
 const HeaderContext = createContext<{ header: HeaderPayload; setHeader: HeaderSetter } | undefined>(undefined)

@@ -1,16 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
   createConnector,
   expectConnector,
   listConnectors,
   openConnectorPanelFromFirstEdge,
-  prepareStorage,
 } from '../../helpers/vieweditor'
 
-test.beforeEach(async ({ page }) => {
-  await prepareStorage(page)
-})
 
 test('edits connector metadata, direction, and style from the connector panel', async ({ page }) => {
   const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 2, 'Connector Edit')

@@ -1,6 +1,8 @@
 package localserver_test
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,7 +13,11 @@ import (
 	"testing"
 	"testing/fstest"
 
+	diagv1connect "buf.build/gen/go/tldiagramcom/diagram/connectrpc/go/diag/v1/diagv1connect"
+	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
+	"connectrpc.com/connect"
 	"github.com/mertcikla/tld/v2/internal/localserver"
+	_ "modernc.org/sqlite"
 )
 
 func TestBootstrapCreatesDatabaseAndReadyEndpoint(t *testing.T) {
@@ -88,6 +94,55 @@ func TestBootstrapReportsExistingDatabase(t *testing.T) {
 	}
 	if second.Resources.Views < 0 || second.Resources.Elements < 0 || second.Resources.Connectors < 0 {
 		t.Fatalf("second bootstrap contains negative resources: %+v", second.Resources)
+	}
+}
+
+func TestBootstrapServesLegacyNullOrgRows(t *testing.T) {
+	dir := t.TempDir()
+	app, err := localserver.Bootstrap(dir)
+	if err != nil {
+		t.Fatalf("bootstrap app: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", app.DBPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close db: %v", closeErr)
+		}
+	}()
+	if _, err := db.Exec(`
+		INSERT INTO elements(id, name, tags, technology_connectors, created_at, updated_at)
+		VALUES (10, 'API', '[]', '[]', 'now', 'now');
+		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
+		VALUES (1, 10, 0, 0, 'now', 'now');
+	`); err != nil {
+		t.Fatalf("seed legacy rows: %v", err)
+	}
+
+	server := httptest.NewServer(app.Handler)
+	defer server.Close()
+
+	client := diagv1connect.NewWorkspaceServiceClient(server.Client(), server.URL+"/api")
+	elements, err := client.ListElements(context.Background(), connect.NewRequest(&diagv1.ListElementsRequest{}))
+	if err != nil {
+		t.Fatalf("list elements: %v", err)
+	}
+	if got := len(elements.Msg.GetElements()); got != 1 {
+		t.Fatalf("elements length = %d, want 1", got)
+	}
+
+	workspace, err := client.GetWorkspace(context.Background(), connect.NewRequest(&diagv1.GetWorkspaceRequest{IncludeContent: true}))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if got := len(workspace.Msg.GetViews()); got != 1 {
+		t.Fatalf("views length = %d, want 1", got)
+	}
+	if got := len(workspace.Msg.GetContent()); got != 1 {
+		t.Fatalf("content length = %d, want 1", got)
 	}
 }
 
