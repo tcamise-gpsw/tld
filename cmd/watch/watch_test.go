@@ -80,6 +80,7 @@ func TestConfirmLSPProceedWarnsAndContinuesForNonInteractiveInput(t *testing.T) 
 		"Reference resolution quality will be lower",
 		"Go (gopls): not found in PATH",
 		"Error: no installed LSP server found",
+		`Override: tld config set watch.lsp.commands.go "/path/to/gopls"`,
 		"Remediation: install the missing language server(s) or ensure they are on your PATH",
 		"Non-interactive input detected; continuing without confirmation",
 	} {
@@ -219,7 +220,6 @@ func TestLogWatchEventSuppressesLSPStatusUpdates(t *testing.T) {
 		t.Fatalf("lsp.status should not print CLI updates, got %q", out.String())
 	}
 }
-
 
 func TestScanCommandPrintsCountsAndSkipsRepeatScan(t *testing.T) {
 	repo := initGitRepoNoCommit(t)

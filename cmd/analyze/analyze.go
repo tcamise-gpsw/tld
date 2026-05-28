@@ -442,6 +442,7 @@ func resolveAnalyzeWatchSettings(cfg *workspace.Config, languages []string, maxE
 			Enabled:          cfg.Watch.LSP.Enabled,
 			HealthInterval:   parseAnalyzeDurationOrZero(cfg.Watch.LSP.HealthInterval),
 			MemoryLimitBytes: cfg.Watch.LSP.MemoryLimitBytes,
+			Commands:         cfg.Watch.LSP.Commands,
 		}
 	}
 	if len(languages) > 0 {
@@ -584,6 +585,9 @@ func confirmLSPProceed(cmd *cobra.Command, status watchpkg.LSPStatus) error {
 		if server.LastError != "" {
 			term.Hint(cmd.OutOrStdout(), "    Error: "+server.LastError)
 		}
+		if server.Language != "" {
+			term.Hint(cmd.OutOrStdout(), fmt.Sprintf("    Override: tld config set watch.lsp.commands.%s %q", server.Language, suggestedLSPOverrideCommand(server.Command, server.Language)))
+		}
 	}
 
 	if hasUnavailable {
@@ -607,6 +611,18 @@ func confirmLSPProceed(cmd *cobra.Command, status watchpkg.LSPStatus) error {
 		return errors.New("aborted: LSP confirmation declined")
 	}
 	return nil
+}
+
+func suggestedLSPOverrideCommand(command, language string) string {
+	name := language + "-language-server"
+	fields := strings.Fields(command)
+	if len(fields) > 0 {
+		name = fields[0]
+		if idx := strings.LastIndexAny(name, `/\`); idx >= 0 && idx+1 < len(name) {
+			name = name[idx+1:]
+		}
+	}
+	return "/path/to/" + strings.Trim(name, `"'`)
 }
 
 func isInteractiveInput(r io.Reader) bool {

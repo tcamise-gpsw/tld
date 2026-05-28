@@ -159,6 +159,7 @@ type LSPStatus struct {
 type LSPServerStatus struct {
 	Language        string `json:"language"`
 	Command         string `json:"command,omitempty"`
+	CommandSource   string `json:"command_source,omitempty"`
 	Path            string `json:"path,omitempty"`
 	State           string `json:"state"`
 	PID             int    `json:"pid,omitempty"`
@@ -243,9 +244,10 @@ type ScaleConfig struct {
 }
 
 type LSPConfig struct {
-	Enabled          bool          `json:"enabled" yaml:"enabled"`
-	HealthInterval   time.Duration `json:"health_interval" yaml:"health_interval"`
-	MemoryLimitBytes int64         `json:"memory_limit_bytes" yaml:"memory_limit_bytes"`
+	Enabled          bool              `json:"enabled" yaml:"enabled"`
+	HealthInterval   time.Duration     `json:"health_interval" yaml:"health_interval"`
+	MemoryLimitBytes int64             `json:"memory_limit_bytes" yaml:"memory_limit_bytes"`
+	Commands         map[string]string `json:"commands,omitempty" yaml:"commands,omitempty"`
 }
 
 type RepresentRequest struct {

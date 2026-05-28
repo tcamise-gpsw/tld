@@ -205,6 +205,66 @@ func TestGlobalConfigLSPDefaultsAndEnvOverrides(t *testing.T) {
 	if cfg.Watch.LSP.MemoryLimitBytes != 2048 {
 		t.Fatalf("Watch.LSP.MemoryLimitBytes = %d, want 2048", cfg.Watch.LSP.MemoryLimitBytes)
 	}
+	if cfg.Watch.LSP.Commands["go"] != "" {
+		t.Fatalf("default Go LSP command = %q, want empty", cfg.Watch.LSP.Commands["go"])
+	}
+}
+
+func TestGlobalConfigLSPCommandOverrides(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	t.Setenv("TLD_WATCH_LSP_GO_COMMAND", "/opt/bin/gopls -remote=auto")
+	writeFile(t, filepath.Join(configDir, "tld.yaml"), `watch:
+  lsp:
+    commands:
+      python: pyright-langserver --stdio
+`)
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if got := cfg.Watch.LSP.Commands["go"]; got != "/opt/bin/gopls -remote=auto" {
+		t.Fatalf("Go command = %q", got)
+	}
+	if got := cfg.Watch.LSP.Commands["python"]; got != "pyright-langserver --stdio" {
+		t.Fatalf("Python command = %q", got)
+	}
+
+	if err := workspace.SetGlobalConfigValue("watch.lsp.commands.typescript", "typescript-language-server --stdio"); err != nil {
+		t.Fatalf("SetGlobalConfigValue command: %v", err)
+	}
+	cfg, err = workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig after set: %v", err)
+	}
+	if got := cfg.Watch.LSP.Commands["typescript"]; got != "typescript-language-server --stdio" {
+		t.Fatalf("TypeScript command = %q", got)
+	}
+	data, err := os.ReadFile(filepath.Join(configDir, "tld.yaml"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if content := string(data); !strings.Contains(content, "commands:") || !strings.Contains(content, "typescript: typescript-language-server --stdio") {
+		t.Fatalf("command override was not written:\n%s", content)
+	}
+	if err := workspace.SetGlobalConfigValue("watch.lsp.commands.ruby", "ruby-lsp"); err == nil {
+		t.Fatal("expected unsupported language key to fail")
+	}
+}
+
+func TestGlobalConfigRejectsUnsupportedLSPCommandLanguage(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	writeFile(t, filepath.Join(configDir, "tld.yaml"), `watch:
+  lsp:
+    commands:
+      ruby: ruby-lsp
+`)
+
+	if _, err := workspace.LoadGlobalConfig(); err == nil {
+		t.Fatal("expected unsupported LSP command language to fail validation")
+	}
 }
 
 func TestGlobalConfigScaleRecentAndCallerEnvOverrides(t *testing.T) {

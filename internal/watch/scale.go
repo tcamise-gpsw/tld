@@ -52,7 +52,9 @@ func planScan(repoRoot string, settings Settings, rules *ignore.Rules) (scanPlan
 			plan.Reason = "repository below scale threshold"
 			return plan, nil
 		}
-		plan.Reason = fmt.Sprintf("tracked files exceed %d", settings.Scale.MaxTrackedFiles)
+		plan.Reason = fmt.Sprintf("tracked files exceed %d; attempting full scan", settings.Scale.MaxTrackedFiles)
+		plan.Warnings = append(plan.Warnings, "full scan selected in auto mode; limited view is reserved for explicit requests or full-scan fallback")
+		return plan, nil
 	}
 	plan.Mode = "limited"
 	plan.Limited = true

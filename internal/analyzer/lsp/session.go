@@ -161,7 +161,7 @@ func (s *Session) Command() ResolvedCommand {
 	if s == nil {
 		return ResolvedCommand{}
 	}
-	return ResolvedCommand{Path: s.command.Path, Args: append([]string{}, s.command.Args...)}
+	return ResolvedCommand{Path: s.command.Path, Args: append([]string{}, s.command.Args...), CommandSource: s.command.CommandSource}
 }
 
 func (s *Session) SupportsDefinition() bool {

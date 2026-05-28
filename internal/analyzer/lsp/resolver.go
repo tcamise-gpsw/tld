@@ -36,6 +36,7 @@ type ResolverConfig struct {
 	HealthInterval    time.Duration
 	DefinitionTimeout time.Duration
 	MemoryLimitBytes  int64
+	Commands          map[analyzer.Language]string
 	Logger            EventLogger
 }
 
@@ -61,6 +62,7 @@ type StatusSnapshot struct {
 type ServerStatus struct {
 	Language        string `json:"language"`
 	Command         string `json:"command,omitempty"`
+	CommandSource   string `json:"command_source,omitempty"`
 	Path            string `json:"path,omitempty"`
 	State           string `json:"state"`
 	PID             int    `json:"pid,omitempty"`
@@ -289,7 +291,7 @@ func (r *MultiLanguageResolver) sessionForLanguage(ctx context.Context, language
 			return session, true, nil
 		}
 	}
-	command, err := ResolveServerCommand(language)
+	command, err := ResolveServerCommandWithOverrides(language, r.cfg.Commands, nil)
 	if err != nil {
 		status.State = StateUnavailable
 		status.LastError = err.Error()
@@ -299,6 +301,7 @@ func (r *MultiLanguageResolver) sessionForLanguage(ctx context.Context, language
 	}
 	status.Path = command.Path
 	status.Command = commandDisplay(command)
+	status.CommandSource = command.CommandSource
 	status.State = StateAvailable
 	r.logInfo(ctx, "watch.lsp.command_resolved", language, status, "path", command.Path)
 	r.mu.Unlock()
@@ -457,15 +460,30 @@ func (r *MultiLanguageResolver) ensureRequestedLocked(language analyzer.Language
 		return status
 	}
 	status := &ServerStatus{Language: string(language), State: StateRequested}
+	overrideCommand := strings.TrimSpace(r.cfg.Commands[language])
 	commands := DefaultCommands(language)
 	if len(commands) == 0 {
 		status.State = StateUnavailable
 		status.LastError = ErrServerNotConfigured{Language: language}.Error()
-	} else {
-		status.Command = commands[0].Display()
-		if command, err := ResolveServerCommand(language); err == nil {
+	} else if overrideCommand != "" {
+		status.Command = overrideCommand
+		status.CommandSource = CommandSourceOverride
+		if command, err := ResolveServerCommandWithOverrides(language, r.cfg.Commands, nil); err == nil {
 			status.Path = command.Path
 			status.Command = commandDisplay(command)
+			status.CommandSource = command.CommandSource
+			status.State = StateAvailable
+		} else {
+			status.State = StateUnavailable
+			status.LastError = err.Error()
+		}
+	} else {
+		status.Command = commands[0].Display()
+		status.CommandSource = CommandSourceDefault
+		if command, err := ResolveServerCommandWithOverrides(language, r.cfg.Commands, nil); err == nil {
+			status.Path = command.Path
+			status.Command = commandDisplay(command)
+			status.CommandSource = command.CommandSource
 			status.State = StateAvailable
 		} else {
 			status.State = StateUnavailable
@@ -520,6 +538,7 @@ func lspLogFields(language analyzer.Language, status *ServerStatus, args ...any)
 		fields = append(fields,
 			"state", status.State,
 			"command", status.Command,
+			"command_source", status.CommandSource,
 			"path", status.Path,
 			"pid", status.PID,
 			"memory_bytes", status.MemoryBytes,

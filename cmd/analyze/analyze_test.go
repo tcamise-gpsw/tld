@@ -460,6 +460,7 @@ func TestAnalyzeCmd_DryRunDoesNotWriteYAML(t *testing.T) {
 func TestAnalyzeCmd_WarnsWhenLimitedScanModeIsActive(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := t.TempDir()
+	t.Setenv("TLD_WATCH_SCALE_STRATEGY", "limited")
 	t.Setenv("TLD_WATCH_SCALE_MAX_TRACKED_FILES", "1")
 	t.Setenv("TLD_WATCH_SCALE_MAX_LIMITED_FILES", "10")
 	cmd.MustInitWorkspace(t, dir)
@@ -473,7 +474,7 @@ func TestAnalyzeCmd_WarnsWhenLimitedScanModeIsActive(t *testing.T) {
 		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 	for _, want := range []string{
-		"Limited scan mode active: tracked files exceed 1.",
+		"Limited scan mode active: limited scan requested.",
 		"Scanned recent files plus bounded reference/caller context; source symbols and connectors may still be omitted.",
 		"Limited expansion: recent=",
 		"Use `tld config set watch.scale.strategy full` or raise `watch.scale.max_tracked_files` for a full scan.",
