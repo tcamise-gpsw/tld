@@ -529,8 +529,8 @@ export default function Inventory() {
     <ViewEditorContext.Provider value={editorContext}>
       <Box data-testid="inventory-page" h="100%" bg="var(--bg-canvas)" display="flex" flexDir="column" overflow="hidden">
         {/* Header bar */}
-        <Flex px={4} py={2.5} gap={3} align="center" justify="center" borderBottom="1px solid" borderColor="whiteAlpha.100" flexShrink={0} position="relative">
-          <InputGroup size="sm" maxW="480px" w="full">
+        <Flex px={4} py={2.5} gap={3} align="center" justify={{ base: 'flex-start', md: 'center' }} borderBottom="1px solid" borderColor="whiteAlpha.100" flexShrink={0} position="relative">
+          <InputGroup size="sm" maxW={{ base: 'none', md: '480px' }} w="full" flex={1} minW={0}>
             <InputLeftElement pointerEvents="none" color="gray.500"><SearchIcon boxSize={3.5} /></InputLeftElement>
             <Input
               ref={searchInputRef}
@@ -562,11 +562,10 @@ export default function Inventory() {
               </InputRightElement>
             )}
           </InputGroup>
-          <Flex align="center" gap={2} position="absolute" right={4} flexShrink={0}>
-            <Box fontSize="xs" color="gray.500">
+          <Flex align="center" gap={2} position={{ base: 'static', md: 'absolute' }} right={{ md: 4 }} flexShrink={0}>
+            <Box fontSize="xs" color="gray.500" whiteSpace="nowrap">
               {loading ? <Spinner size="xs" /> : <><Box as="span" color="gray.300" fontWeight="medium">{filteredRows.length}</Box> / {rows.length}</>}
             </Box>
-            <Text fontSize="xs" color="gray.600">objects</Text>
           </Flex>
         </Flex>
 
