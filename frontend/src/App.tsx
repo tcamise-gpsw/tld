@@ -53,7 +53,13 @@ function AppLayout() {
           />
         </>
       )}
-      <Box flex="1" minH={0} overflow="hidden" position="relative">
+      <Box
+        flex="1"
+        minH={0}
+        overflow="hidden"
+        position="relative"
+        pb={{ base: hideTopBar ? 0 : 'calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px))', sm: 0 }}
+      >
         <Outlet />
       </Box>
     </Box>
