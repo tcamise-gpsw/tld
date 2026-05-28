@@ -61,6 +61,7 @@ const TYPE_OPTIONS: { value: InventoryType; label: string }[] = [
 const QUALITY_OPTIONS = ['untagged', 'missing description', 'has child view', 'unused element', 'empty view', 'missing label']
 const PAGE_SIZE_OPTIONS = [50, 100, 250]
 const DEFAULT_PAGE_SIZE = 100
+const TAGS_COLUMN_WIDTH = '112px'
 const MAX_VISIBLE_FILTER_OPTIONS = 100
 const DEFAULT_COLLAPSED_FILTER_SECTIONS = ['tags', 'kind', 'quality', 'sort']
 const ACCENT_CHECKBOX_SX = {
@@ -1056,7 +1057,7 @@ export default function Inventory() {
                     ) : (
                       <>
                         <SortableHeader label="Name" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} flex={1} />
-                        <Box w="200px"><SortableHeader label="Tags" sortKey={null} activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
+                        <Box w={TAGS_COLUMN_WIDTH}><SortableHeader label="Tags" sortKey={null} activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
                         <Box w="160px"><SortableHeader label="Usage" sortKey="usage" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
                         <Box w="90px"><SortableHeader label="Updated" sortKey="updatedAt" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
                       </>
@@ -1110,7 +1111,7 @@ export default function Inventory() {
                             <Text fontSize="11px" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
                           </Box>
                         </HStack>
-                        <Box w="200px" minW="200px" flexShrink={0}>
+                        <Box w={TAGS_COLUMN_WIDTH} minW={TAGS_COLUMN_WIDTH} flexShrink={0}>
                           <InventoryTagList
                             tags={row.tags}
                             tagColorMap={tagColorMap}
