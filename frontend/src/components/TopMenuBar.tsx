@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useEffect, useRef } from "react"
 import type { TopMenuBarSlots } from '../slots'
 import { Link as RouterLink, useLocation } from "react-router-dom"
 import {
@@ -14,6 +14,7 @@ import {
   Portal,
   Text,
   Tooltip,
+  useDisclosure,
   useMediaQuery,
 } from "@chakra-ui/react"
 import { SettingsIcon } from "@chakra-ui/icons"
@@ -73,6 +74,30 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
   const location = useLocation()
   const { accent } = useAccentColor()
   const [isSmallerThan1150] = useMediaQuery("(max-width: 1150px)")
+  const appearancePopover = useDisclosure()
+  const appearanceTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const appearanceContentRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!appearancePopover.isOpen) return
+
+    const closeOnOutsideInteraction = (event: MouseEvent | TouchEvent | PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (appearanceTriggerRef.current?.contains(target)) return
+      if (appearanceContentRef.current?.contains(target)) return
+      appearancePopover.onClose()
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideInteraction, true)
+    document.addEventListener("mousedown", closeOnOutsideInteraction, true)
+    document.addEventListener("touchstart", closeOnOutsideInteraction, true)
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideInteraction, true)
+      document.removeEventListener("mousedown", closeOnOutsideInteraction, true)
+      document.removeEventListener("touchstart", closeOnOutsideInteraction, true)
+    }
+  }, [appearancePopover])
 
   const isActive = (path: string) => {
     if (path === "/") {
@@ -251,9 +276,18 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           {rightSlot}
           {userControlsSlot}
 
-          <Popover placement="bottom-end" isLazy closeOnBlur={false}>
+          <Popover
+            placement="bottom-end"
+            isLazy
+            closeOnBlur
+            isOpen={appearancePopover.isOpen}
+            onOpen={appearancePopover.onOpen}
+            onClose={appearancePopover.onClose}
+            returnFocusOnClose={false}
+          >
             <PopoverTrigger>
               <IconButton
+                ref={appearanceTriggerRef}
                 data-testid="topnav-appearance"
                 aria-label="Appearance"
                 icon={<SettingsIcon boxSize={4} />}
@@ -268,11 +302,11 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
                   color: "white",
                   transform: "translateY(-1px)",
                 }}
-                onPointerDown={(e) => e.currentTarget.focus()}
               />
             </PopoverTrigger>
             <Portal>
               <PopoverContent
+                ref={appearanceContentRef}
                 mr={{ base: 2, sm: 0 }}
                 mt={2}
                 w={{ base: "calc(100vw - 24px)", sm: "360px" }}
@@ -284,6 +318,14 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
                 borderRadius="20px"
                 overflow="hidden"
                 position="relative"
+                _focus={{
+                  outline: "none",
+                  boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
+                }}
+                _focusVisible={{
+                  outline: "none",
+                  boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
+                }}
               >
                 <PopoverArrow bg="rgba(var(--bg-main-rgb), 0.95)" />
                 <PopoverBody p={4} pb={7}>
