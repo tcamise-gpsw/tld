@@ -195,6 +195,11 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
         sx={{
           containerType: "inline-size",
           containerName: "topbar",
+          "&.glass": {
+            borderTop: "none",
+            borderLeft: "none",
+            borderRight: "none",
+          },
         }}
       >
         {isWailsWindows && <WindowsWindowControls />}
@@ -207,7 +212,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
         >
           {isWailsMac ? (
-            <Box w="80px" h="full" />
+            <Box w="82px" h="full" />
           ) : (
             <HStack
               as={RouterLink}

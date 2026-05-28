@@ -220,6 +220,7 @@ function DiagramJumpToolbar({
                 <SearchIcon color="whiteAlpha.400" fontSize="10px" />
               </InputLeftElement>
               <Input
+                data-testid="views-search-input"
                 ref={searchInputRef}
                 placeholder="Search"
                 value={searchTerm}
@@ -276,6 +277,7 @@ function DiagramJumpToolbar({
                 style={{ overflow: 'hidden', flexShrink: 0 }}
               >
                 <Button
+                  data-testid="views-new-diagram-button"
                   size="sm"
                   h="28px"
                   leftIcon={<AddIcon fontSize="9px" />}
@@ -317,6 +319,7 @@ function DiagramJumpToolbar({
             }}
           >
             <Box
+              data-testid="views-search-results"
               bg="var(--bg-panel)"
               backdropFilter="blur(24px) saturate(180%)"
               border="1px solid"
@@ -327,6 +330,7 @@ function DiagramJumpToolbar({
             >
               {searchResults.map((result, idx) => (
                 <Flex
+                  data-testid="views-search-result"
                   key={result.key}
                   px={4}
                   py={2.5}
@@ -670,6 +674,7 @@ export default function ViewsPage({ shareSlot, onShareView }: Props) {
                 Diagram Name
               </FormLabel>
               <Input
+                data-testid="views-new-diagram-name-input"
                 name="name"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -690,6 +695,7 @@ export default function ViewsPage({ shareSlot, onShareView }: Props) {
               Cancel
             </Button>
             <Button
+              data-testid="views-create-diagram-submit"
               size="sm"
               bg="var(--accent)"
               color="white"
