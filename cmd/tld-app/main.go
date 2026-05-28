@@ -66,13 +66,15 @@ func main() {
 
 	desktopBridge := NewDesktopBridge()
 	err = wails.Run(&options.App{
-		Title:  "tlDiagram",
-		Width:  1200,
-		Height: 800,
+		Title:     "tlDiagram",
+		Width:     1200,
+		Height:    800,
+		MinWidth:  720,
+		MinHeight: 720,
 		OnStartup: func(ctx context.Context) {
 			desktopBridge.startup(ctx)
 		},
-		Bind: []interface{}{
+		Bind: []any{
 			desktopBridge,
 		},
 		AssetServer: &assetserver.Options{
@@ -90,7 +92,7 @@ func main() {
     <script>
         window.__TLD_SERVER_URL__ = 'http://%s';
         window.__TLD_APP__ = true;
-        
+
         // WKWebView does not fire wheel events for trackpad pinch like Chrome does.
         // It fires gesture events. ReactFlow (via d3-zoom) relies on wheel+ctrlKey for pinch.
         // We polyfill this by translating gesture events into wheel events.
