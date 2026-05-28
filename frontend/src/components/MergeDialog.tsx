@@ -39,7 +39,7 @@ function fieldsConflict(a: LibraryElement, b: LibraryElement): boolean {
   if ((a.repo || null) !== (b.repo || null)) return true
   if ((a.branch || null) !== (b.branch || null)) return true
   if ((a.file_path || null) !== (b.file_path || null)) return true
-  if ((a.language || null) !== (a.language || null)) return true
+  if ((a.language || null) !== (b.language || null)) return true
   return false
 }
 

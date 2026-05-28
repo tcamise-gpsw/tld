@@ -375,7 +375,6 @@ export default function InspectDrawer({ selectedRow, elements, views, connectors
                   {selectedRow.objectType === 'view' && viewData && (
                     <ViewInspector
                       data={viewData}
-                      cardShadow={cardShadow}
                       onSelectRow={onSelectRow}
                       connectors={connectors}
                       placementByViewElement={placementByViewElement}

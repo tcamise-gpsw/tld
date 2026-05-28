@@ -304,7 +304,6 @@ interface ViewRelationshipData {
 
 interface ViewInspectorProps {
   data: ViewRelationshipData
-  cardShadow: string
   onSelectRow: (key: string) => void
   connectors?: Connector[]
   placementByViewElement?: Record<string, { x: number; y: number }>
@@ -313,7 +312,6 @@ interface ViewInspectorProps {
 
 export function ViewInspector({
   data,
-  cardShadow,
   onSelectRow,
   connectors = [],
   placementByViewElement = {},
