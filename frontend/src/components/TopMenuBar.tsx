@@ -23,7 +23,7 @@ import { useAccentColor } from "../context/ThemeContext"
 import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
 import ExperimentalSettings from "../pages/ExperimentalSettings"
-import { isWailsApp } from "../config/runtime"
+import { isWailsApp, isWailsMac, isWailsWindows } from "../config/runtime"
 
 const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -126,7 +126,9 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
         style={{
           paddingTop: "env(safe-area-inset-top, 0px)",
           paddingLeft: "max(env(safe-area-inset-left, 0px), 8px)",
-          paddingRight: "max(env(safe-area-inset-right, 0px), 8px)",
+          paddingRight: isWailsWindows
+            ? "calc(var(--wails-window-controls-w, 138px) + max(env(safe-area-inset-right, 0px), 8px))"
+            : "max(env(safe-area-inset-right, 0px), 8px)",
           "--wails-draggable": isWailsApp ? "drag" : "no-drag",
         } as React.CSSProperties}
         sx={{
@@ -141,7 +143,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           display={{ base: "none", sm: "flex" }}
           style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
         >
-          {isWailsApp ? (
+          {isWailsMac ? (
             <Box w="80px" h="full" />
           ) : (
             <HStack
