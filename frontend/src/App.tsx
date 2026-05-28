@@ -17,7 +17,7 @@ import { WorkspaceVersionProvider } from './context/WorkspaceVersionContext'
 import { initializeTheme, ThemeProvider } from './context/ThemeContext'
 import { platform } from './platform/local'
 import { HomeRedirect } from './components/HomeRedirect'
-import { isWailsApp } from './config/runtime'
+import { isWailsApp, isWailsWindows } from './config/runtime'
 
 initializeTheme()
 
@@ -38,6 +38,7 @@ function AppLayout() {
       style={isWailsApp ? {
         "--topbar-h": "52px",
         "--topbar-h-total": "52px",
+        "--wails-window-controls-w": isWailsWindows ? "138px" : "0px",
       } as React.CSSProperties : undefined}
     >
       {!hideTopBar && (
@@ -52,7 +53,13 @@ function AppLayout() {
           />
         </>
       )}
-      <Box flex="1" minH={0} overflow="hidden" position="relative">
+      <Box
+        flex="1"
+        minH={0}
+        overflow="hidden"
+        position="relative"
+        pb={{ base: hideTopBar ? 0 : 'calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px))', sm: 0 }}
+      >
         <Outlet />
       </Box>
     </Box>

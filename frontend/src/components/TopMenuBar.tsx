@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useEffect, useRef } from "react"
 import type { TopMenuBarSlots } from '../slots'
 import { Link as RouterLink, useLocation } from "react-router-dom"
 import {
@@ -14,6 +14,7 @@ import {
   Portal,
   Text,
   Tooltip,
+  useDisclosure,
   useMediaQuery,
 } from "@chakra-ui/react"
 import { SettingsIcon } from "@chakra-ui/icons"
@@ -22,7 +23,7 @@ import { useAccentColor } from "../context/ThemeContext"
 import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
 import ExperimentalSettings from "../pages/ExperimentalSettings"
-import { isWailsApp } from "../config/runtime"
+import { isWailsApp, isWailsMac, isWailsWindows } from "../config/runtime"
 
 const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -73,6 +74,31 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
   const location = useLocation()
   const { accent } = useAccentColor()
   const [isSmallerThan1150] = useMediaQuery("(max-width: 1150px)")
+  const [isMobileLayout] = useMediaQuery("(max-width: 479px)")
+  const appearancePopover = useDisclosure()
+  const appearanceTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const appearanceContentRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!appearancePopover.isOpen) return
+
+    const closeOnOutsideInteraction = (event: MouseEvent | TouchEvent | PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (appearanceTriggerRef.current?.contains(target)) return
+      if (appearanceContentRef.current?.contains(target)) return
+      appearancePopover.onClose()
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideInteraction, true)
+    document.addEventListener("mousedown", closeOnOutsideInteraction, true)
+    document.addEventListener("touchstart", closeOnOutsideInteraction, true)
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideInteraction, true)
+      document.removeEventListener("mousedown", closeOnOutsideInteraction, true)
+      document.removeEventListener("touchstart", closeOnOutsideInteraction, true)
+    }
+  }, [appearancePopover])
 
   const isActive = (path: string) => {
     if (path === "/") {
@@ -83,6 +109,65 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
     }
     return location.pathname === path || location.pathname.startsWith(`${path}/`)
   }
+
+  const renderAppearancePopover = (trigger: React.ReactElement, placement: "bottom-end" | "top-end" = "bottom-end") => (
+    <Popover
+      placement={placement}
+      isLazy
+      closeOnBlur
+      isOpen={appearancePopover.isOpen}
+      onOpen={appearancePopover.onOpen}
+      onClose={appearancePopover.onClose}
+      returnFocusOnClose={false}
+    >
+      <PopoverTrigger>
+        {trigger}
+      </PopoverTrigger>
+      <Portal>
+        <PopoverContent
+          ref={appearanceContentRef}
+          mr={{ base: 2, sm: 0 }}
+          mt={2}
+          w={{ base: "calc(100vw - 24px)", sm: "360px" }}
+          maxW="360px"
+          bg="rgba(var(--bg-main-rgb), 0.95)"
+          backdropFilter="blur(18px)"
+          borderColor="whiteAlpha.200"
+          boxShadow="0 18px 48px rgba(0,0,0,0.45)"
+          borderRadius="20px"
+          overflow="hidden"
+          position="relative"
+          _focus={{
+            outline: "none",
+            boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
+          }}
+          _focusVisible={{
+            outline: "none",
+            boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
+          }}
+        >
+          <PopoverArrow bg="rgba(var(--bg-main-rgb), 0.95)" />
+          <PopoverBody p={4} pb={7}>
+            <Flex direction="column" gap={5}>
+              <AppearanceSettings compact />
+              <ExperimentalSettings compact />
+            </Flex>
+          </PopoverBody>
+          <Box
+            position="absolute"
+            bottom={2}
+            right={4}
+            pointerEvents="none"
+            userSelect="none"
+          >
+            <Text fontSize="9px" color="gray.600" fontFamily="mono">
+              v2.2.0-alpha.1
+            </Text>
+          </Box>
+        </PopoverContent>
+      </Portal>
+    </Popover>
+  )
 
   return (
     <>
@@ -101,7 +186,9 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
         style={{
           paddingTop: "env(safe-area-inset-top, 0px)",
           paddingLeft: "max(env(safe-area-inset-left, 0px), 8px)",
-          paddingRight: "max(env(safe-area-inset-right, 0px), 8px)",
+          paddingRight: isWailsWindows
+            ? "calc(var(--wails-window-controls-w, 138px) + max(env(safe-area-inset-right, 0px), 8px))"
+            : "max(env(safe-area-inset-right, 0px), 8px)",
           "--wails-draggable": isWailsApp ? "drag" : "no-drag",
         } as React.CSSProperties}
         sx={{
@@ -116,7 +203,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           display={{ base: "none", sm: "flex" }}
           style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
         >
-          {isWailsApp ? (
+          {isWailsMac ? (
             <Box w="80px" h="full" />
           ) : (
             <HStack
@@ -247,65 +334,29 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
         {/* Spacer to push right-side content */}
         <Box flex={1} minW={0} display={{ base: "none", sm: "block" }} />
 
-        <HStack spacing={2} ml="auto" flexShrink={0} display="flex" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
+        <HStack spacing={2} ml="auto" flexShrink={0} display={{ base: "none", sm: "flex" }} style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
           {rightSlot}
           {userControlsSlot}
 
-          <Popover placement="bottom-end" isLazy closeOnBlur={false}>
-            <PopoverTrigger>
-              <IconButton
-                data-testid="topnav-appearance"
-                aria-label="Appearance"
-                icon={<SettingsIcon boxSize={4} />}
-                size="sm"
-                borderRadius="full"
-                bg="whiteAlpha.100"
-                color="whiteAlpha.700"
-                border="1px solid"
-                borderColor="whiteAlpha.100"
-                _hover={{
-                  bg: "whiteAlpha.200",
-                  color: "white",
-                  transform: "translateY(-1px)",
-                }}
-                onPointerDown={(e) => e.currentTarget.focus()}
-              />
-            </PopoverTrigger>
-            <Portal>
-              <PopoverContent
-                mr={{ base: 2, sm: 0 }}
-                mt={2}
-                w={{ base: "calc(100vw - 24px)", sm: "360px" }}
-                maxW="360px"
-                bg="rgba(var(--bg-main-rgb), 0.95)"
-                backdropFilter="blur(18px)"
-                borderColor="whiteAlpha.200"
-                boxShadow="0 18px 48px rgba(0,0,0,0.45)"
-                borderRadius="20px"
-                overflow="hidden"
-                position="relative"
-              >
-                <PopoverArrow bg="rgba(var(--bg-main-rgb), 0.95)" />
-                <PopoverBody p={4} pb={7}>
-                  <Flex direction="column" gap={5}>
-                    <AppearanceSettings compact />
-                    <ExperimentalSettings compact />
-                  </Flex>
-                </PopoverBody>
-                <Box
-                  position="absolute"
-                  bottom={2}
-                  right={4}
-                  pointerEvents="none"
-                  userSelect="none"
-                >
-                  <Text fontSize="9px" color="gray.600" fontFamily="mono">
-                    v2.2.0-alpha.1
-                  </Text>
-                </Box>
-              </PopoverContent>
-            </Portal>
-          </Popover>
+          {!isMobileLayout && renderAppearancePopover(
+            <IconButton
+              ref={appearanceTriggerRef}
+              data-testid="topnav-appearance"
+              aria-label="Appearance"
+              icon={<SettingsIcon boxSize={4} />}
+              size="sm"
+              borderRadius="full"
+              bg="whiteAlpha.100"
+              color="whiteAlpha.700"
+              border="1px solid"
+              borderColor="whiteAlpha.100"
+              _hover={{
+                bg: "whiteAlpha.200",
+                color: "white",
+                transform: "translateY(-1px)",
+              }}
+            />,
+          )}
         </HStack>
       </Flex>
 
@@ -400,6 +451,33 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
             )
           })}
           {mobileMenuSlot}
+          {isMobileLayout && renderAppearancePopover(
+            <Box
+              ref={appearanceTriggerRef}
+              data-testid="mobile-topnav-appearance"
+              as="button"
+              type="button"
+              aria-label="Appearance"
+              flex={1}
+              display="flex"
+              flexDir="column"
+              alignItems="center"
+              justifyContent="center"
+              gap="3px"
+              h="full"
+              color={appearancePopover.isOpen ? "var(--accent)" : "whiteAlpha.500"}
+              transition="color 0.15s"
+              pointerEvents="auto"
+              _active={{ opacity: 0.6 }}
+              style={{ WebkitTapHighlightColor: "transparent" } as React.CSSProperties}
+            >
+              <SettingsIcon boxSize={5} />
+              <Text fontSize="9px" fontWeight={appearancePopover.isOpen ? "700" : "500"} letterSpacing="wide" textTransform="uppercase">
+                Settings
+              </Text>
+            </Box>,
+            "top-end",
+          )}
         </Flex>
       </Box>
     </>

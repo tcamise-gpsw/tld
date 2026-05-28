@@ -28,11 +28,19 @@ declare global {
     __TLD_SERVER_URL__?: string
     __TLD_DIAGRAM_ID__?: number
     __TLD_APP__?: boolean
+    __TLD_PLATFORM__?: string
   }
 }
 
 export const isNativeApp = false
-export const isWailsApp = typeof window !== 'undefined' && (!!window.__TLD_APP__ || !!(window as any).runtime || !!(window as any).wails)
+const runtimeWindow = typeof window !== 'undefined'
+  ? window as Window & { runtime?: unknown; wails?: unknown }
+  : undefined
+const browserPlatform = typeof navigator !== 'undefined' ? navigator.platform : ''
+export const isWailsApp = !!runtimeWindow && (!!runtimeWindow.__TLD_APP__ || !!runtimeWindow.runtime || !!runtimeWindow.wails)
+export const wailsPlatform = runtimeWindow?.__TLD_PLATFORM__
+export const isWailsMac = isWailsApp && (wailsPlatform === 'darwin' || (!wailsPlatform && browserPlatform.toLowerCase().includes('mac')))
+export const isWailsWindows = isWailsApp && (wailsPlatform === 'windows' || (!wailsPlatform && browserPlatform.toLowerCase().includes('win')))
 
 const defaultApiBase = typeof window !== 'undefined' && window.__TLD_SERVER_URL__ ? `${window.__TLD_SERVER_URL__.replace(/\/$/, "")}/api` : "/api"
 

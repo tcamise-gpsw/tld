@@ -61,6 +61,7 @@ const TYPE_OPTIONS: { value: InventoryType; label: string }[] = [
 const QUALITY_OPTIONS = ['untagged', 'missing description', 'has child view', 'unused element', 'empty view', 'missing label']
 const PAGE_SIZE_OPTIONS = [50, 100, 250]
 const DEFAULT_PAGE_SIZE = 100
+const TAGS_COLUMN_WIDTH = '112px'
 const MAX_VISIBLE_FILTER_OPTIONS = 100
 const DEFAULT_COLLAPSED_FILTER_SECTIONS = ['tags', 'kind', 'quality', 'sort']
 const ACCENT_CHECKBOX_SX = {
@@ -529,8 +530,8 @@ export default function Inventory() {
     <ViewEditorContext.Provider value={editorContext}>
       <Box data-testid="inventory-page" h="100%" bg="var(--bg-canvas)" display="flex" flexDir="column" overflow="hidden">
         {/* Header bar */}
-        <Flex px={4} py={2.5} gap={3} align="center" justify="center" borderBottom="1px solid" borderColor="whiteAlpha.100" flexShrink={0} position="relative">
-          <InputGroup size="sm" maxW="480px" w="full">
+        <Flex px={4} py={2.5} gap={3} align="center" justify={{ base: 'flex-start', md: 'center' }} borderBottom="1px solid" borderColor="whiteAlpha.100" flexShrink={0} position="relative">
+          <InputGroup size="sm" maxW={{ base: 'none', md: '480px' }} w="full" flex={1} minW={0}>
             <InputLeftElement pointerEvents="none" color="gray.500"><SearchIcon boxSize={3.5} /></InputLeftElement>
             <Input
               ref={searchInputRef}
@@ -562,11 +563,10 @@ export default function Inventory() {
               </InputRightElement>
             )}
           </InputGroup>
-          <Flex align="center" gap={2} position="absolute" right={4} flexShrink={0}>
-            <Box fontSize="xs" color="gray.500">
+          <Flex align="center" gap={2} position={{ base: 'static', md: 'absolute' }} right={{ md: 4 }} flexShrink={0}>
+            <Box fontSize="xs" color="gray.500" whiteSpace="nowrap">
               {loading ? <Spinner size="xs" /> : <><Box as="span" color="gray.300" fontWeight="medium">{filteredRows.length}</Box> / {rows.length}</>}
             </Box>
-            <Text fontSize="xs" color="gray.600">objects</Text>
           </Flex>
         </Flex>
 
@@ -905,7 +905,7 @@ export default function Inventory() {
                 <Box minW="720px">
                   {/* Sortable header */}
                   <Flex
-                    h={selectedKeys.size > 0 ? '48px' : '48px'}
+                    h={selectedKeys.size > 0 ? '40px' : '40px'}
                     px={4}
                     align="center"
                     borderBottom="1px solid"
@@ -1057,7 +1057,7 @@ export default function Inventory() {
                     ) : (
                       <>
                         <SortableHeader label="Name" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} flex={1} />
-                        <Box w="200px"><SortableHeader label="Tags" sortKey={null} activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
+                        <Box w={TAGS_COLUMN_WIDTH}><SortableHeader label="Tags" sortKey={null} activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
                         <Box w="160px"><SortableHeader label="Usage" sortKey="usage" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
                         <Box w="90px"><SortableHeader label="Updated" sortKey="updatedAt" activeSortKey={sortKey} sortDir={sortDir} onSort={toggleSort} /></Box>
                       </>
@@ -1111,7 +1111,7 @@ export default function Inventory() {
                             <Text fontSize="11px" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
                           </Box>
                         </HStack>
-                        <Box w="200px" minW="200px" flexShrink={0}>
+                        <Box w={TAGS_COLUMN_WIDTH} minW={TAGS_COLUMN_WIDTH} flexShrink={0}>
                           <InventoryTagList
                             tags={row.tags}
                             tagColorMap={tagColorMap}

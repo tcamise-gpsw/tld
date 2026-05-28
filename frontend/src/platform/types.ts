@@ -80,6 +80,7 @@ export interface RealtimePresenceSnapshot {
   crdt_connectors: RealtimeCRDTConnectorState[]
   drawings: RealtimeDrawing[]
   canvas_visibility: RealtimeCanvasVisibility
+  has_canvas_visibility?: boolean
 }
 
 export interface RealtimeThreadResolveEvent {
@@ -104,6 +105,13 @@ export interface RealtimeReactionSummary {
   reacted_by_me: boolean
 }
 
+export interface RealtimeViewStateEvent {
+  type: string
+  resource_id?: string
+  details?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export interface ViewRealtimeHandlers {
   onSnapshot: (snapshot: RealtimePresenceSnapshot) => void
   onPresenceJoin: (viewer: RealtimeUserPresence) => void
@@ -124,6 +132,7 @@ export interface ViewRealtimeHandlers {
   onThreadResolve: (event: RealtimeThreadResolveEvent) => void
   onCommentCreate: (comment: RealtimeViewComment) => void
   onReactionsSnapshot: (items: RealtimeReactionSummary[]) => void
+  onViewStateChange?: (event: RealtimeViewStateEvent) => void
   onClose?: () => void
   onRoomFull?: () => void
 }
