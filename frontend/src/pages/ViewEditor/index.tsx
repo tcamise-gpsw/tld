@@ -58,6 +58,7 @@ import ViewPanel from '../../components/ViewPanel'
 import { useSetHeader } from '../../components/HeaderContext'
 import { usePlatform } from '../../platform/context'
 import type {
+  RealtimeCursor,
   RealtimeUserPresence,
   ViewRealtimeConnection,
   ViewRealtimeHandlers,
@@ -143,6 +144,8 @@ const VIEW_EDITOR_CANVAS_MIN_WIDTH_MOBILE = 260
 const VIEW_EDITOR_MARKDOWN_RESIZE_HANDLE_WIDTH = 10
 const VIEW_EDITOR_TOPBAR_NOTCH_LEFT_VAR = '--topbar-notch-left'
 const SNAP_GRID: [number, number] = [30, 30]
+const REMOTE_CURSOR_STALE_MS = 30000
+const REMOTE_CURSOR_COLORS = ['#38bdf8', '#f97316', '#a78bfa', '#22c55e', '#f43f5e', '#eab308', '#14b8a6']
 
 type CollaborationHeaderState = {
   viewers: RealtimeUserPresence[]
@@ -151,7 +154,31 @@ type CollaborationHeaderState = {
   onAvatarClick?: (userId: string) => void
 }
 
+type RemoteCursorState = RealtimeCursor & {
+  updatedAt: number
+}
+
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
+
+function cursorColorForUser(userId: string) {
+  let hash = 0
+  for (let i = 0; i < userId.length; i += 1) {
+    hash = (hash * 31 + userId.charCodeAt(i)) >>> 0
+  }
+  return REMOTE_CURSOR_COLORS[hash % REMOTE_CURSOR_COLORS.length]
+}
+
+function isRenderableCursor(cursor: RealtimeCursor, selfUserId: string | null): cursor is RealtimeCursor {
+  return !!cursor.user_id &&
+    cursor.user_id !== selfUserId &&
+    Number.isFinite(cursor.x) &&
+    Number.isFinite(cursor.y)
+}
+
+function stringArraysEqual(a: string[], b: string[]) {
+  if (a.length !== b.length) return false
+  return a.every((item, index) => item === b[index])
+}
 
 async function copyTextToClipboard(text: string) {
   let clipboardError: unknown
@@ -438,6 +465,9 @@ function ViewEditorInner({
   const setHeader = useSetHeader()
   const realtimeRef = useRef<ViewRealtimeConnection | null>(null)
   const realtimeClockRef = useRef(0)
+  const realtimeSelfUserIdRef = useRef<string | null>(null)
+  const [remoteCursors, setRemoteCursors] = useState<RemoteCursorState[]>([])
+  const [canvasViewport, setCanvasViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [collaboration, setCollaboration] = useState<CollaborationHeaderState>({
     viewers: [],
     collaborators: [],
@@ -663,7 +693,7 @@ function ViewEditorInner({
   const drawingCanvasRef = useRef<DrawingCanvasHandle | null>(null)
 
   const { safeFitView } = useSafeFitView(containerRef)
-  const { screenToFlowPosition, fitView, setViewport } = useReactFlow()
+  const { screenToFlowPosition, fitView, setViewport, getViewport } = useReactFlow()
   const screenToFlowPositionRef = useRef(screenToFlowPosition)
   screenToFlowPositionRef.current = screenToFlowPosition
   const needsFitView = useRef(true)
@@ -780,18 +810,55 @@ function ViewEditorInner({
     handleElementDeleted, handleElementPermanentlyDeleted, handleElementSaved: applyElementSaved,
   } = data
   refreshElementsRef.current = refreshElements
+  const remoteViewRefreshTimerRef = useRef<number | null>(null)
+
+  const scheduleRemoteViewRefresh = useCallback(() => {
+    if (remoteViewRefreshTimerRef.current !== null) return
+    remoteViewRefreshTimerRef.current = window.setTimeout(() => {
+      remoteViewRefreshTimerRef.current = null
+      void Promise.all([refreshElements(), refreshGrid()])
+    }, 100)
+  }, [refreshElements, refreshGrid])
+
+  useEffect(() => {
+    return () => {
+      if (remoteViewRefreshTimerRef.current !== null) {
+        window.clearTimeout(remoteViewRefreshTimerRef.current)
+        remoteViewRefreshTimerRef.current = null
+      }
+    }
+  }, [viewId])
+
+  const applyRemoteCanvasVisibility = useCallback((visibility: { active_tags: string[]; hidden_layer_tags: string[] }) => {
+    const nextActiveTags = visibility.active_tags
+    const nextHiddenLayerTags = visibility.hidden_layer_tags
+    const activeChanged = !stringArraysEqual(activeTagsRef.current, nextActiveTags)
+    const hiddenChanged = !stringArraysEqual(hiddenLayerTagsRef.current, nextHiddenLayerTags)
+    if (!activeChanged && !hiddenChanged) return
+
+    applyingRemoteVisibilityRef.current = true
+    if (activeChanged) setActiveTags(nextActiveTags)
+    if (hiddenChanged) setHiddenLayerTags(nextHiddenLayerTags)
+    window.setTimeout(() => { applyingRemoteVisibilityRef.current = false }, 0)
+  }, [])
 
   const realtimeHandlers = useMemo<ViewRealtimeHandlers>(() => ({
     onSnapshot: (snapshot) => {
+      realtimeSelfUserIdRef.current = snapshot.self_user_id || null
       setCollaboration({
         viewers: snapshot.viewers,
         collaborators: snapshot.collaborators,
         followUserId: null,
       })
-      applyingRemoteVisibilityRef.current = true
-      setActiveTags(snapshot.canvas_visibility.active_tags)
-      setHiddenLayerTags(snapshot.canvas_visibility.hidden_layer_tags)
-      window.setTimeout(() => { applyingRemoteVisibilityRef.current = false }, 0)
+      const now = Date.now()
+      setRemoteCursors(snapshot.cursors
+        .filter((cursor) => isRenderableCursor(cursor, realtimeSelfUserIdRef.current))
+        .map((cursor) => ({ ...cursor, updatedAt: now })))
+      if (snapshot.has_canvas_visibility) {
+        applyRemoteCanvasVisibility(snapshot.canvas_visibility)
+      } else {
+        realtimeRef.current?.sendCanvasVisibility(activeTagsRef.current, hiddenLayerTagsRef.current)
+      }
       setDrawingPaths(snapshot.drawings.reduce<DrawingPath[]>((paths, drawing) => {
         if (!drawing.path_id) return paths
         paths.push({
@@ -833,16 +900,20 @@ function ViewEditorInner({
         collaborators: prev.collaborators.map((viewer) => viewer.user_id === userId ? { ...viewer, online: false } : viewer),
         followUserId: prev.followUserId === userId ? null : prev.followUserId,
       }))
+      setRemoteCursors((prev) => prev.filter((cursor) => cursor.user_id !== userId))
     },
-    onCursor: () => { },
+    onCursor: (cursor) => {
+      if (!isRenderableCursor(cursor, realtimeSelfUserIdRef.current)) return
+      const nextCursor = { ...cursor, updatedAt: Date.now() }
+      setRemoteCursors((prev) => {
+        const existing = prev.find((item) => item.user_id === cursor.user_id)
+        if (!existing) return [...prev, nextCursor]
+        return prev.map((item) => item.user_id === cursor.user_id ? nextCursor : item)
+      })
+    },
     onSelection: () => { },
     onViewport: () => { },
-    onCanvasVisibility: (visibility) => {
-      applyingRemoteVisibilityRef.current = true
-      setActiveTags(visibility.active_tags)
-      setHiddenLayerTags(visibility.hidden_layer_tags)
-      window.setTimeout(() => { applyingRemoteVisibilityRef.current = false }, 0)
-    },
+    onCanvasVisibility: applyRemoteCanvasVisibility,
     onDrawing: (drawing) => {
       if (!drawing.path_id) return
       const next: DrawingPath = {
@@ -862,12 +933,15 @@ function ViewEditorInner({
       setDrawingPaths((prev) => prev.filter((path) => path.id !== pathId))
     },
     onCRDTElementPosition: (state) => {
+      if (state.actor_user_id && state.actor_user_id === realtimeSelfUserIdRef.current) return
       updateStoreElementPosition(state.element_id, state.x, state.y)
     },
     onCRDTConnectorUpsert: (state) => {
+      if (state.actor_user_id && state.actor_user_id === realtimeSelfUserIdRef.current) return
       if (state.connector) upsertStoreConnector(state.connector)
     },
     onCRDTConnectorDelete: (state) => {
+      if (state.actor_user_id && state.actor_user_id === realtimeSelfUserIdRef.current) return
       removeStoreConnector(state.connector_id)
     },
     onViewElementAdd: (element) => {
@@ -887,17 +961,18 @@ function ViewEditorInner({
     onThreadResolve: () => { },
     onCommentCreate: () => { },
     onReactionsSnapshot: () => { },
-    onClose: () => {
-      realtimeRef.current = null
-    },
+    onViewStateChange: scheduleRemoteViewRefresh,
+    onClose: () => { },
     onRoomFull: () => {
       toast({ status: 'warning', title: 'Collaboration room is full' })
     },
   }), [
     applyElementSaved,
+    applyRemoteCanvasVisibility,
     handleElementDeleted,
     refreshGrid,
     removeStoreConnector,
+    scheduleRemoteViewRefresh,
     setDrawingPaths,
     setViewElements,
     toast,
@@ -908,6 +983,8 @@ function ViewEditorInner({
   useEffect(() => {
     realtimeRef.current?.disconnect()
     realtimeRef.current = null
+    realtimeSelfUserIdRef.current = null
+    setRemoteCursors([])
     setCollaboration({ viewers: [], collaborators: [], followUserId: null })
 
     if (viewId === null || isFreePlan || !platform.connectRealtime) return
@@ -923,6 +1000,15 @@ function ViewEditorInner({
     if (applyingRemoteVisibilityRef.current) return
     realtimeRef.current?.sendCanvasVisibility(activeTags, hiddenLayerTags)
   }, [activeTags, hiddenLayerTags])
+
+  useEffect(() => {
+    if (remoteCursors.length === 0) return
+    const interval = window.setInterval(() => {
+      const cutoff = Date.now() - REMOTE_CURSOR_STALE_MS
+      setRemoteCursors((prev) => prev.filter((cursor) => cursor.updatedAt >= cutoff))
+    }, 5000)
+    return () => window.clearInterval(interval)
+  }, [remoteCursors.length])
 
   useEffect(() => {
     realtimeRef.current?.sendSelection(selectedElement?.id ?? null, selectedEdge?.id ?? null)
@@ -2224,14 +2310,18 @@ function ViewEditorInner({
     handleConfirmNewElement, handleConfirmExistingElement, handleConfirmConnectExistingElement,
   } = canvas
 
-  const handleRealtimePaneMouseMove = useCallback((event: React.MouseEvent) => {
-    onPaneMouseMove(event)
+  const handleRealtimeCanvasMouseMove = useCallback((event: React.MouseEvent) => {
     const flowPos = screenToFlowPositionRef.current({ x: event.clientX, y: event.clientY })
     realtimeRef.current?.sendCursor(flowPos.x, flowPos.y)
+  }, [])
+
+  const handleRealtimePaneMouseMove = useCallback((event: React.MouseEvent) => {
+    onPaneMouseMove(event)
   }, [onPaneMouseMove])
 
   const handleRealtimeMove = useCallback((event: unknown, viewport: { x: number; y: number; zoom: number }) => {
     onMove(event, viewport)
+    setCanvasViewport(viewport)
     realtimeRef.current?.sendViewport(viewport.x, viewport.y, viewport.zoom)
   }, [onMove])
 
@@ -2301,7 +2391,11 @@ function ViewEditorInner({
     viewIdRef,
   ])
 
-  const onRFInit = useCallback(() => { rfReadyRef.current = true; maybeFitView() }, [maybeFitView])
+  const onRFInit = useCallback(() => {
+    rfReadyRef.current = true
+    setCanvasViewport(getViewport())
+    maybeFitView()
+  }, [getViewport, maybeFitView])
 
   useEffect(() => {
     needsFitView.current = true
@@ -2845,6 +2939,7 @@ function ViewEditorInner({
               w="full"
               h="full"
               onWheelCapture={onWheelCapture}
+              onMouseMove={handleRealtimeCanvasMouseMove}
               onTouchStart={onTouchStart}
               onTouchMove={onTouchMove}
               onTouchEnd={onTouchEnd}
@@ -2881,6 +2976,57 @@ function ViewEditorInner({
               >
                 <SafeBackground variant={BackgroundVariant.Dots} gap={16} color="#2D3748" size={1} />
               </ReactFlow>
+              {remoteCursors.length > 0 && (
+                <Box position="absolute" inset={0} pointerEvents="none" zIndex={11} overflow="hidden">
+                  {remoteCursors.map((cursor) => {
+                    const color = cursorColorForUser(cursor.user_id)
+                    const left = cursor.x * canvasViewport.zoom + canvasViewport.x
+                    const top = cursor.y * canvasViewport.zoom + canvasViewport.y
+                    if (!Number.isFinite(left) || !Number.isFinite(top)) return null
+                    return (
+                      <Box
+                        key={cursor.user_id}
+                        position="absolute"
+                        left={0}
+                        top={0}
+                        transform={`translate(${left}px, ${top}px)`}
+                        transition="transform 80ms linear"
+                        willChange="transform"
+                      >
+                        <svg width="20" height="24" viewBox="0 0 20 24" fill="none" aria-hidden="true">
+                          <path
+                            d="M2 2.5L17 12.5L10.7 14.1L7.2 22L2 2.5Z"
+                            fill={color}
+                            stroke="white"
+                            strokeWidth="1.5"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <Text
+                          position="absolute"
+                          left="16px"
+                          top="16px"
+                          maxW="180px"
+                          px={2}
+                          py={0.5}
+                          borderRadius="6px"
+                          bg={color}
+                          color="white"
+                          fontSize="11px"
+                          fontWeight="600"
+                          lineHeight="1.2"
+                          whiteSpace="nowrap"
+                          overflow="hidden"
+                          textOverflow="ellipsis"
+                          boxShadow="0 6px 16px rgba(0,0,0,0.25)"
+                        >
+                          {cursor.username || 'User'}
+                        </Text>
+                      </Box>
+                    )
+                  })}
+                </Box>
+              )}
               {canvasOverlaySlot && (
                 <Box position="absolute" inset={0} pointerEvents="none" zIndex={10}>
                   {canvasOverlaySlot}
