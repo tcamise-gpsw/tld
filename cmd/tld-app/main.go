@@ -73,7 +73,9 @@ func main() {
 		Height:    800,
 		MinWidth:  720,
 		MinHeight: 720,
-		Frameless: runtime.GOOS == "windows",
+		// Keep Windows frameless builds resizable while the frontend draws caption buttons.
+		DisableResize: false,
+		Frameless:     runtime.GOOS == "windows",
 		OnStartup: func(ctx context.Context) {
 			desktopBridge.startup(ctx)
 		},

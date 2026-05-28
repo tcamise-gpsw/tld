@@ -24,6 +24,7 @@ import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
 import ExperimentalSettings from "../pages/ExperimentalSettings"
 import { isWailsApp, isWailsMac, isWailsWindows } from "../config/runtime"
+import WindowsWindowControls from "./WindowsWindowControls"
 
 const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -196,6 +197,8 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           containerName: "topbar",
         }}
       >
+        {isWailsWindows && <WindowsWindowControls />}
+
         <HStack
           spacing={0}
           h="full"

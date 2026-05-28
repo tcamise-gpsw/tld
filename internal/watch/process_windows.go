@@ -19,7 +19,7 @@ func processExists(pid int) bool {
 	if err != nil {
 		return false
 	}
-	defer syscall.CloseHandle(handle)
+	defer func() { _ = syscall.CloseHandle(handle) }()
 
 	var exitCode uint32
 	if err := syscall.GetExitCodeProcess(handle, &exitCode); err != nil {
