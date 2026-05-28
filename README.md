@@ -7,6 +7,9 @@
 </p>
 
 
+
+`tld` is an opinionated, flexible diagramming tool with rich featureset to help you visualize, understand, and maintain your software architecture. Inspired by C4 model, designed with multiple opt-in features to answer evolving needs of software teams. 
+
 <p align="center">
   <a href="https://go.dev/"><img src="https://img.shields.io/github/go-mod/go-version/mertcikla/tld" alt="Go Version"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/mertcikla/tld" alt="License"></a>
@@ -20,12 +23,10 @@
 </p>
 
 
-`tld` is an opinionated, flexible diagramming tool to help you visualize, understand, and maintain your software architecture. Inspired by C4 model, designed with multiple opt-in features to answer evolving needs of software teams. 
-
 ## Highlights
 
 - **UI**: A frontend optimized to handle complex architectures while attempting to intelligently show and hide details.
-- **Standalone Distribution**: A single, dependency-free binary containing both the server and the web application.
+- **Standalone Distribution**: A single, dependency-free binary containing both the server and the web application. Available as CLI + WebUI or Native app(windows and macOS).
 - **CLI that speaks agent**: Use the [agent skill](./skills/create-diagram/SKILL.md) and use your agent to create a diagram of your codebase with the exact detail level you need. Prompt the agent to add/remove details you see fit. 
 Here are some examples that were generated using the agent skill.
 
@@ -37,11 +38,13 @@ Here are some examples that were generated using the agent skill.
 
   - [.NET eShop reference](https://tldiagram.com/app/explore/shared/ba6cbf2a-e0ff-468a-87e5-f720d35f448d)
 
-- **Editor and Github Integration**: Jump to the code in your editor or Github from diagrams, or open the code symbol in diagram from your editor to visualize the code using the [VSCode extension](https://marketplace.visualstudio.com/items?itemName=tlDiagram-com.tldiagram).
-- **Bi-directional Sync**: (Preview) Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
-- **Git diff visualization**: (Preview) Sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
-- **Diagrams as Code**: (Preview) A git/terraform like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
-- **Automated Codebase Analysis**: (Preview) Built-in tree-sitter integration to automatically discover architecture components in Go, Java, Python, C++, and TypeScript (more soon™ (hopefully)).
+- **Editor and Github Integration**: Jump to the code in your editor or Github from diagrams, or open the code symbol in diagram from your editor to visualize the code using the [VSCode extension](https://marketplace.visualstudio.com/items?itemName=tlDiagram-com.tldiagram). 
+- **Mermaid Integration**: Copy your mermaid diagrams into canvas to import them or export as mermaid for quick sharing.
+- **Markdown Notes Support**: Add notes and documentation for your diagram or link an existing one, preview and edit diagrams and markdown side-by-side with rich UI. 
+- **Bi-directional Sync**: (Experimental) Seamlessly sync changes between your local YAML files, the self-hosted web UI, and the cloud version at tlDiagram.com.
+- **Git diff visualization**: (Experimental) Sync and visualize the changes you or your agent are making live in diagram form. Inspect the dependencies and intervene when necessary.
+- **Diagrams as Code**: (Experimental) A git/terraform like workflow (`plan`/`apply`) to manage architectural evolution alongside your source code.
+- **Automated Codebase Analysis**: (Experimental) Built-in tree-sitter integration to automatically discover architecture components in Go, Java, Python, C++, and TypeScript (more soon™ (hopefully)).
 
 <p align="center"><img width="1280" height="720" alt="explore" src="https://github.com/user-attachments/assets/0b194071-d411-449a-87bd-2d4883e9c354" />
 
@@ -64,12 +67,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | i
 
 `tld` designed to be run fully offline, behind a reverse-proxy or in your infrastructure or as a local development tool.
 
-### Local Development
 Run `tld serve` in any directory to start a local instance that uses your current folder for storage. 
-
-### Server Deployment
-1. Provide a persistent volume for the `.tld/` directory (where YAMLs and the SQLite cache are stored).
-2. Set `TLD_ADDR=0.0.0.0` and `PORT=8060`.
 
 ### Configuration
 Various configuration options are available in `~/.config/tldiagram/tld.yaml`
@@ -77,13 +75,6 @@ Various configuration options are available in `~/.config/tldiagram/tld.yaml`
 # Documentation
 
 Visit [docs](https://tldiagram.com/docs) for more info.
-
-## An example workflow
-
-1. **Visualize**: Use `tld serve` to open the interactive UI. 
-2. **Automate**: Run `tld analyze` to scan your repository. It will suggest new elements and connectors based on your actual source code.
-3. **Commit**: Save your changes. All UI edits are persisted to `elements.yaml` and `connectors.yaml`. Commit these to Git to version your architecture.
-
 
 ## Commands Reference 
 `tld --help`
@@ -130,38 +121,3 @@ Flags:
 Use "tld [command] --help" for more information about a command
 
 ```
-
-## Workspace Structure
-
-- `.tld.yaml`: Project settings and exclusions.
-- `elements.yaml`: Definitions for all components and their placements.
-- `connectors.yaml`: Connection and relationship definitions.
-- `.tld.lock`: Tracks sync state and versioning.
-
-## Terminal Rendering
-
-Use Mermaid output for terminal, CI, and remote workflows without launching the web UI.
-
-```bash
-tld render root > architecture.mmd
-tld render platform --format mermaid -o platform.mmd
-
-# By default, connectors are placed in the source element's view.
-tld connect --from api --to db --label reads
-
-# --kind is short custom metadata, not a closed set.
-```
-
-
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `TLD_ADDR` | Host address to bind the server. | `127.0.0.1` |
-| `PORT` | Port for the web UI and API. | `8060` |
-| `TLD_API_KEY` | API key for cloud synchronization. | - |
-
-see `tld config list` for the full list of configuration options.
-
-`tld config path` shows the path to the current configuration file.
