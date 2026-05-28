@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/schollz/progressbar/v3"
+	"github.com/mertcikla/tld/v2/internal/term"
 	"golang.org/x/mod/semver"
 )
 
@@ -153,29 +153,17 @@ func Install(ctx context.Context, opts Options) (Status, error) {
 		return status, err
 	}
 	var src io.Reader = resp.Body
+	var progress io.Writer
 	if opts.ProgressWriter != nil && resp.ContentLength > 0 {
-		bar := progressbar.NewOptions64(
-			resp.ContentLength,
-			progressbar.OptionSetWriter(opts.ProgressWriter),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionSetDescription("Downloading"),
-			progressbar.OptionSetWidth(12),
-			progressbar.OptionFullWidth(),
-			progressbar.OptionClearOnFinish(),
-			progressbar.OptionSetTheme(progressbar.Theme{
-				Saucer:        "=",
-				SaucerHead:    ">",
-				SaucerPadding: " ",
-				BarStart:      "[",
-				BarEnd:        "]",
-			}),
-		)
-		src = io.TeeReader(resp.Body, bar)
+		progress = term.NewByteProgressWriter(opts.ProgressWriter, resp.ContentLength, "Downloading")
+		src = io.TeeReader(resp.Body, progress)
 	}
 	if _, err := io.Copy(archive, src); err != nil {
+		closeProgress(progress)
 		_ = archive.Close()
 		return status, err
 	}
+	closeProgress(progress)
 	if err := archive.Close(); err != nil {
 		return status, err
 	}
@@ -199,6 +187,12 @@ func Install(ctx context.Context, opts Options) (Status, error) {
 		AssetURL:   status.AssetURL,
 	})
 	return status, nil
+}
+
+func closeProgress(w io.Writer) {
+	if closer, ok := w.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
 }
 
 func IsNewer(current, latest string) bool {

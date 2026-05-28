@@ -495,8 +495,16 @@ func TestAnalyzeCmd_WritesPipelineLogWithoutBanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "░███████") || !strings.Contains(stdout, "Version:") {
-		t.Fatalf("text stdout should include startup banner/logo, got:\n%s", stdout)
+	for _, want := range []string{"tld analyze", "Workspace\n", "Data directory", "Runtime\n", "Results\n", "Duration"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("text stdout should include compact analyze output %q, got:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "Pipeline\n") {
+		t.Fatalf("text stdout should hide pipeline history without verbose, got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "░███████") || strings.Contains(stdout, "Version:") || strings.Contains(stdout, "✓") {
+		t.Fatalf("text stdout should use compact analyze output without logo/check glyphs, got:\n%s", stdout)
 	}
 	logData, err := os.ReadFile(localserver.LogPath(dataDir))
 	if err != nil {
