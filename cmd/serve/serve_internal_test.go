@@ -9,6 +9,7 @@ import (
 
 	"github.com/mertcikla/tld/v2/internal/localserver"
 	"github.com/mertcikla/tld/v2/internal/term"
+	"github.com/mertcikla/tld/v2/internal/workspace"
 )
 
 func TestPrintServeInfoIncludesCoreFields(t *testing.T) {
@@ -94,6 +95,23 @@ func TestPrintServeInfoShowsDBPathWhileInitializing(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "DB size:") {
 		t.Fatalf("new database should not have size metadata yet: %q", out.String())
+	}
+}
+
+func TestResolveServeOptionsCarriesSelfHostedURLWithoutChangingBindAddress(t *testing.T) {
+	cfg := workspace.DefaultConfig()
+	cfg.Serve.PublicURL = "https://app.example.com"
+	cfg.Serve.AllowedOrigins = []string{"https://admin.example.com"}
+
+	opts := resolveServeOptions(cfg, "0.0.0.0", "9000")
+	if got := localserver.ResolveAddr(opts); got != "0.0.0.0:9000" {
+		t.Fatalf("ResolveAddr = %q, want explicit bind address", got)
+	}
+	if got := localserver.DisplayURL(opts, "0.0.0.0:9000"); got != "https://app.example.com" {
+		t.Fatalf("DisplayURL = %q, want public URL", got)
+	}
+	if len(opts.AllowedOrigins) != 1 || opts.AllowedOrigins[0] != "https://admin.example.com" {
+		t.Fatalf("AllowedOrigins = %+v", opts.AllowedOrigins)
 	}
 }
 

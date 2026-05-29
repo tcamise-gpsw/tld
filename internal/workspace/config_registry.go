@@ -183,6 +183,15 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 			add("serve.data_dir", err.Error())
 		}
 	}
+	if strings.TrimSpace(cfg.Serve.PublicURL) != "" && !validRootHTTPURL(cfg.Serve.PublicURL) {
+		add("serve.public_url", "must be an http or https root URL")
+	}
+	for _, origin := range cfg.Serve.AllowedOrigins {
+		if !validHTTPOrigin(origin) {
+			add("serve.allowed_origins", "entries must be http or https origins without a path")
+			break
+		}
+	}
 
 	for _, item := range []struct {
 		key   string
@@ -353,6 +362,8 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "serve.host", Env: []string{"TLD_HOST", "TLD_ADDR"}, Description: "Host address for the local web server."},
 	{Key: "serve.port", Env: []string{"PORT", "TLD_ADDR"}, Description: "Port for the local web server."},
 	{Key: "serve.data_dir", Env: []string{"TLD_DATA_DIR"}, Description: "Directory for local database and logs."},
+	{Key: "serve.public_url", Env: []string{"TLD_PUBLIC_URL"}, Description: "Public root URL for reverse-proxied self-hosted deployments."},
+	{Key: "serve.allowed_origins", Env: []string{"TLD_ALLOWED_ORIGINS"}, Description: "Additional comma-separated HTTP(S) origins allowed by local server CORS."},
 	{Key: "watch.languages", Env: []string{"TLD_WATCH_LANGUAGES"}, Description: "Comma-separated source languages watched by analyze/watch."},
 	{Key: "watch.watcher", Env: []string{"TLD_WATCH_WATCHER"}, Description: "File watcher backend: auto, fsnotify, or poll."},
 	{Key: "watch.poll_interval", Env: []string{"TLD_WATCH_POLL_INTERVAL"}, Description: "Polling interval used by the poll watcher."},
@@ -429,6 +440,7 @@ func loadGlobalConfigState(repair bool) (*GlobalConfigState, error) {
 		if err := yaml.Unmarshal(data, fileCfg); err != nil {
 			return nil, fmt.Errorf("parse global config: %w", err)
 		}
+		normalizeConfig(fileCfg)
 		*cfg = *fileCfg
 	}
 	if repair && shouldSaveConfig(root) {
@@ -497,6 +509,8 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"serve.host", "TLD_HOST"},
 		{"serve.port", "PORT"},
 		{"serve.data_dir", "TLD_DATA_DIR"},
+		{"serve.public_url", "TLD_PUBLIC_URL"},
+		{"serve.allowed_origins", "TLD_ALLOWED_ORIGINS"},
 		{"watch.languages", "TLD_WATCH_LANGUAGES"},
 		{"watch.watcher", "TLD_WATCH_WATCHER"},
 		{"watch.poll_interval", "TLD_WATCH_POLL_INTERVAL"},
@@ -646,6 +660,10 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.Serve.Port = strings.TrimSpace(value)
 	case "serve.data_dir":
 		cfg.Serve.DataDir = strings.TrimSpace(value)
+	case "serve.public_url":
+		cfg.Serve.PublicURL = normalizePublicURLValue(value)
+	case "serve.allowed_origins":
+		cfg.Serve.AllowedOrigins = parseStringList(value)
 	case "watch.languages":
 		cfg.Watch.Languages = parseStringList(value)
 	case "watch.watcher":
@@ -900,6 +918,10 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.Serve.Port
 	case "serve.data_dir":
 		return cfg.Serve.DataDir
+	case "serve.public_url":
+		return cfg.Serve.PublicURL
+	case "serve.allowed_origins":
+		return cfg.Serve.AllowedOrigins
 	case "watch.languages":
 		return cfg.Watch.Languages
 	case "watch.watcher":
@@ -1045,7 +1067,9 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	addScalar(serve, "host", cfg.Serve.Host, desc("serve.host"))
 	addScalar(serve, "port", cfg.Serve.Port, desc("serve.port"))
 	addScalar(serve, "data_dir", cfg.Serve.DataDir, desc("serve.data_dir"))
-	appendUnknownEntries(serve, mappingValueNode(existing, "serve"), setOf("host", "port", "data_dir"))
+	addScalar(serve, "public_url", cfg.Serve.PublicURL, desc("serve.public_url"))
+	addStringSeq(serve, "allowed_origins", cfg.Serve.AllowedOrigins, desc("serve.allowed_origins"))
+	appendUnknownEntries(serve, mappingValueNode(existing, "serve"), setOf("host", "port", "data_dir", "public_url", "allowed_origins"))
 	addMap(mapping, "serve", serve, "Local web server settings.")
 
 	watchNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -1294,9 +1318,48 @@ func parseFloat(value string) (float64, error) {
 	return v, nil
 }
 
+func normalizeConfig(cfg *Config) {
+	cfg.Serve.PublicURL = normalizePublicURLValue(cfg.Serve.PublicURL)
+	for i, origin := range cfg.Serve.AllowedOrigins {
+		cfg.Serve.AllowedOrigins[i] = strings.TrimSpace(origin)
+	}
+}
+
+func normalizePublicURLValue(value string) string {
+	return strings.TrimRight(strings.TrimSpace(value), "/")
+}
+
 func validHTTPURL(value string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
+}
+
+func validRootHTTPURL(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return false
+	}
+	return parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Hostname() != ""
+}
+
+func validHTTPOrigin(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return parsed.Hostname() != ""
 }
 
 func validPort(value string) bool {

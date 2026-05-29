@@ -26,9 +26,27 @@ type Server struct {
 	handler http.Handler
 }
 
+type Options struct {
+	DataDir        string
+	PublicURL      string
+	AllowedOrigins []string
+}
+
 func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID, dataDir ...string) (*Server, error) {
+	opts := Options{}
+	if len(dataDir) > 0 {
+		opts.DataDir = dataDir[0]
+	}
+	return NewWithOptions(sqliteStore, static, workspaceID, opts)
+}
+
+func NewWithOptions(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID, opts Options) (*Server, error) {
 	watchStore := watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect())
-	apiStore := store.NewAPIAdapter(sqliteStore, dataDir...)
+	dataDirs := []string{}
+	if opts.DataDir != "" {
+		dataDirs = append(dataDirs, opts.DataDir)
+	}
+	apiStore := store.NewAPIAdapter(sqliteStore, dataDirs...)
 	lockHooks := watchLockHooks{store: watchStore}
 	wsSvc := &api.WorkspaceService{Store: apiStore, Hooks: lockHooks}
 	orgSvc := &api.OrgService{Store: apiStore, Hooks: lockHooks}
@@ -106,7 +124,7 @@ func New(sqliteStore *store.SQLiteStore, static fs.FS, workspaceID uuid.UUID, da
 		mux.ServeHTTP(w, r.WithContext(api.WithWorkspaceID(r.Context(), workspaceID)))
 	})
 
-	return &Server{handler: localCORSMiddleware(handler)}, nil
+	return &Server{handler: localCORSMiddleware(handler, opts)}, nil
 }
 
 type watchLockHooks struct {
@@ -137,9 +155,10 @@ func (s *Server) Shutdown(context.Context) error {
 	return nil
 }
 
-func localCORSMiddleware(next http.Handler) http.Handler {
+func localCORSMiddleware(next http.Handler, opts Options) http.Handler {
+	configuredOrigins := configuredCORSOrigins(opts)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); isAllowedLocalOrigin(origin) {
+		if origin := r.Header.Get("Origin"); isAllowedCORSOrigin(origin, configuredOrigins) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
@@ -160,6 +179,38 @@ func localCORSMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func configuredCORSOrigins(opts Options) map[string]struct{} {
+	origins := map[string]struct{}{}
+	if origin := httpOrigin(opts.PublicURL); origin != "" {
+		origins[origin] = struct{}{}
+	}
+	for _, origin := range opts.AllowedOrigins {
+		if origin := httpOrigin(origin); origin != "" {
+			origins[origin] = struct{}{}
+		}
+	}
+	return origins
+}
+
+func isAllowedCORSOrigin(origin string, configured map[string]struct{}) bool {
+	if isAllowedLocalOrigin(origin) {
+		return true
+	}
+	_, ok := configured[origin]
+	return ok
+}
+
+func httpOrigin(value string) string {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(value), "/"))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func isAllowedLocalOrigin(origin string) bool {

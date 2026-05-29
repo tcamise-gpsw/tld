@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	assets "github.com/mertcikla/tld/v2"
@@ -35,10 +36,12 @@ type ResourceCounts struct {
 // ServeOptions overrides the address that Bootstrap listens on.
 // An empty field means "use the lower-priority source".
 type ServeOptions struct {
-	Host     string
-	Port     string
-	StaticFS fs.FS
-	Config   *workspace.Config
+	Host           string
+	Port           string
+	PublicURL      string
+	AllowedOrigins []string
+	StaticFS       fs.FS
+	Config         *workspace.Config
 }
 
 func envOrDefault(key, fallback string) string {
@@ -101,7 +104,21 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 		return nil, err
 	}
 
-	srv, err := server.New(sqliteStore, staticFS, localWorkspaceID, dataDir)
+	publicURL := o.PublicURL
+	allowedOrigins := o.AllowedOrigins
+	if o.Config != nil {
+		if publicURL == "" {
+			publicURL = o.Config.Serve.PublicURL
+		}
+		if len(allowedOrigins) == 0 {
+			allowedOrigins = o.Config.Serve.AllowedOrigins
+		}
+	}
+	srv, err := server.NewWithOptions(sqliteStore, staticFS, localWorkspaceID, server.Options{
+		DataDir:        dataDir,
+		PublicURL:      publicURL,
+		AllowedOrigins: allowedOrigins,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -137,4 +154,11 @@ func ResolveAddr(o ServeOptions) string {
 		port = o.Port
 	}
 	return host + ":" + port
+}
+
+func DisplayURL(o ServeOptions, addr string) string {
+	if publicURL := strings.TrimRight(strings.TrimSpace(o.PublicURL), "/"); publicURL != "" {
+		return publicURL
+	}
+	return "http://" + addr
 }

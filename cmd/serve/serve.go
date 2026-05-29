@@ -77,7 +77,7 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	if os.Getenv(skipStartupUpdateEnv) != "1" {
 		go reportStartupUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg)
 	}
-	url := "http://" + app.Addr
+	url := localserver.DisplayURL(opts, app.Addr)
 	printServeInfo(cmd.OutOrStdout(), url, serveStatus{
 		Mode:            "foreground",
 		InitializedData: app.InitializedData,
@@ -116,17 +116,19 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	}
 	opts := resolveServeOptions(cfg, host, port)
 	addr := localserver.ResolveAddr(opts)
-	url := "http://" + addr
+	readyURL := "http://" + addr
+	url := localserver.DisplayURL(opts, addr)
 	initializedData := databaseWillBeInitialized(dataDir)
 
 	if existing, ok := findRunningServerProcess(dataDir, addr); ok {
 		PrintLogo(cmd.OutOrStdout())
 		if existing.Addr != "" {
 			addr = existing.Addr
-			url = "http://" + addr
+			readyURL = "http://" + addr
+			url = localserver.DisplayURL(opts, addr)
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Server already running (pid %d)\n", existing.PID)
-		ready, _ := getReady(url + "/api/ready")
+		ready, _ := getReady(readyURL + "/api/ready")
 		printServeInfo(cmd.OutOrStdout(), url, serveStatus{
 			Mode:            "background",
 			InitializedData: initializedData,
@@ -178,7 +180,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		return fmt.Errorf("start server process: %w", err)
 	}
 
-	ready, err := waitReady(url+"/api/ready", backgroundReadyTimeout)
+	ready, err := waitReady(readyURL+"/api/ready", backgroundReadyTimeout)
 	if err != nil {
 		_ = child.Process.Kill()
 		_ = localserver.RemoveProcess(child.Process.Pid)
@@ -367,7 +369,12 @@ func getReady(url string) (*readyInfo, error) {
 
 func resolveServeOptions(cfg *workspace.Config, flagHost, flagPort string) localserver.ServeOptions {
 	serve := workspace.ResolveServeOptions(cfg, flagHost, flagPort)
-	return localserver.ServeOptions{Host: serve.Host, Port: serve.Port}
+	return localserver.ServeOptions{
+		Host:           serve.Host,
+		Port:           serve.Port,
+		PublicURL:      serve.PublicURL,
+		AllowedOrigins: serve.AllowedOrigins,
+	}
 }
 
 func NewServeCmd(runE func(*cobra.Command, []string) error) *cobra.Command {

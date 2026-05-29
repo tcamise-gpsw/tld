@@ -303,6 +303,107 @@ func TestGlobalConfigDatabaseEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestGlobalConfigServeSelfHostedEnvOverrides(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	t.Setenv("TLD_PUBLIC_URL", "https://app.example.com/")
+	t.Setenv("TLD_ALLOWED_ORIGINS", "https://admin.example.com, https://preview.example.com:8443")
+	writeFile(t, filepath.Join(configDir, "tld.yaml"), `serve:
+  public_url: https://file.example.com
+  allowed_origins:
+    - https://file-admin.example.com
+`)
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Serve.PublicURL != "https://app.example.com" {
+		t.Fatalf("Serve.PublicURL = %q, want trimmed env value", cfg.Serve.PublicURL)
+	}
+	wantOrigins := []string{"https://admin.example.com", "https://preview.example.com:8443"}
+	if !reflect.DeepEqual(cfg.Serve.AllowedOrigins, wantOrigins) {
+		t.Fatalf("Serve.AllowedOrigins = %#v, want %#v", cfg.Serve.AllowedOrigins, wantOrigins)
+	}
+}
+
+func TestSetGlobalConfigSelfHostedValuesPreservesUnknownAndNormalizesPublicURL(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+	configPath := filepath.Join(configDir, "tld.yaml")
+	writeFile(t, configPath, "serve:\n  host: 127.0.0.1\n  unknown_serve: keep-me\nunknown_root: keep-too\n")
+
+	if err := workspace.SetGlobalConfigValue("serve.public_url", "https://app.example.com/"); err != nil {
+		t.Fatalf("SetGlobalConfigValue public_url: %v", err)
+	}
+	if err := workspace.SetGlobalConfigValue("serve.allowed_origins", "https://admin.example.com,https://preview.example.com:8443"); err != nil {
+		t.Fatalf("SetGlobalConfigValue allowed_origins: %v", err)
+	}
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Serve.PublicURL != "https://app.example.com" {
+		t.Fatalf("Serve.PublicURL = %q, want trimmed URL", cfg.Serve.PublicURL)
+	}
+	wantOrigins := []string{"https://admin.example.com", "https://preview.example.com:8443"}
+	if !reflect.DeepEqual(cfg.Serve.AllowedOrigins, wantOrigins) {
+		t.Fatalf("Serve.AllowedOrigins = %#v, want %#v", cfg.Serve.AllowedOrigins, wantOrigins)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "unknown_serve: keep-me") || !strings.Contains(content, "unknown_root: keep-too") {
+		t.Fatalf("unknown keys were not preserved:\n%s", content)
+	}
+	if strings.Contains(content, "https://app.example.com/") {
+		t.Fatalf("public_url should be stored without trailing slash:\n%s", content)
+	}
+}
+
+func TestGlobalConfigRejectsInvalidSelfHostedURLs(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "public url requires http scheme",
+			content: "serve:\n  public_url: ftp://app.example.com\n",
+		},
+		{
+			name:    "public url cannot use subpath",
+			content: "serve:\n  public_url: https://app.example.com/tld\n",
+		},
+		{
+			name: "allowed origin cannot include path",
+			content: `serve:
+  allowed_origins:
+    - https://admin.example.com/app
+`,
+		},
+		{
+			name: "allowed origin requires http scheme",
+			content: `serve:
+  allowed_origins:
+    - vscode-webview://abc123
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			t.Setenv("TLD_CONFIG_DIR", configDir)
+			writeFile(t, filepath.Join(configDir, "tld.yaml"), tt.content)
+			if _, err := workspace.LoadGlobalConfig(); err == nil {
+				t.Fatal("expected invalid self-hosted config to fail")
+			}
+		})
+	}
+}
+
 func TestSetGlobalConfigLSPValue(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("TLD_CONFIG_DIR", configDir)

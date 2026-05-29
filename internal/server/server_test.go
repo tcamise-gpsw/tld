@@ -107,6 +107,62 @@ func TestServerAllowsVSCodeFileOrigin(t *testing.T) {
 	}
 }
 
+func TestServerAllowsLocalhostCORSOrigin(t *testing.T) {
+	_, routes := newTestServer(t, uuid.New(), nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/diag.v1.WorkspaceService/ListViews", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("allow origin = %q, want localhost origin", got)
+	}
+}
+
+func TestServerAllowsConfiguredCORSOrigins(t *testing.T) {
+	_, routes := newTestServerWithOptions(t, uuid.New(), nil, Options{
+		PublicURL:      "https://app.example.com",
+		AllowedOrigins: []string{"https://admin.example.com", "https://preview.example.com:8443"},
+	})
+	tests := []struct {
+		name   string
+		origin string
+	}{
+		{name: "public url origin", origin: "https://app.example.com"},
+		{name: "allowed origin", origin: "https://admin.example.com"},
+		{name: "allowed origin with port", origin: "https://preview.example.com:8443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodOptions, "/api/diag.v1.WorkspaceService/ListViews", nil)
+			req.Header.Set("Origin", tt.origin)
+			req.Header.Set("Access-Control-Request-Method", "POST")
+			req.Header.Set("Access-Control-Request-Headers", "content-type,connect-protocol-version")
+
+			rec := httptest.NewRecorder()
+			routes.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Access-Control-Allow-Origin"); got != tt.origin {
+				t.Fatalf("allow origin = %q, want %q", got, tt.origin)
+			}
+			if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+				t.Fatalf("allow credentials = %q, want true", got)
+			}
+			if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "connect-protocol-version") {
+				t.Fatalf("allow headers = %q, want requested connect header", got)
+			}
+		})
+	}
+}
+
 func TestServerRejectsNonLocalCORSOrigin(t *testing.T) {
 	_, routes := newTestServer(t, uuid.New(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
@@ -925,6 +981,10 @@ func insertWatchRepositoryAt(t *testing.T, db interface {
 }
 
 func newTestServer(t *testing.T, workspaceID uuid.UUID, static fs.FS) (*localstore.SQLiteStore, http.Handler) {
+	return newTestServerWithOptions(t, workspaceID, static, Options{})
+}
+
+func newTestServerWithOptions(t *testing.T, workspaceID uuid.UUID, static fs.FS, opts Options) (*localstore.SQLiteStore, http.Handler) {
 	t.Helper()
 	t.Setenv("DEV", "")
 	if static == nil {
@@ -935,7 +995,7 @@ func newTestServer(t *testing.T, workspaceID uuid.UUID, static fs.FS) (*localsto
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqliteStore.Legacy().Close() })
-	srv, err := New(sqliteStore, static, workspaceID)
+	srv, err := NewWithOptions(sqliteStore, static, workspaceID, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
