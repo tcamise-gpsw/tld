@@ -1,62 +1,51 @@
 import {
-  Alert,
-  AlertDescription,
-  AlertIcon,
-  Badge,
   Box,
   Button,
-  Divider,
   FormLabel,
   HStack,
   Text,
   VStack,
 } from '@chakra-ui/react'
-import { DownloadIcon, ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, DownloadIcon, InfoOutlineIcon, RepeatIcon, WarningIcon } from '@chakra-ui/icons'
 import { useState } from 'react'
-import { isWailsApp, tldVersion } from '../config/runtime'
+import { isWailsApp } from '../config/runtime'
+import { tldVersion } from '../config/runtime'
 import {
   checkForDesktopUpdate,
   installDesktopUpdate,
-  openExternalUrl,
   type DesktopUpdateStatus,
 } from '../lib/desktop'
 
 type UpdateAction = 'checking' | 'installing' | null
 
-function updateStatusLabel(status: DesktopUpdateStatus | null): string {
-  if (!status) return 'Not checked'
-  if (!status.supported) return 'Unsupported'
-  if (status.updateAvailable) return 'Update available'
-  if (status.checked) return 'Up to date'
-  return 'Not checked'
+function statusDisplay(status: DesktopUpdateStatus | null, error: string) {
+  if (error) {
+    return { text: error, color: 'orange.200', icon: WarningIcon } as const
+  }
+  if (!status) return null
+  if (status.message) {
+    return { text: status.message, color: 'gray.400', icon: InfoOutlineIcon } as const
+  }
+  if (!status.supported) {
+    return { text: 'Updates not available on this platform.', color: 'gray.500', icon: InfoOutlineIcon } as const
+  }
+  if (status.updateAvailable) {
+    return { text: `v${status.latest} available`, color: 'blue.200', icon: DownloadIcon } as const
+  }
+  if (status.checked) {
+    return { text: 'Up to date', color: 'green.300', icon: CheckCircleIcon } as const
+  }
+  return null
 }
 
-function updateStatusColor(status: DesktopUpdateStatus | null): string {
-  if (!status) return 'gray'
-  if (!status.supported) return 'orange'
-  if (status.updateAvailable) return 'blue'
-  if (status.checked) return 'green'
-  return 'gray'
-}
-
-function updateMessage(status: DesktopUpdateStatus | null, error: string): string {
-  if (error) return error
-  if (!status) return ''
-  if (status.message) return status.message
-  if (!status.supported) return 'Desktop updates are not available on this platform.'
-  if (status.updateAvailable) return `Version ${status.latest} is available.`
-  if (status.checked) return `Version ${status.current} is up to date.`
-  return ''
-}
-
-export default function UpdateSettings() {
+export default function UpdateSettings({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<DesktopUpdateStatus | null>(null)
   const [error, setError] = useState('')
   const [action, setAction] = useState<UpdateAction>(null)
   const busy = action !== null
-  const currentVersion = status?.current || tldVersion
-  const message = updateMessage(status, error)
-  const alertStatus: 'warning' | 'info' | 'success' = error || status?.supported === false ? 'warning' : status?.updateAvailable ? 'info' : 'success'
+  const display = statusDisplay(status, error)
+  const canInstall = !!status?.canInstall
+  const displayVersion = tldVersion.startsWith('v') ? tldVersion : `v${tldVersion}`
 
   async function handleCheck() {
     setAction('checking')
@@ -68,6 +57,14 @@ export default function UpdateSettings() {
     } finally {
       setAction(null)
     }
+  }
+
+  function handleAction() {
+    if (canInstall) {
+      void handleInstall()
+      return
+    }
+    void handleCheck()
   }
 
   async function handleInstall() {
@@ -84,94 +81,74 @@ export default function UpdateSettings() {
 
   if (!isWailsApp) {
     return (
-      <VStack align="start" spacing={6} maxW="520px" w="full">
+      <VStack align="start" spacing={compact ? 4 : 6} maxW={compact ? '320px' : '520px'} w="full">
         <Box w="full">
-          <FormLabel mb={3} fontSize="sm" textTransform="uppercase" letterSpacing="0.12em" color="gray.400">
-            Desktop Updates
+          <FormLabel mb={3} fontSize={compact ? 'xs' : 'sm'} textTransform="uppercase" letterSpacing="0.12em" color="gray.400">
+            Version
           </FormLabel>
-          <Text fontSize="sm" color="gray.300">Only available in the desktop app.</Text>
+          <Text fontSize="xs" color="gray.500">Only available in the desktop app.</Text>
         </Box>
       </VStack>
     )
   }
 
   return (
-    <VStack align="start" spacing={6} maxW="520px" w="full">
+    <VStack align="start" spacing={compact ? 4 : 6} maxW={compact ? '320px' : '520px'} w="full">
       <Box w="full">
-        <FormLabel mb={3} fontSize="sm" textTransform="uppercase" letterSpacing="0.12em" color="gray.400">
+        <FormLabel mb={3} fontSize={compact ? 'xs' : 'sm'} textTransform="uppercase" letterSpacing="0.12em" color="gray.400">
           Desktop Updates
         </FormLabel>
 
-        <VStack align="stretch" spacing={4}>
-          <HStack justify="space-between" align="center" spacing={4}>
-            <Box minW={0}>
-              <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="0.08em">
-                Current
+        <VStack align="stretch" spacing={3}>
+          <HStack justify="space-between" align="center">
+            <HStack spacing={2} align="center">
+              <Text fontSize="sm" color="gray.300" fontWeight="500">
+                {displayVersion}
               </Text>
-              <Text fontSize="sm" color="gray.100" fontFamily="mono">{currentVersion}</Text>
-            </Box>
-            <Badge colorScheme={updateStatusColor(status)} variant="subtle" flexShrink={0}>
-              {updateStatusLabel(status)}
-            </Badge>
-          </HStack>
-
-          {status?.latest && (
-            <HStack justify="space-between" align="center" spacing={4}>
-              <Box minW={0}>
-                <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="0.08em">
-                  Latest
-                </Text>
-                <Text fontSize="sm" color="gray.100" fontFamily="mono">{status.latest}</Text>
-              </Box>
-              {status.assetName && (
-                <Text fontSize="xs" color="gray.500" noOfLines={1} title={status.assetName}>
-                  {status.assetName}
-                </Text>
+              {display && (
+                <HStack
+                  spacing={1}
+                  px={2}
+                  py={0.5}
+                  borderRadius="full"
+                  bg={
+                    display.color === 'green.300'
+                      ? 'green.900'
+                      : display.color === 'blue.200'
+                        ? 'blue.900'
+                        : display.color === 'orange.200'
+                          ? 'orange.900'
+                          : 'whiteAlpha.100'
+                  }
+                  opacity={0.9}
+                >
+                  <display.icon boxSize={2.5} color={display.color} />
+                  <Text fontSize="xs" color={display.color} fontWeight="500">
+                    {display.text}
+                  </Text>
+                </HStack>
               )}
             </HStack>
-          )}
 
-          {message && (
-            <Alert status={alertStatus} variant="subtle" rounded="md" py={2} px={3}>
-              <AlertIcon boxSize={4} />
-              <AlertDescription fontSize="sm">{message}</AlertDescription>
-            </Alert>
-          )}
-
-          <Divider borderColor="whiteAlpha.100" />
-
-          <HStack spacing={3} flexWrap="wrap">
             <Button
-              size="sm"
-              variant="clay"
-              leftIcon={<RepeatIcon />}
-              isLoading={action === 'checking'}
-              isDisabled={busy}
-              onClick={handleCheck}
+              size="xs"
+              variant={canInstall ? 'solid' : 'ghost'}
+              colorScheme={canInstall ? 'blue' : undefined}
+              color={canInstall ? undefined : 'gray.400'}
+              leftIcon={canInstall ? <DownloadIcon boxSize={3} /> : <RepeatIcon boxSize={3} />}
+              isLoading={busy}
+              loadingText={action === 'installing' ? 'Updating…' : 'Checking…'}
+              isDisabled={status?.supported === false}
+              onClick={handleAction}
+              borderRadius="full"
+              fontWeight="500"
+              _hover={{
+                color: canInstall ? undefined : 'gray.200',
+                bg: canInstall ? undefined : 'whiteAlpha.100',
+              }}
             >
-              Check
+              {canInstall ? 'Update' : status?.checked ? 'Recheck' : 'Check for updates'}
             </Button>
-            <Button
-              size="sm"
-              colorScheme="blue"
-              leftIcon={<DownloadIcon />}
-              isLoading={action === 'installing'}
-              isDisabled={!status?.canInstall || busy}
-              onClick={handleInstall}
-            >
-              Install Update
-            </Button>
-            {status?.releaseUrl && (
-              <Button
-                size="sm"
-                variant="ghost"
-                color="gray.300"
-                rightIcon={<ExternalLinkIcon />}
-                onClick={() => openExternalUrl(status.releaseUrl)}
-              >
-                Release
-              </Button>
-            )}
           </HStack>
         </VStack>
       </Box>

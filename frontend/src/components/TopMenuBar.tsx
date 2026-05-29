@@ -23,6 +23,7 @@ import { useAccentColor } from "../context/ThemeContext"
 import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
 import ExperimentalSettings from "../pages/ExperimentalSettings"
+import UpdateSettings from "../pages/UpdateSettings"
 import { isWailsApp, isWailsMac, isWailsWindows, tldVersion } from "../config/runtime"
 import WindowsWindowControls from "./WindowsWindowControls"
 import { KbdHint } from "./PanelUI"
@@ -202,6 +203,7 @@ export default function TopMenuBar({
             <Flex direction="column" gap={5}>
               <AppearanceSettings compact />
               <ExperimentalSettings compact />
+              {isWailsApp && <UpdateSettings compact />}
             </Flex>
           </PopoverBody>
           <Box
@@ -211,9 +213,6 @@ export default function TopMenuBar({
             pointerEvents="none"
             userSelect="none"
           >
-            <Text fontSize="9px" color="gray.600" fontFamily="mono">
-              {displayVersion}
-            </Text>
           </Box>
         </PopoverContent>
       </Portal>
