@@ -895,14 +895,14 @@ export default function Inventory() {
           </Box>
 
           <Flex flex={1} minW={0} direction="column" overflow="hidden">
-            <Box flex={1} overflow="auto">
+            <Box flex={1} minH={0} overflowX="auto" overflowY="hidden">
               {loading ? (
                 <Flex h="100%" align="center" justify="center" direction="column" gap={3} color="gray.600">
                   <Spinner size="lg" color="var(--accent)" />
                   <Text fontSize="sm">Loading inventory…</Text>
                 </Flex>
               ) : (
-                <Box minW="720px">
+                <Flex minW="720px" h="100%" minH={0} direction="column">
                   {/* Sortable header */}
                   <Flex
                     h={selectedKeys.size > 0 ? '40px' : '40px'}
@@ -915,9 +915,7 @@ export default function Inventory() {
                     fontSize="10px"
                     fontWeight="bold"
                     textTransform={selectedKeys.size > 0 ? 'none' : 'uppercase'}
-                    position="sticky"
-                    top={0}
-                    zIndex={1}
+                    flexShrink={0}
                     boxShadow={selectedKeys.size > 0 ? 'inset 0 -1px 0 rgba(var(--accent-rgb), 0.12)' : undefined}
                   >
                     <Flex w="32px" flexShrink={0} justify="center" align="center">
@@ -1067,77 +1065,79 @@ export default function Inventory() {
                       </>
                     )}
                   </Flex>
-                  {paginatedRows.map((row) => {
-                    const isSelected = selectedKeys.has(row.key)
-                    const isHighlighted = selectedRow?.key === row.key && selectedKeys.size === 0
-                    return (
-                      <Flex
-                        data-testid="inventory-row"
-                        data-inventory-key={row.key}
-                        key={row.key}
-                        px={4}
-                        py={2.5}
-                        align="center"
-                        borderBottom="1px solid"
-                        borderColor="whiteAlpha.50"
-                        bg={isSelected ? 'rgba(var(--accent-rgb), 0.08)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.08)' : 'transparent'}
-                        cursor="pointer"
-                        role="group"
-                        transition="background 0.1s"
-                        _hover={{ bg: isSelected ? 'rgba(var(--accent-rgb), 0.12)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.12)' : 'whiteAlpha.50' }}
-                        onClick={() => selectRow(row)}
-                      >
+                  <Box flex={1} minH={0} overflowY="auto">
+                    {paginatedRows.map((row) => {
+                      const isSelected = selectedKeys.has(row.key)
+                      const isHighlighted = selectedRow?.key === row.key && selectedKeys.size === 0
+                      return (
                         <Flex
-                          w="32px"
-                          flexShrink={0}
-                          justify="center"
+                          data-testid="inventory-row"
+                          data-inventory-key={row.key}
+                          key={row.key}
+                          px={4}
+                          py={2.5}
                           align="center"
-                          opacity={selectedKeys.size > 0 || isSelected ? 1 : 0}
-                          _groupHover={{ opacity: 1 }}
-                          transition="opacity 0.1s"
-                          onClick={(e) => { e.stopPropagation(); toggleSelectKey(row.key) }}
+                          borderBottom="1px solid"
+                          borderColor="whiteAlpha.50"
+                          bg={isSelected ? 'rgba(var(--accent-rgb), 0.08)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.08)' : 'transparent'}
+                          cursor="pointer"
+                          role="group"
+                          transition="background 0.1s"
+                          _hover={{ bg: isSelected ? 'rgba(var(--accent-rgb), 0.12)' : isHighlighted ? 'rgba(var(--accent-rgb), 0.12)' : 'whiteAlpha.50' }}
+                          onClick={() => selectRow(row)}
                         >
-                          <Checkbox
-                            data-testid={`inventory-row-select-${row.key}`}
-                            isChecked={isSelected}
-                            colorScheme="blue"
-                            size="sm"
-                            onChange={() => toggleSelectKey(row.key)}
-                            onClick={(e) => e.stopPropagation()}
-                            sx={ACCENT_CHECKBOX_SX}
-                          />
-                        </Flex>
-                        <HStack flex={1} minW={0} spacing={2.5}>
-                          <InventoryRowIcon row={row} />
-                          <Box minW={0}>
-                            <HStack spacing={2} mb={0.5}>
-                              <Text fontSize="sm" fontWeight="semibold" noOfLines={1} color={isHighlighted ? 'white' : 'gray.100'}>{row.name}</Text>
-                            </HStack>
-                            <Text fontSize="11px" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
+                          <Flex
+                            w="32px"
+                            flexShrink={0}
+                            justify="center"
+                            align="center"
+                            opacity={selectedKeys.size > 0 || isSelected ? 1 : 0}
+                            _groupHover={{ opacity: 1 }}
+                            transition="opacity 0.1s"
+                            onClick={(e) => { e.stopPropagation(); toggleSelectKey(row.key) }}
+                          >
+                            <Checkbox
+                              data-testid={`inventory-row-select-${row.key}`}
+                              isChecked={isSelected}
+                              colorScheme="blue"
+                              size="sm"
+                              onChange={() => toggleSelectKey(row.key)}
+                              onClick={(e) => e.stopPropagation()}
+                              sx={ACCENT_CHECKBOX_SX}
+                            />
+                          </Flex>
+                          <HStack flex={1} minW={0} spacing={2.5}>
+                            <InventoryRowIcon row={row} />
+                            <Box minW={0}>
+                              <HStack spacing={2} mb={0.5}>
+                                <Text fontSize="sm" fontWeight="semibold" noOfLines={1} color={isHighlighted ? 'white' : 'gray.100'}>{row.name}</Text>
+                              </HStack>
+                              <Text fontSize="11px" color="gray.500" noOfLines={1}>{row.subtitle}</Text>
+                            </Box>
+                          </HStack>
+                          <Box w={TAGS_COLUMN_WIDTH} minW={TAGS_COLUMN_WIDTH} flexShrink={0}>
+                            <InventoryTagList
+                              tags={row.tags}
+                              tagColorMap={tagColorMap}
+                              activeTags={tagsFilter}
+                              onTagClick={toggleTagFilter}
+                            />
                           </Box>
-                        </HStack>
-                        <Box w={TAGS_COLUMN_WIDTH} minW={TAGS_COLUMN_WIDTH} flexShrink={0}>
-                          <InventoryTagList
-                            tags={row.tags}
-                            tagColorMap={tagColorMap}
-                            activeTags={tagsFilter}
-                            onTagClick={toggleTagFilter}
-                          />
-                        </Box>
-                        <Text w="160px" fontSize="xs" color="gray.400" noOfLines={1}>{row.usageLabel || '—'}</Text>
-                        <Text w="90px" fontSize="xs" color="gray.500">{formatUpdated(row.updatedAt)}</Text>
+                          <Text w="160px" fontSize="xs" color="gray.400" noOfLines={1}>{row.usageLabel || '—'}</Text>
+                          <Text w="90px" fontSize="xs" color="gray.500">{formatUpdated(row.updatedAt)}</Text>
+                        </Flex>
+                      )
+                    })}
+                    {filteredRows.length === 0 && (
+                      <Flex h="220px" align="center" justify="center" color="gray.600" direction="column" gap={3}>
+                        <Text fontSize="sm" color="gray.500">{query || hasActiveFilters ? 'No matching objects' : 'Nothing here yet'}</Text>
+                        <Text fontSize="xs" color="gray.700">{query ? `No results for "${query}"` : hasActiveFilters ? 'Try adjusting your filters' : 'Add elements and views to get started'}</Text>
+                        {hasActiveFilters && (
+                          <Button size="xs" variant="outline" colorScheme="gray" onClick={resetFilters}>Clear filters</Button>
+                        )}
                       </Flex>
-                    )
-                  })}
-                  {filteredRows.length === 0 && (
-                    <Flex h="220px" align="center" justify="center" color="gray.600" direction="column" gap={3}>
-                      <Text fontSize="sm" color="gray.500">{query || hasActiveFilters ? 'No matching objects' : 'Nothing here yet'}</Text>
-                      <Text fontSize="xs" color="gray.700">{query ? `No results for "${query}"` : hasActiveFilters ? 'Try adjusting your filters' : 'Add elements and views to get started'}</Text>
-                      {hasActiveFilters && (
-                        <Button size="xs" variant="outline" colorScheme="gray" onClick={resetFilters}>Clear filters</Button>
-                      )}
-                    </Flex>
-                  )}
+                    )}
+                  </Box>
                   {filteredRows.length > 0 && (
                     <Flex
                       h="44px"
@@ -1148,8 +1148,7 @@ export default function Inventory() {
                       borderColor="whiteAlpha.100"
                       bg="rgb(var(--bg-main-rgb))"
                       color="gray.500"
-                      position="sticky"
-                      bottom={0}
+                      flexShrink={0}
                     >
                       <Text fontSize="xs" flex={1}>
                         Showing <Box as="span" color="gray.300">{pageStart + 1}-{pageEnd}</Box> of {filteredRows.length}
@@ -1183,7 +1182,7 @@ export default function Inventory() {
                       </Button>
                     </Flex>
                   )}
-                </Box>
+                </Flex>
               )}
             </Box>
             <InspectDrawer
