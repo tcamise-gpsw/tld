@@ -99,6 +99,12 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
     setLoading(true)
     setError(null)
     try {
+      const resolvedConflictValue = (key: string) => {
+        const choice = resolved[key]
+        const conflict = conflicts?.find((item) => item.key === key)
+        if (!choice || !conflict || choice === 'none') return null
+        return choice === 'source' ? conflict.source : conflict.survivor
+      }
       const finalResolved: {
         kind: string | null
         description: string | null
@@ -108,10 +114,10 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
         language: string | null
       } = { kind: null, description: null, repo: null, branch: null, file_path: null, language: null }
 
-      if (resolved.kind) finalResolved.kind = resolved.kind
-      if (resolved.description) finalResolved.description = resolved.description
+      if (resolved.kind) finalResolved.kind = resolvedConflictValue('kind')
+      if (resolved.description) finalResolved.description = resolvedConflictValue('description')
       if (resolved.gitsource) {
-        const parts = resolved.gitsource.split(' / ')
+        const parts = (resolvedConflictValue('gitsource') ?? '').split(' / ')
         if (parts.length === 4) {
           finalResolved.repo = parts[0] || null
           finalResolved.branch = parts[1] || null
@@ -125,7 +131,7 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
     } finally {
       setLoading(false)
     }
-  }, [resolved, onMerge])
+  }, [conflicts, resolved, onMerge])
 
   const handleResolve = useCallback(async () => {
     if (!survivor) return
@@ -218,12 +224,12 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
             <Box px={4} pb={2} maxH="280px" overflowY="auto">
               <VStack spacing={4} align="stretch">
                 {conflicts.map((conflict) => (
-                  <Box key={conflict.key} p={3} bg="whiteAlpha.50" rounded="md" border="1px solid" borderColor="whiteAlpha.100">
+                  <Box data-testid={`merge-dialog-conflict-${conflict.key}`} key={conflict.key} p={3} bg="whiteAlpha.50" rounded="md" border="1px solid" borderColor="whiteAlpha.100">
                     <Text fontSize="xs" fontWeight="medium" color="gray.300" mb={2}>{conflict.label}</Text>
                     <RadioGroup value={resolved[conflict.key] || ''} onChange={(val) => handleResolveChange(conflict.key, val)}>
                       <VStack spacing={1.5} align="stretch">
                         {conflict.source && conflict.source !== 'null' && conflict.source !== '' && (
-                          <Radio value="source" size="sm">
+                          <Radio data-testid={`merge-dialog-conflict-${conflict.key}-source`} value="source" size="sm">
                             <HStack spacing={1.5}>
                               <Text fontSize="xs" color="gray.300">{conflict.source}</Text>
                               <Badge variant="subtle" colorScheme="red" fontSize="2xs">source</Badge>
@@ -231,14 +237,14 @@ export default function MergeDialog({ isOpen, onClose, source, onMerge }: MergeD
                           </Radio>
                         )}
                         {conflict.survivor && conflict.survivor !== 'null' && conflict.survivor !== '' && (
-                          <Radio value="survivor" size="sm">
+                          <Radio data-testid={`merge-dialog-conflict-${conflict.key}-survivor`} value="survivor" size="sm">
                             <HStack spacing={1.5}>
                               <Text fontSize="xs" color="gray.300">{conflict.survivor}</Text>
                               <Badge variant="subtle" colorScheme="green" fontSize="2xs">survivor</Badge>
                             </HStack>
                           </Radio>
                         )}
-                        <Radio value="none" size="sm">
+                        <Radio data-testid={`merge-dialog-conflict-${conflict.key}-none`} value="none" size="sm">
                           <Text fontSize="xs" color="gray.400">Leave empty</Text>
                         </Radio>
                       </VStack>

@@ -11,7 +11,9 @@ async function openNodeMenu(page: import('@playwright/test').Page, name: string)
   await page.getByTestId('views-search-input').fill(name)
   const node = page.getByTestId('views-grid-node').filter({ hasText: name }).first()
   await expect(node).toBeVisible()
-  await node.getByTestId('views-grid-node-menu').click({ force: true })
+  await node.getByTestId('views-grid-node-menu').hover()
+  await node.getByTestId('views-grid-node-menu').click()
+  await expect(page.getByTestId('views-grid-node-details')).toBeVisible()
 }
 
 test('clears jump search results from the views grid', async ({ page }) => {

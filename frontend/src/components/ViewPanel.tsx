@@ -289,6 +289,7 @@ function ViewPanel({
               <Divider borderColor="whiteAlpha.100" my={2} />
               <VStack align="stretch" spacing={3}>
                 <HStack
+                  data-testid="view-panel-markdown-toggle"
                   cursor="pointer"
                   onClick={() => setMarkdownOpen(v => !v)}
                   justify="space-between"
@@ -334,7 +335,7 @@ function ViewPanel({
                               </Text>
                             </VStack>
                             {onOpenMarkdown && (
-                              <Button size="xs" variant="outline" onClick={onOpenMarkdown}>
+                              <Button data-testid="view-panel-markdown-open" size="xs" variant="outline" onClick={onOpenMarkdown}>
                                 Open editor
                               </Button>
                             )}
@@ -355,6 +356,7 @@ function ViewPanel({
                           )}
                           {canEdit && (
                             <Button
+                              data-testid="view-panel-markdown-unlink"
                               size="sm"
                               colorScheme="red"
                               variant="outline"
@@ -377,6 +379,7 @@ function ViewPanel({
                         <FormControl>
                           <FormLabel fontSize="xs" color="gray.400">Managed File Name</FormLabel>
                           <Input
+                            data-testid="view-panel-markdown-managed-name"
                             size="sm"
                             value={managedFileName}
                             onChange={(event) => setManagedFileName(event.target.value)}
@@ -384,6 +387,7 @@ function ViewPanel({
                           />
                         </FormControl>
                         <Button
+                          data-testid="view-panel-markdown-create"
                           size="sm"
                           onClick={() => { void handleCreateMarkdown() }}
                           isLoading={markdownAction === 'create'}
@@ -398,6 +402,7 @@ function ViewPanel({
                         <FormControl>
                           <FormLabel fontSize="xs" color="gray.400">Link Existing Markdown File</FormLabel>
                           <Input
+                            data-testid="view-panel-markdown-path"
                             size="sm"
                             value={markdownPath}
                             onChange={(event) => setMarkdownPath(event.target.value)}
@@ -405,6 +410,7 @@ function ViewPanel({
                           />
                         </FormControl>
                         <Button
+                          data-testid="view-panel-markdown-link"
                           size="sm"
                           variant="outline"
                           onClick={() => { void handleLinkMarkdown() }}

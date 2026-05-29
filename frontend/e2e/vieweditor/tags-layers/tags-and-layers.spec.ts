@@ -73,3 +73,47 @@ test('deletes a layer from the explorer tag manager', async ({ page }) => {
     return layers.some((candidate) => candidate.id === layer.id)
   }).toBeFalsy()
 })
+
+test('dragging tags and layers onto a canvas node updates element tags', async ({ page }) => {
+  const tag = uniqueName('drop-tag')
+  const layerTagA = uniqueName('layer-a')
+  const layerTagB = uniqueName('layer-b')
+  const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 1, 'Tag Drop')
+
+  await createTag(page, tag, '#F6AD55')
+  await createTag(page, layerTagA, '#68D391')
+  await createTag(page, layerTagB, '#63B3ED')
+  const layer = await createLayer(page, diagram.id, { name: uniqueName('Drop Layer'), tags: [layerTagA, layerTagB] })
+  await page.reload()
+
+  const otherTags = page.getByRole('button', { name: /Other tags/ })
+  if (await otherTags.count()) await otherTags.click()
+
+  const target = nodeByName(page, elements[0].name)
+  const targetBox = await target.boundingBox()
+  if (!targetBox) throw new Error('Missing node target')
+  const dropPoint = {
+    clientX: targetBox.x + targetBox.width / 2,
+    clientY: targetBox.y + targetBox.height / 2,
+  }
+
+  const tagTransfer = await page.evaluateHandle(() => new DataTransfer())
+  await page.getByTestId('tag-manager-tag').filter({ hasText: tag }).dispatchEvent('dragstart', { dataTransfer: tagTransfer })
+  await target.dispatchEvent('dragover', { dataTransfer: tagTransfer, ...dropPoint })
+  await target.dispatchEvent('drop', { dataTransfer: tagTransfer, ...dropPoint })
+
+  await expect.poll(async () => {
+    const element = await getElement(page, elements[0].id)
+    return element.tags ?? []
+  }).toContain(tag)
+
+  const layerTransfer = await page.evaluateHandle(() => new DataTransfer())
+  await page.getByTestId('tag-manager-layer').filter({ hasText: layer.name }).dispatchEvent('dragstart', { dataTransfer: layerTransfer })
+  await target.dispatchEvent('dragover', { dataTransfer: layerTransfer, ...dropPoint })
+  await target.dispatchEvent('drop', { dataTransfer: layerTransfer, ...dropPoint })
+
+  await expect.poll(async () => {
+    const element = await getElement(page, elements[0].id)
+    return element.tags ?? []
+  }).toEqual(expect.arrayContaining([tag, layerTagA, layerTagB]))
+})

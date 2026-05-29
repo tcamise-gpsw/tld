@@ -133,7 +133,16 @@ export async function listPlacements(page: Page, viewId = currentViewId(page)) {
   })
   expect(response.ok()).toBeTruthy()
   const json = await response.json()
-  return (json.placements ?? []) as Array<{ id: number; viewId: number; elementId: number; name: string }>
+  return (json.placements ?? []) as Array<{
+    id: number
+    viewId: number
+    elementId: number
+    positionX?: number
+    positionY?: number
+    position_x?: number
+    position_y?: number
+    name: string
+  }>
 }
 
 export async function expectPlacement(page: Page, name: string, visible: boolean, viewId = currentViewId(page)) {
@@ -277,6 +286,51 @@ export async function deleteView(page: Page, viewId: number) {
   expect(response.ok()).toBeTruthy()
 }
 
+export async function deleteTag(page: Page, tag: string) {
+  const response = await page.request.delete(`/api/tags/${encodeURIComponent(tag)}`)
+  expect(response.ok()).toBeTruthy()
+}
+
+export async function mergeElements(page: Page, sourceId: number, survivorId: number, resolved: Record<string, string | null> = {}) {
+  const response = await page.request.post('/api/elements/merge', {
+    data: { source_id: sourceId, survivor_id: survivorId, resolved },
+  })
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return json as { survivor: { id: number; name: string; tags?: string[] }; deleted_id: number }
+}
+
+export async function getViewMarkdown(page: Page, viewId: number) {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/GetViewMarkdown', {
+    data: { viewId },
+  })
+  if (response.status() === 404) return null
+  expect(response.ok()).toBeTruthy()
+  const json = await response.json()
+  return json as { markdown?: { path?: string; isManaged?: boolean; is_managed?: boolean; updatedAt?: string; updated_at?: string }; content?: string }
+}
+
+export async function createViewMarkdown(page: Page, viewId: number, fileName: string, initialContent = '') {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/CreateViewMarkdown', {
+    data: { viewId, fileName, initialContent },
+  })
+  expect(response.ok()).toBeTruthy()
+}
+
+export async function saveViewMarkdown(page: Page, viewId: number, content: string) {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/SaveViewMarkdown', {
+    data: { viewId, content },
+  })
+  expect(response.ok()).toBeTruthy()
+}
+
+export async function unlinkViewMarkdown(page: Page, viewId: number, deleteManagedFile = true) {
+  const response = await page.request.post('/api/diag.v1.WorkspaceService/UnlinkViewMarkdown', {
+    data: { viewId, deleteManagedFile },
+  })
+  expect(response.ok()).toBeTruthy()
+}
+
 async function expectResponseOk(response: APIResponse, action: string) {
   if (!response.ok()) {
     throw new Error(`${action} failed with ${response.status()}: ${await response.text()}`)
@@ -310,6 +364,11 @@ export async function listConnectors(page: Page, viewId = currentViewId(page)) {
     direction?: string
     style?: string
     url?: string
+    sourceHandle?: string | null
+    targetHandle?: string | null
+    source_handle?: string | null
+    target_handle?: string | null
+    tags?: string[]
   }>
 }
 
@@ -320,6 +379,10 @@ export async function createConnector(page: Page, viewId: number, sourceElementI
   direction?: string
   style?: string
   url?: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
+  source_handle?: string | null
+  target_handle?: string | null
   tags?: string[]
 } = {}) {
   const response = await page.request.post('/api/diag.v1.WorkspaceService/CreateConnector', {
@@ -333,6 +396,8 @@ export async function createConnector(page: Page, viewId: number, sourceElementI
       description: data.description ?? '',
       relationship: data.relationship ?? '',
       url: data.url ?? '',
+      sourceHandle: data.sourceHandle ?? data.source_handle ?? undefined,
+      targetHandle: data.targetHandle ?? data.target_handle ?? undefined,
       tags: data.tags ?? [],
     },
   })

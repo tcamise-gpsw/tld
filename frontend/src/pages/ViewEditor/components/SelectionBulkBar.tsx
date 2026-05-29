@@ -45,15 +45,18 @@ function ToolbarIconButton({
   onClick,
   children,
   color,
+  testId,
 }: {
   label: string
   onClick: () => void
   children: React.ReactElement
   color?: string
+  testId?: string
 }) {
   return (
     <Tooltip label={label} placement="top" openDelay={200}>
       <IconButton
+        data-testid={testId}
         aria-label={label}
         icon={children}
         variant="ghost"
@@ -125,17 +128,17 @@ export default function SelectionBulkBar({
       <Box w="1px" h="16px" bg="whiteAlpha.100" mx={0.5} />
 
       {(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const).map((align) => (
-        <ToolbarIconButton key={align} label={`Align ${align}`} onClick={() => onAlign(align)}>
+        <ToolbarIconButton key={align} testId={`selection-bulk-align-${align}`} label={`Align ${align}`} onClick={() => onAlign(align)}>
           <AlignIcon kind={align} />
         </ToolbarIconButton>
       ))}
 
       <Box w="1px" h="16px" bg="whiteAlpha.100" mx={0.5} />
 
-      <ToolbarIconButton label="Distribute horizontal" onClick={() => onDistribute('horizontal')}>
+      <ToolbarIconButton testId="selection-bulk-distribute-horizontal" label="Distribute horizontal" onClick={() => onDistribute('horizontal')}>
         <AlignIcon kind="horizontal" />
       </ToolbarIconButton>
-      <ToolbarIconButton label="Distribute vertical" onClick={() => onDistribute('vertical')}>
+      <ToolbarIconButton testId="selection-bulk-distribute-vertical" label="Distribute vertical" onClick={() => onDistribute('vertical')}>
         <AlignIcon kind="vertical" />
       </ToolbarIconButton>
 
@@ -144,6 +147,7 @@ export default function SelectionBulkBar({
       <Popover placement="top" isLazy closeOnBlur>
         <PopoverTrigger>
           <Button
+            data-testid="selection-bulk-tags"
             variant="ghost"
             h="28px"
             px={2.5}
@@ -180,7 +184,7 @@ export default function SelectionBulkBar({
                         <Box w="7px" h="7px" rounded="full" bg={tagColors[tag]?.color ?? 'var(--accent)'} flexShrink={0} />
                         <Text fontSize="xs" color="gray.300" flex={1} noOfLines={1}>{tag}</Text>
                         <Button size="xs" h="22px" variant="ghost" color="red.300" onClick={() => onRemoveTag(tag)}>
-                          Remove
+                          <Text as="span" data-testid={`selection-bulk-remove-tag-${tag}`}>Remove</Text>
                         </Button>
                       </HStack>
                     ))}
@@ -192,10 +196,10 @@ export default function SelectionBulkBar({
         </Portal>
       </Popover>
 
-      <ToolbarIconButton label="Fit selection" onClick={onFitSelection}>
+      <ToolbarIconButton testId="selection-bulk-fit" label="Fit selection" onClick={onFitSelection}>
         <FitViewIcon size={14} />
       </ToolbarIconButton>
-      <ToolbarIconButton label="Remove from view" onClick={onRemoveFromView} color="red.300">
+      <ToolbarIconButton testId="selection-bulk-remove" label="Remove from view" onClick={onRemoveFromView} color="red.300">
         <TrashIcon size={13} />
       </ToolbarIconButton>
     </HStack>
