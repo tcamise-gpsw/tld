@@ -44,17 +44,23 @@ export default function ViewHeaderButton({
         border="1px solid"
         borderColor={isOpen ? 'rgba(var(--accent-rgb), 0.3)' : 'whiteAlpha.100'}
         rounded="xl"
-        boxShadow="0 8px 32px rgba(0,0,0,0.5)"
+        boxShadow="0 1px 2px rgba(0,0,0,0.42), 0 5px 12px rgba(0,0,0,0.26), 0 10px 18px rgba(0,0,0,0.16)"
         backdropFilter="blur(20px)"
-        px={3}
+        h="42px"
+        maxW="calc(100vw - 32px)"
+        justify="center"
+        px={4}
         py={1.5}
         cursor="pointer"
         role="group"
         transition="all 0.2s"
-        _hover={{ borderColor: isOpen ? 'rgba(var(--accent-rgb), 0.45)' : 'whiteAlpha.200', boxShadow: '0 12px 40px rgba(0,0,0,0.6)' }}
+        _hover={{
+          borderColor: isOpen ? 'rgba(var(--accent-rgb), 0.45)' : 'whiteAlpha.200',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.46), 0 6px 14px rgba(0,0,0,0.3), 0 12px 20px rgba(0,0,0,0.18)',
+        }}
       >
         <EditIcon
-          boxSize="11px"
+          boxSize="15px"
           color="var(--accent)"
           opacity={isOpen ? 1 : 0.55}
           transition="all 0.2s"
@@ -64,7 +70,7 @@ export default function ViewHeaderButton({
         <Text
           fontSize="sm"
           color={isOpen ? 'var(--accent)' : 'whiteAlpha.900'}
-          fontWeight="700"
+          fontWeight="500"
           letterSpacing="0.01em"
           noOfLines={1}
           textShadow="0 1px 0 rgba(0,0,0,0.22)"

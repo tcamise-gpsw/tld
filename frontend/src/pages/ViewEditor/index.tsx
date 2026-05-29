@@ -3536,7 +3536,6 @@ function ViewEditorInner({
           hasBackdrop={isMobileLayout}
           markdown={viewMarkdown}
           markdownLoading={isMarkdownLoading}
-          onCreateMarkdown={(options) => handleCreateManagedMarkdown({ ...options, openEditor: true })}
           onLinkMarkdown={handleLinkMarkdown}
           onUnlinkMarkdown={handleUnlinkMarkdown}
           onOpenMarkdown={handleOpenMarkdown}
