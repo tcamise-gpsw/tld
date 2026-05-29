@@ -161,6 +161,10 @@ func (a *APIStore) GetElement(ctx context.Context, id int32, workspaceID uuid.UU
 }
 
 func (a *APIStore) CreateElement(ctx context.Context, workspaceID uuid.UUID, input ElementInput) (*diagv1.Element, error) {
+	techLinks := technologyLinksToConnectors(input.TechLinks)
+	if techLinks == nil {
+		techLinks = []app.TechnologyConnector{}
+	}
 	element, err := a.Store.CreateElement(ctx, app.LibraryElement{
 		Name:                 input.Name,
 		Description:          input.Description,
@@ -168,7 +172,7 @@ func (a *APIStore) CreateElement(ctx context.Context, workspaceID uuid.UUID, inp
 		Technology:           input.Technology,
 		URL:                  input.URL,
 		LogoURL:              input.LogoURL,
-		TechnologyConnectors: technologyLinksToConnectors(input.TechLinks),
+		TechnologyConnectors: techLinks,
 		Tags:                 input.Tags,
 		Repo:                 input.Repo,
 		Branch:               input.Branch,
@@ -965,6 +969,9 @@ func layerToProto(layer app.ViewLayer) *diagv1.ViewLayer {
 }
 
 func technologyLinksToConnectors(links []*diagv1.TechnologyLink) []app.TechnologyConnector {
+	if links == nil {
+		return nil
+	}
 	if len(links) == 0 {
 		return []app.TechnologyConnector{}
 	}

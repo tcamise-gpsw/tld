@@ -97,6 +97,9 @@ type PlanElement struct {
 
 func (s *Store) Elements(ctx context.Context, limit, offset int, search string) ([]LibraryElement, int, error) {
 	query := s.bun.NewSelect().Model((*elementModel)(nil))
+	if orgID := TenantOrgIDFromCtx(ctx); orgID != uuid.Nil {
+		query = query.Where("org_id = ?", orgID)
+	}
 	if strings.TrimSpace(search) != "" {
 		pattern := "%" + strings.TrimSpace(search) + "%"
 		query = query.Where("LOWER(name) LIKE LOWER(?)", pattern)
@@ -108,6 +111,9 @@ func (s *Store) Elements(ctx context.Context, limit, offset int, search string) 
 
 	var rows []elementModel
 	selectQuery := s.bun.NewSelect().Model(&rows)
+	if orgID := TenantOrgIDFromCtx(ctx); orgID != uuid.Nil {
+		selectQuery = selectQuery.Where("org_id = ?", orgID)
+	}
 	if strings.TrimSpace(search) != "" {
 		pattern := "%" + strings.TrimSpace(search) + "%"
 		selectQuery = selectQuery.Where("LOWER(name) LIKE LOWER(?)", pattern)

@@ -560,7 +560,7 @@ func (r *Representer) cachePopulateResourceEmbeddings(ctx context.Context, model
 }
 
 func (r *Representer) populateResourceEmbeddingInputs(ctx context.Context, repositoryID int64) ([]EmbeddingInput, error) {
-	rows, err := r.Store.db.QueryContext(ctx, `
+	rows, err := r.Store.rowsRaw(ctx, `
 		SELECT m.owner_type, m.owner_key, el.name, COALESCE(el.kind, ''), COALESCE(el.description, ''), COALESCE(el.technology, ''), COALESCE(el.file_path, ''), COALESCE(el.language, ''), el.tags
 		FROM watch_materialization m
 		JOIN elements el ON el.id = m.resource_id
@@ -641,7 +641,7 @@ func (r *Representer) populateResourceEmbeddingText(ctx context.Context, reposit
 }
 
 func (r *Representer) populateResourceChildSummary(ctx context.Context, ownerType, ownerKey string) (string, error) {
-	rows, err := r.Store.db.QueryContext(ctx, `
+	rows, err := r.Store.rowsRaw(ctx, `
 		SELECT child.name
 		FROM watch_materialization parent
 		JOIN views v ON v.owner_element_id = parent.resource_id
@@ -669,7 +669,7 @@ func (r *Representer) populateResourceReferenceSummary(ctx context.Context, repo
 	if strings.TrimSpace(filePath) == "" {
 		return "", nil
 	}
-	rows, err := r.Store.db.QueryContext(ctx, `
+	rows, err := r.Store.rowsRaw(ctx, `
 		SELECT DISTINCT target.name
 		FROM watch_symbols source
 		JOIN watch_references ref ON ref.source_symbol_id = source.id
