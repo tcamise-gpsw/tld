@@ -27,7 +27,6 @@ jobs:
       fail-fast: false
       matrix:
         go-version: ["1.26.1"]
-        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -90,6 +89,7 @@ jobs:
       fail-fast: false
       matrix:
         go-version: ["1.26.1"]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -157,7 +157,7 @@ jobs:
         run: npx playwright test -c playwright.config.ts --shard=${{ matrix.shard }}/4 --reporter=json,line
 
       - name: Publish Playwright report
-        if: ${{ github.event_name == 'pull_request' && !cancelled() }}
+        if: ${{ github.event_name == 'pull_request' && !cancelled() && hashFiles(format('frontend/report-{0}.json', matrix.shard)) != '' }}
         uses: sidharthv96/playwright-report-action@v2.0-rc.5
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
