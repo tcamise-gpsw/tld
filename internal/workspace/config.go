@@ -91,9 +91,11 @@ type ValidationConfig struct {
 
 // ServeConfig holds serve-specific settings from the global config file.
 type ServeConfig struct {
-	Host    string `yaml:"host"`
-	Port    string `yaml:"port"`
-	DataDir string `yaml:"data_dir"`
+	Host           string   `yaml:"host"`
+	Port           string   `yaml:"port"`
+	DataDir        string   `yaml:"data_dir"`
+	PublicURL      string   `yaml:"public_url"`
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 type WatchEmbeddingConfig struct {

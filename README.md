@@ -67,7 +67,19 @@ powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | i
 
 `tld` designed to be run fully offline, behind a reverse-proxy or in your infrastructure or as a local development tool.
 
-Run `tld serve` in any directory to start a local instance that uses your current folder for storage. 
+```bash
+export TLD_DB_DRIVER=postgres
+export TLD_DATABASE_URL='postgres://user:pass@postgres:5432/tld?sslmode=require'
+export TLD_PUBLIC_URL='https://app.example.com'
+export TLD_HOST=127.0.0.1
+export PORT=8060
+
+tld serve
+```
+
+The PostgreSQL database must have `pgvector` support.
+
+Run `tld serve` without PostgreSQL settings to start a local SQLite-backed instance.
 
 ### Configuration
 Various configuration options are available in `~/.config/tldiagram/tld.yaml`

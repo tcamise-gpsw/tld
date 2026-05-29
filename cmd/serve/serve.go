@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -77,7 +78,7 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	if os.Getenv(skipStartupUpdateEnv) != "1" {
 		go reportStartupUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg)
 	}
-	url := "http://" + app.Addr
+	url := localserver.DisplayURL(opts, app.Addr)
 	printServeInfo(cmd.OutOrStdout(), url, serveStatus{
 		Mode:            "foreground",
 		InitializedData: app.InitializedData,
@@ -85,6 +86,7 @@ func runForeground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		BindAddr:        app.Addr,
 		Startup:         time.Since(started),
 		DBPath:          app.DBPath,
+		DBDriver:        app.DBDriver,
 	})
 
 	if openBrowser {
@@ -116,17 +118,19 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 	}
 	opts := resolveServeOptions(cfg, host, port)
 	addr := localserver.ResolveAddr(opts)
-	url := "http://" + addr
-	initializedData := databaseWillBeInitialized(dataDir)
+	readyURL := "http://" + addr
+	url := localserver.DisplayURL(opts, addr)
+	initializedData := databaseWillBeInitialized(cfg, dataDir)
 
 	if existing, ok := findRunningServerProcess(dataDir, addr); ok {
 		PrintLogo(cmd.OutOrStdout())
 		if existing.Addr != "" {
 			addr = existing.Addr
-			url = "http://" + addr
+			readyURL = "http://" + addr
+			url = localserver.DisplayURL(opts, addr)
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Server already running (pid %d)\n", existing.PID)
-		ready, _ := getReady(url + "/api/ready")
+		ready, _ := getReady(readyURL + "/api/ready")
 		printServeInfo(cmd.OutOrStdout(), url, serveStatus{
 			Mode:            "background",
 			InitializedData: initializedData,
@@ -135,6 +139,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 			BindAddr:        addr,
 			Startup:         0,
 			DBPath:          localserver.DatabasePath(dataDir),
+			DBDriver:        cfg.Database.Driver,
 		})
 		if openBrowser {
 			_ = cmdutil.OpenBrowser(url)
@@ -178,7 +183,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		return fmt.Errorf("start server process: %w", err)
 	}
 
-	ready, err := waitReady(url+"/api/ready", backgroundReadyTimeout)
+	ready, err := waitReady(readyURL+"/api/ready", backgroundReadyTimeout)
 	if err != nil {
 		_ = child.Process.Kill()
 		_ = localserver.RemoveProcess(child.Process.Pid)
@@ -199,6 +204,7 @@ func runBackground(cmd *cobra.Command, host, port, dataDir string, openBrowser b
 		BindAddr:        addr,
 		Startup:         time.Since(started),
 		DBPath:          localserver.DatabasePath(dataDir),
+		DBDriver:        cfg.Database.Driver,
 	})
 
 	if openBrowser {
@@ -242,6 +248,7 @@ type serveStatus struct {
 	Resources       localserver.ResourceCounts
 	Startup         time.Duration
 	DBPath          string
+	DBDriver        string
 }
 
 func printServeInfo(out io.Writer, url string, status serveStatus) {
@@ -250,7 +257,7 @@ func printServeInfo(out io.Writer, url string, status serveStatus) {
 	if status.PID != nil {
 		term.Label(out, 20, "PID", fmt.Sprintf("%d", *status.PID))
 	}
-	term.Label(out, 20, "Server status", dataStatus(status.InitializedData))
+	term.Label(out, 20, "Server status", dataStatus(status.InitializedData, status.DBDriver))
 	term.Label(out, 20, "Bind address", status.BindAddr)
 	if !status.InitializedData {
 		term.Label(out, 20, "Resource counts", fmt.Sprintf("%d views, %d elements, %d connectors", status.Resources.Views, status.Resources.Elements, status.Resources.Connectors))
@@ -258,10 +265,12 @@ func printServeInfo(out io.Writer, url string, status serveStatus) {
 	if status.Startup > 0 {
 		term.Label(out, 20, "Ready in", status.Startup.Round(time.Millisecond).String())
 	}
-	term.Label(out, 20, "DB", term.Path(out, status.DBPath))
-	if info, err := os.Stat(status.DBPath); err == nil {
-		term.Label(out, 20, "DB size", humanBytes(info.Size()))
-		term.Label(out, 20, "DB last modified", info.ModTime().Format(time.RFC3339))
+	term.Label(out, 20, "DB", databaseLabel(out, status))
+	if status.DBPath != "" && normalizedDBDriver(status.DBDriver) == "sqlite" {
+		if info, err := os.Stat(status.DBPath); err == nil {
+			term.Label(out, 20, "DB size", humanBytes(info.Size()))
+			term.Label(out, 20, "DB last modified", info.ModTime().Format(time.RFC3339))
+		}
 	}
 	term.Label(out, 20, "Config path", term.Path(out, cfgPath))
 	term.Separator(out)
@@ -270,16 +279,47 @@ func printServeInfo(out io.Writer, url string, status serveStatus) {
 	term.Hint(out, "Run 'tld stop' to shut down the server")
 }
 
-func databaseWillBeInitialized(dataDir string) bool {
+func databaseWillBeInitialized(cfg *workspace.Config, dataDir string) bool {
+	driver := ""
+	if cfg != nil {
+		driver = cfg.Database.Driver
+	}
+	if normalizedDBDriver(driver) != "sqlite" {
+		return false
+	}
 	_, err := os.Stat(localserver.DatabasePath(dataDir))
 	return errors.Is(err, os.ErrNotExist)
 }
 
-func dataStatus(initialized bool) string {
+func dataStatus(initialized bool, driver string) string {
+	if normalizedDBDriver(driver) == "postgres" {
+		return "using postgres database"
+	}
 	if initialized {
 		return "initialized new local data"
 	}
 	return "using existing local data"
+}
+
+func databaseLabel(out io.Writer, status serveStatus) string {
+	switch normalizedDBDriver(status.DBDriver) {
+	case "postgres":
+		return "postgres"
+	default:
+		if status.DBPath == "" {
+			return "sqlite"
+		}
+		return term.Path(out, status.DBPath)
+	}
+}
+
+func normalizedDBDriver(driver string) string {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "postgres", "postgresql":
+		return "postgres"
+	default:
+		return "sqlite"
+	}
 }
 
 func printableMode(mode string) string {
@@ -367,7 +407,12 @@ func getReady(url string) (*readyInfo, error) {
 
 func resolveServeOptions(cfg *workspace.Config, flagHost, flagPort string) localserver.ServeOptions {
 	serve := workspace.ResolveServeOptions(cfg, flagHost, flagPort)
-	return localserver.ServeOptions{Host: serve.Host, Port: serve.Port}
+	return localserver.ServeOptions{
+		Host:           serve.Host,
+		Port:           serve.Port,
+		PublicURL:      serve.PublicURL,
+		AllowedOrigins: serve.AllowedOrigins,
+	}
 }
 
 func NewServeCmd(runE func(*cobra.Command, []string) error) *cobra.Command {

@@ -147,9 +147,16 @@ func NewWatchCmd() *cobra.Command {
 				embeddingHealth = fmt.Sprintf("dimension=%d similarity=%.3f", health.Dimension, health.Similarity)
 			}
 			serveCfg := workspace.ResolveServeOptions(cfg, host, port)
-			serveOpts := localserver.ServeOptions{Host: serveCfg.Host, Port: serveCfg.Port, Config: cfg}
+			serveOpts := localserver.ServeOptions{
+				Host:           serveCfg.Host,
+				Port:           serveCfg.Port,
+				PublicURL:      serveCfg.PublicURL,
+				AllowedOrigins: serveCfg.AllowedOrigins,
+				Config:         cfg,
+			}
 			addr := localserver.ResolveAddr(serveOpts)
-			url := "http://" + addr
+			serverURL := "http://" + addr
+			browserURL := localserver.DisplayURL(serveOpts, addr)
 			if err := localserver.RegisterProcess(localserver.ProcessRecord{
 				Kind:    localserver.ProcessKindWatch,
 				PID:     os.Getpid(),
@@ -162,8 +169,8 @@ func NewWatchCmd() *cobra.Command {
 			var srv *http.Server
 			if !noServe {
 				serveStarted := time.Now()
-				logger.InfoContext(cmd.Context(), "watch.server.ensure.started", "url", url)
-				if !serverReady(url) {
+				logger.InfoContext(cmd.Context(), "watch.server.ensure.started", "url", serverURL)
+				if !serverReady(serverURL) {
 					if progress != nil {
 						progress.Start("Starting watch server", 1)
 					}
@@ -182,18 +189,19 @@ func NewWatchCmd() *cobra.Command {
 							term.Failf(cmd.ErrOrStderr(), "server error: %v", err)
 						}
 					}()
-					url = "http://" + app.Addr
+					serverURL = "http://" + app.Addr
+					browserURL = localserver.DisplayURL(serveOpts, app.Addr)
 					if progress != nil {
 						progress.Advance("")
 						progress.Finish()
 					}
-					logger.InfoContext(cmd.Context(), "watch.server.bootstrap.completed", "elapsed", time.Since(serveStarted).Round(time.Millisecond).String(), "url", url)
+					logger.InfoContext(cmd.Context(), "watch.server.bootstrap.completed", "elapsed", time.Since(serveStarted).Round(time.Millisecond).String(), "url", serverURL)
 				} else {
-					logger.InfoContext(cmd.Context(), "watch.server.reused", "elapsed", time.Since(serveStarted).Round(time.Millisecond).String(), "url", url)
+					logger.InfoContext(cmd.Context(), "watch.server.reused", "elapsed", time.Since(serveStarted).Round(time.Millisecond).String(), "url", serverURL)
 				}
 				if openBrowser {
-					logger.InfoContext(cmd.Context(), "watch.browser.open.started", "url", url)
-					_ = cmdutil.OpenBrowser(url)
+					logger.InfoContext(cmd.Context(), "watch.browser.open.started", "url", browserURL)
+					_ = cmdutil.OpenBrowser(browserURL)
 				}
 			} else {
 				logger.InfoContext(cmd.Context(), "watch.server.skipped", "reason", "no_serve")
@@ -231,7 +239,7 @@ func NewWatchCmd() *cobra.Command {
 			defer stop()
 			events := watch.NewEventQueue()
 			ready := make(chan watch.RunnerResult, 1)
-			watchProgress := newWatchActivityProgress(cmd.ErrOrStderr(), watchClientCounter(url))
+			watchProgress := newWatchActivityProgress(cmd.ErrOrStderr(), watchClientCounter(serverURL))
 			defer func() {
 				if watchProgress != nil {
 					watchProgress.Stop()
@@ -285,7 +293,7 @@ func NewWatchCmd() *cobra.Command {
 				Branch:            result.GitStatus.Branch,
 				Head:              result.GitStatus.HeadCommit,
 				ActiveLSPs:        formatWatchLSPServers(result.InitialScan.LSP),
-				URL:               url,
+				URL:               browserURL,
 				EmbeddingProvider: embeddingCfg.Provider,
 				EmbeddingModel:    embeddingCfg.Model,
 				EmbeddingHealth:   embeddingHealth,
@@ -295,7 +303,7 @@ func NewWatchCmd() *cobra.Command {
 			if watchProgress != nil {
 				watchProgress.Start("Workspace status: current")
 			}
-			logger.InfoContext(cmd.Context(), "watch.command.ready", "repository_id", repo.ID, "repo_root", repo.RepoRoot, "url", url)
+			logger.InfoContext(cmd.Context(), "watch.command.ready", "repository_id", repo.ID, "repo_root", repo.RepoRoot, "url", browserURL)
 			if err := <-errCh; err != nil {
 				return fail("watch.runner.failed", err)
 			}

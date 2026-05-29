@@ -5,6 +5,7 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ func TestPostgresWatchAnalyzeE2E(t *testing.T) {
 	src := filepath.Join(tmp, "repo")
 	dataDir := filepath.Join(tmp, "data")
 	configDir := filepath.Join(tmp, "config")
+	workspaceDir := filepath.Join(tmp, "workspace")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -36,6 +38,15 @@ func TestPostgresWatchAnalyzeE2E(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(workspaceDir, ".tld.yaml"), `repositories:
+  test:
+    localDir: ../repo
+    config:
+      mode: upsert
+`)
 	writeFile(t, filepath.Join(src, "main.go"), `package main
 
 func main() { println(message()) }
@@ -53,6 +64,7 @@ func message() string { return "hello" }
 		t.Fatalf("watch scan output did not include parsed file count:\n%s", scanOut)
 	}
 	analyzeOut := run(t, repoRoot, env, "go", "run", "./cmd/tld", "analyze", src,
+		"--workspace", workspaceDir,
 		"--data-dir", dataDir,
 		"--language", "go",
 		"--embedding-provider", "local-deterministic-test",
@@ -60,8 +72,16 @@ func message() string { return "hello" }
 		"--dry-run",
 		"--format", "json",
 		"--compact")
-	if !strings.Contains(analyzeOut, `"embeddings_created":2`) {
-		t.Fatalf("analyze output did not include created embeddings:\n%s", analyzeOut)
+	var analyze struct {
+		Representation struct {
+			EmbeddingsCreated int `json:"embeddings_created"`
+		} `json:"representation"`
+	}
+	if err := json.Unmarshal([]byte(analyzeOut), &analyze); err != nil {
+		t.Fatalf("parse analyze output: %v\n%s", err, analyzeOut)
+	}
+	if analyze.Representation.EmbeddingsCreated < 2 {
+		t.Fatalf("analyze embeddings_created = %d, want at least 2:\n%s", analyze.Representation.EmbeddingsCreated, analyzeOut)
 	}
 
 	db := openPostgres(t, dsn)

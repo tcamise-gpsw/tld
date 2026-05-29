@@ -843,6 +843,14 @@ func (s *WorkspaceService) CreatePlacement(
 	if err != nil {
 		return nil, err
 	}
+	if workspaceID != uuid.Nil {
+		if _, err := s.Store.GetView(ctx, viewID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("view not found"))
+		}
+		if _, err := s.Store.GetElement(ctx, elementID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("element not found"))
+		}
+	}
 	ve, err := s.Store.AddPlacement(ctx, viewID, elementID, m.GetPositionX(), m.GetPositionY())
 	if err != nil {
 		return nil, storeErr("add placement", err)
@@ -879,6 +887,11 @@ func (s *WorkspaceService) UpdatePlacementPosition(
 	elementID, err := parseRequiredInt32("element_id", m.GetElementId())
 	if err != nil {
 		return nil, err
+	}
+	if workspaceID != uuid.Nil {
+		if _, err := s.Store.GetElement(ctx, elementID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("element not found"))
+		}
 	}
 	if err := s.Store.UpdatePlacementPosition(ctx, viewID, elementID, m.GetPositionX(), m.GetPositionY()); err != nil {
 		return nil, storeErr("update placement position", err)
@@ -982,12 +995,23 @@ func (s *WorkspaceService) CreateConnector(
 	if err := validateEdgeType(style); err != nil {
 		return nil, err
 	}
+	if workspaceID != uuid.Nil {
+		if _, err := s.Store.GetView(ctx, viewID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("view not found"))
+		}
+		if _, err := s.Store.GetElement(ctx, sourceID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("source element not found"))
+		}
+		if _, err := s.Store.GetElement(ctx, targetID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("target element not found"))
+		}
+	}
 	c, err := s.Store.CreateConnector(ctx, workspaceID, ConnectorInput{
 		ViewID: viewID, SourceID: sourceID, TargetID: targetID,
 		Label: OptStr(m.GetLabel()), Description: OptStr(m.GetDescription()),
 		Relationship: OptStr(m.GetRelationship()), Direction: direction, Style: style,
 		URL: OptStr(m.GetUrl()), SourceHandle: OptStr(m.GetSourceHandle()),
-		TargetHandle: OptStr(m.GetTargetHandle()),
+		TargetHandle: OptStr(m.GetTargetHandle()), Tags: m.GetTags(),
 	})
 	if err != nil {
 		return nil, storeErr("create connector", err)
@@ -1032,6 +1056,17 @@ func (s *WorkspaceService) UpdateConnector(
 			return nil, err
 		}
 		targetID = tid
+	}
+	if workspaceID != uuid.Nil {
+		if _, err := s.Store.GetView(ctx, existing.ViewId, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("view not found"))
+		}
+		if _, err := s.Store.GetElement(ctx, sourceID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("source element not found"))
+		}
+		if _, err := s.Store.GetElement(ctx, targetID, workspaceID); err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("target element not found"))
+		}
 	}
 
 	label := existing.Label
