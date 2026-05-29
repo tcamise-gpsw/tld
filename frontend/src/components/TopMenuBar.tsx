@@ -120,6 +120,8 @@ export default function TopMenuBar({
   }, [appearancePopover])
 
   useEffect(() => {
+    const shortcutItems = new Map<string, string>(NAV_ITEMS.map((item) => [item.shortcutKey, item.path]))
+
     const resetCommandState = () => setIsCommandPressed(false)
 
     const handleKeyDown = (event: KeyboardEvent) => {

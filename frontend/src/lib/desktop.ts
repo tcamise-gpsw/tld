@@ -16,6 +16,21 @@ export interface SaveFileResult {
   canceled: boolean
 }
 
+export interface DesktopUpdateStatus {
+  checked: boolean
+  current: string
+  latest: string
+  updateAvailable: boolean
+  releaseUrl: string
+  assetName: string
+  cached: boolean
+  supported: boolean
+  canInstall: boolean
+  installStarted: boolean
+  restartRequired: boolean
+  message?: string
+}
+
 type FileDropCallback = (x: number, y: number, paths: string[]) => void
 
 interface DesktopBridge {
@@ -23,6 +38,8 @@ interface DesktopBridge {
   OpenTextFile(filters: DialogFilter[]): Promise<FileDialogResult>
   ReadTextFile(path: string): Promise<FileDialogResult>
   OpenPath(path: string): Promise<void>
+  CheckForUpdate(): Promise<DesktopUpdateStatus>
+  InstallUpdate(): Promise<DesktopUpdateStatus>
 }
 
 declare global {
@@ -96,6 +113,20 @@ export async function readTextFile(path: string): Promise<FileDialogResult> {
     throw new Error('Native file read is only available in the desktop app')
   }
   return desktopBridge().ReadTextFile(path)
+}
+
+export async function checkForDesktopUpdate(): Promise<DesktopUpdateStatus> {
+  if (!isWailsApp) {
+    throw new Error('Update checks are only available in the desktop app')
+  }
+  return desktopBridge().CheckForUpdate()
+}
+
+export async function installDesktopUpdate(): Promise<DesktopUpdateStatus> {
+  if (!isWailsApp) {
+    throw new Error('Self update is only available in the desktop app')
+  }
+  return desktopBridge().InstallUpdate()
 }
 
 export function onFileDrop(callback: FileDropCallback): (() => void) | null {

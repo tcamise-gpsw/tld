@@ -29,6 +29,7 @@ declare global {
     __TLD_DIAGRAM_ID__?: number
     __TLD_APP__?: boolean
     __TLD_PLATFORM__?: string
+    __TLD_VERSION__?: string
   }
 }
 
@@ -39,6 +40,7 @@ const runtimeWindow = typeof window !== 'undefined'
 const browserPlatform = typeof navigator !== 'undefined' ? navigator.platform : ''
 export const isWailsApp = !!runtimeWindow && (!!runtimeWindow.__TLD_APP__ || !!runtimeWindow.runtime || !!runtimeWindow.wails)
 export const wailsPlatform = runtimeWindow?.__TLD_PLATFORM__
+export const tldVersion = runtimeWindow?.__TLD_VERSION__ ?? trim(import.meta.env.VITE_APP_VERSION) ?? 'dev'
 export const isWailsMac = isWailsApp && (wailsPlatform === 'darwin' || (!wailsPlatform && browserPlatform.toLowerCase().includes('mac')))
 export const isWailsWindows = isWailsApp && (wailsPlatform === 'windows' || (!wailsPlatform && browserPlatform.toLowerCase().includes('win')))
 

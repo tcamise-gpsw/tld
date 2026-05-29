@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tld "github.com/mertcikla/tld/v2"
+	cmdversion "github.com/mertcikla/tld/v2/cmd/version"
 	"github.com/mertcikla/tld/v2/internal/localserver"
 	"github.com/mertcikla/tld/v2/internal/workspace"
 	"github.com/wailsapp/wails/v2"
@@ -21,6 +22,13 @@ import (
 )
 
 func main() {
+	if handled, err := runDesktopUpdateCommand(os.Args, os.Stdout); handled {
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	_ = workspace.EnsureGlobalConfig()
 
 	cfg, err := workspace.LoadGlobalConfig()
@@ -98,6 +106,7 @@ func main() {
         window.__TLD_SERVER_URL__ = 'http://%s';
         window.__TLD_APP__ = true;
         window.__TLD_PLATFORM__ = %q;
+        window.__TLD_VERSION__ = %q;
 
         // WKWebView does not fire wheel events for trackpad pinch like Chrome does.
         // It fires gesture events. ReactFlow (via d3-zoom) relies on wheel+ctrlKey for pinch.
@@ -123,7 +132,7 @@ func main() {
         document.addEventListener('gestureend', function(e) {
             e.preventDefault();
         }, { passive: false });
-    </script>`, app.Addr, runtime.GOOS),
+    </script>`, app.Addr, runtime.GOOS, cmdversion.Version),
 								1,
 							)
 							w.Header().Set("Content-Type", "text/html; charset=utf-8")

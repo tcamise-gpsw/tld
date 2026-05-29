@@ -32,6 +32,7 @@ const (
 type Options struct {
 	Repo           string
 	Current        string
+	AssetName      string
 	CheckInterval  time.Duration
 	StatePath      string
 	HTTPClient     *http.Client
@@ -96,7 +97,7 @@ func Check(ctx context.Context, opts Options) (Status, error) {
 	status.Latest = release.TagName
 	status.ReleaseURL = release.HTMLURL
 	status.UpdateAvailable = IsNewer(opts.Current, release.TagName)
-	if assetName := assetName(); assetName != "" {
+	if assetName := selectedAssetName(opts); assetName != "" {
 		for _, asset := range release.Assets {
 			if asset.Name == assetName {
 				status.AssetName = asset.Name
@@ -218,6 +219,13 @@ func normalizeOptions(opts Options) Options {
 		opts.APIBaseURL = "https://api.github.com"
 	}
 	return opts
+}
+
+func selectedAssetName(opts Options) string {
+	if strings.TrimSpace(opts.AssetName) != "" {
+		return strings.TrimSpace(opts.AssetName)
+	}
+	return assetName()
 }
 
 func fetchLatest(ctx context.Context, opts Options) (releaseInfo, error) {

@@ -2,6 +2,7 @@ import { Box, Flex, Text, VStack } from '@chakra-ui/react'
 import { useEffect } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useSetHeader } from '../components/HeaderContext'
+import { isWailsApp, tldVersion } from '../config/runtime'
 
 
 
@@ -10,15 +11,20 @@ const DEFAULT_NAV_ITEMS = [
   { label: 'Experimental', path: '/settings/experimental' },
 ]
 
+const DESKTOP_NAV_ITEMS = [
+  { label: 'Updates', path: '/settings/updates' },
+]
+
 export interface SettingsProps {
   extraNavItems?: Array<{ label: string; path: string }>
 }
 
 export default function Settings({ extraNavItems = [] }: SettingsProps) {
-  const navItems = [...extraNavItems, ...DEFAULT_NAV_ITEMS]
+  const navItems = [...extraNavItems, ...DEFAULT_NAV_ITEMS, ...(isWailsApp ? DESKTOP_NAV_ITEMS : [])]
   const navigate = useNavigate()
   const location = useLocation()
   const setHeader = useSetHeader()
+  const displayVersion = tldVersion.startsWith('v') ? tldVersion : `v${tldVersion}`
 
   // Clear any page-specific header when on settings
   useEffect(() => {
@@ -97,7 +103,7 @@ export default function Settings({ extraNavItems = [] }: SettingsProps) {
         zIndex={10}
       >
         <Text fontSize="10px" color="gray.600" fontFamily="mono">
-          v2.2.0-alpha.1
+          {displayVersion}
         </Text>
       </Box>
     </Flex>

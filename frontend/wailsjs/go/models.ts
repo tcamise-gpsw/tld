@@ -1,5 +1,39 @@
 export namespace main {
 	
+	export class DesktopUpdateStatus {
+	    checked: boolean;
+	    current: string;
+	    latest: string;
+	    updateAvailable: boolean;
+	    releaseUrl: string;
+	    assetName: string;
+	    cached: boolean;
+	    supported: boolean;
+	    canInstall: boolean;
+	    installStarted: boolean;
+	    restartRequired: boolean;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DesktopUpdateStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.checked = source["checked"];
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.updateAvailable = source["updateAvailable"];
+	        this.releaseUrl = source["releaseUrl"];
+	        this.assetName = source["assetName"];
+	        this.cached = source["cached"];
+	        this.supported = source["supported"];
+	        this.canInstall = source["canInstall"];
+	        this.installStarted = source["installStarted"];
+	        this.restartRequired = source["restartRequired"];
+	        this.message = source["message"];
+	    }
+	}
 	export class DialogFilter {
 	    displayName: string;
 	    pattern: string;
