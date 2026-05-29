@@ -133,6 +133,12 @@ const EMPTY_LINKS: ViewConnector[] = []
 const EMPTY_TAG_COLORS: Record<string, Tag> = {}
 const noop = () => { }
 const noopAsync = async () => { }
+const CONNECTOR_DRAG_CONNECTION_LINE_STYLE = {
+  stroke: 'var(--accent)',
+  strokeWidth: 2,
+  strokeDasharray: '6 5',
+  opacity: 0.75,
+}
 const VIEW_EDITOR_MIN_ZOOM_FLOOR = 0.12
 const VIEW_EDITOR_INITIAL_FIT_PADDING = 0.25
 const VIEW_EDITOR_FOCUS_FIT_PADDING = 0.35
@@ -2436,6 +2442,7 @@ function ViewEditorInner({
     connectorLongPressMenu, setConnectorLongPressMenu,
     lastMousePosRef,
     showAddingElementAt,
+    cancelPendingElement,
     onEdgesChange, onNodeDragStart, onNodeDrag, onNodeDragStop,
     onConnect, onConnectStart, onConnectEnd,
     onReconnect, onReconnectStart, onReconnectEnd,
@@ -2454,6 +2461,18 @@ function ViewEditorInner({
   const handleRealtimePaneMouseMove = useCallback((event: React.MouseEvent) => {
     onPaneMouseMove(event)
   }, [onPaneMouseMove])
+
+  const handlePendingPanePointerDownCapture = useCallback((event: React.PointerEvent) => {
+    if (!pendingElement || pendingElement.preview || event.button !== 0) return
+    const target = event.target
+    if (!(target instanceof Element)) return
+    if (!target.closest('.react-flow__pane')) return
+    if (target.closest('.react-flow__node, .react-flow__edge, .react-flow__handle')) return
+
+    cancelPendingElement()
+    event.preventDefault()
+    event.stopPropagation()
+  }, [cancelPendingElement, pendingElement])
 
   const handleRealtimeMove = useCallback((event: unknown, viewport: { x: number; y: number; zoom: number }) => {
     onMove(event, viewport)
@@ -3075,6 +3094,7 @@ function ViewEditorInner({
               w="full"
               h="full"
               onWheelCapture={onWheelCapture}
+              onPointerDownCapture={handlePendingPanePointerDownCapture}
               onMouseMove={handleRealtimeCanvasMouseMove}
               onTouchStart={onTouchStart}
               onTouchMove={onTouchMove}
@@ -3097,6 +3117,7 @@ function ViewEditorInner({
                 onMoveStart={onMoveStart} onMove={handleRealtimeMove} onMoveEnd={onMoveEnd}
                 translateExtent={computedTranslateExtent} nodeExtent={computedTranslateExtent} minZoom={computedMinZoom} maxZoom={4}
                 onReconnect={onReconnect} onReconnectStart={onReconnectStart} onReconnectEnd={onReconnectEnd}
+                connectionLineStyle={CONNECTOR_DRAG_CONNECTION_LINE_STYLE}
                 nodeTypes={nodeTypesMemo} edgeTypes={edgeTypesMemo}
                 nodesDraggable={canEdit} connectionMode={ConnectionMode.Loose} connectionRadius={25}
                 edgesUpdatable={canEdit} reconnectRadius={0}

@@ -57,18 +57,37 @@ test('connector handle drag previews a pending placeholder only over empty canva
   const paneBox = await reactFlowPaneBox(page)
   expect(sourceBox).toBeTruthy()
   expect(targetBox).toBeTruthy()
+  const emptyCanvasPoint = {
+    x: paneBox.x + paneBox.width * 0.36,
+    y: paneBox.y + paneBox.height * 0.82,
+  }
 
   await page.mouse.move(sourceBox!.x + sourceBox!.width / 2, sourceBox!.y + sourceBox!.height / 2)
   await page.mouse.down()
-  await page.mouse.move(paneBox.x + paneBox.width * 0.52, paneBox.y + paneBox.height * 0.72, { steps: 10 })
+  await page.mouse.move(emptyCanvasPoint.x, emptyCanvasPoint.y, { steps: 10 })
 
   await expect(pendingNode).toBeVisible()
   await expect(page.getByTestId('pending-element-label-input')).toHaveCount(0)
+  const connectionPathStyle = await page.locator('.react-flow__connection path').evaluate((path) => {
+    const style = getComputedStyle(path)
+    const accentProbe = document.createElement('span')
+    accentProbe.style.color = 'var(--accent)'
+    document.body.appendChild(accentProbe)
+    const accent = getComputedStyle(accentProbe).color
+    accentProbe.remove()
+    return {
+      accent,
+      stroke: style.stroke,
+      strokeDasharray: style.strokeDasharray,
+    }
+  })
+  expect(connectionPathStyle.stroke).toBe(connectionPathStyle.accent)
+  expect(connectionPathStyle.strokeDasharray).toBe('6px, 5px')
 
   await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 10 })
   await expect(pendingNode).toHaveCount(0)
 
-  await page.mouse.move(paneBox.x + paneBox.width * 0.58, paneBox.y + paneBox.height * 0.74, { steps: 10 })
+  await page.mouse.move(emptyCanvasPoint.x, emptyCanvasPoint.y, { steps: 10 })
   await expect(pendingNode).toBeVisible()
 
   await page.mouse.up()
@@ -118,6 +137,23 @@ test('Escape cancels an inline add operation without creating a placement', asyn
   await page.keyboard.press('c')
   await page.getByTestId('pending-element-label-input').fill(name)
   await page.keyboard.press('Escape')
+
+  await expect(page.getByTestId('pending-element-label-input')).toHaveCount(0)
+  await expectPlacement(page, name, false)
+})
+
+test('single empty-canvas click cancels a focused pending element', async ({ page }) => {
+  await createAndLoadDiagramWithNodes(page, 0, 'Cancel Pending Click')
+  const name = uniqueName('Single Click Canceled Node')
+  const canvas = page.getByTestId('vieweditor-canvas')
+  const paneBox = await reactFlowPaneBox(page)
+
+  await canvas.click()
+  await page.keyboard.press('c')
+  await page.getByTestId('pending-element-label-input').fill(name)
+  await expect(page.getByTestId('pending-element-label-input')).toBeFocused()
+
+  await page.mouse.click(paneBox.x + paneBox.width * 0.75, paneBox.y + paneBox.height * 0.72)
 
   await expect(page.getByTestId('pending-element-label-input')).toHaveCount(0)
   await expectPlacement(page, name, false)
