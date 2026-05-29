@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { buildEdgeRoutePoints, buildEdgeSpatialIndex, findHoveredEdge } from './edgeHover'
-import type { DiagramGroupLayout, LayoutNode, ZUIViewState } from './types'
+import type { DiagramGroupLayout, HoveredItem, LayoutNode, ZUIViewState } from './types'
+
+type HoveredEdge = Extract<HoveredItem, { type: 'edge' }>
+
+function expectHoveredEdge(hovered: HoveredItem | null): HoveredEdge {
+  expect(hovered?.type).toBe('edge')
+  if (!hovered || hovered.type !== 'edge') {
+    throw new Error('Expected edge hover result')
+  }
+  return hovered
+}
 
 function node(id: string, elementId: number, x: number, y: number, options: Partial<LayoutNode> = {}): LayoutNode {
   return {
@@ -67,22 +77,20 @@ describe('ZUI edge hover index', () => {
     const route = buildEdgeRoutePoints(source, target, edge)
     const index = buildEdgeSpatialIndex([group([source, target], [edge])])
 
-    const hovered = findHoveredEdge(route.midX, route.midY, index, view)
+    const hovered = expectHoveredEdge(findHoveredEdge(route.midX, route.midY, index, view))
 
-    expect(hovered?.type).toBe('edge')
-    expect((hovered?.data as any).id).toBe(10)
-    expect((hovered?.data as any).label).toBe(`${type} edge`)
+    expect(hovered.data.id).toBe(10)
+    expect(hovered.data.label).toBe(`${type} edge`)
   })
 
   it('returns portal edge hover payloads', () => {
     const portal = node('Portal', 2, 200, 220, { isPortal: true, linkedDiagramId: 42 })
     const index = buildEdgeSpatialIndex([group([portal], [])])
 
-    const hovered = findHoveredEdge(280, 310, index, view)
+    const hovered = expectHoveredEdge(findHoveredEdge(280, 310, index, view))
 
-    expect(hovered?.type).toBe('edge')
-    expect((hovered?.data as any).isPortalConn).toBe(true)
-    expect((hovered?.data as any).targetDiagId).toBe(42)
+    expect(hovered.data.isPortalConn).toBe(true)
+    expect(hovered.data.targetDiagId).toBe(42)
   })
 
   it('selects the nearest indexed edge within the hover threshold', () => {
@@ -95,9 +103,8 @@ describe('ZUI edge hover index', () => {
     const index = buildEdgeSpatialIndex([group([a, b, c, d], [top, bottom])])
     const route = buildEdgeRoutePoints(c, d, bottom)
 
-    const hovered = findHoveredEdge(route.midX, route.midY, index, view)
+    const hovered = expectHoveredEdge(findHoveredEdge(route.midX, route.midY, index, view))
 
-    expect((hovered?.data as any).id).toBe(2)
+    expect(hovered.data.id).toBe(2)
   })
 })
-

@@ -71,7 +71,15 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Inventory", path: "/inventory", icon: InventoryIcon },
 ]
 
-export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileMenuSlot, userControlsSlot }: Props) {
+export default function TopMenuBar({
+  children,
+  hideMobileBar,
+  rightSlot,
+  mobileMenuSlot,
+  settingsSlot,
+  mobileSettingsSlot,
+  userControlsSlot,
+}: Props) {
   const location = useLocation()
   const { accent } = useAccentColor()
   const [isSmallerThan1150] = useMediaQuery("(max-width: 1150px)")
@@ -346,7 +354,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
           {rightSlot}
           {userControlsSlot}
 
-          {!isMobileLayout && renderAppearancePopover(
+          {settingsSlot !== undefined ? settingsSlot : (!isMobileLayout && renderAppearancePopover(
             <IconButton
               ref={appearanceTriggerRef}
               data-testid="topnav-appearance"
@@ -364,7 +372,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
                 transform: "translateY(-1px)",
               }}
             />,
-          )}
+          ))}
         </HStack>
       </Flex>
 
@@ -459,7 +467,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
             )
           })}
           {mobileMenuSlot}
-          {isMobileLayout && renderAppearancePopover(
+          {mobileSettingsSlot !== undefined ? mobileSettingsSlot : (isMobileLayout && renderAppearancePopover(
             <Box
               ref={appearanceTriggerRef}
               data-testid="mobile-topnav-appearance"
@@ -485,7 +493,7 @@ export default function TopMenuBar({ children, hideMobileBar, rightSlot, mobileM
               </Text>
             </Box>,
             "top-end",
-          )}
+          ))}
         </Flex>
       </Box>
     </>

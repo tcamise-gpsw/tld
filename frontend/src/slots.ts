@@ -30,6 +30,18 @@ export interface TopMenuBarSlots {
   mobileMenuSlot?: ReactNode
 
   /**
+   * Replaces the default desktop appearance/settings control.
+   * Use when the host app owns a broader settings surface.
+   */
+  settingsSlot?: ReactNode
+
+  /**
+   * Replaces the default mobile appearance/settings bottom-nav item.
+   * Use when the host app owns a broader settings surface.
+   */
+  mobileSettingsSlot?: ReactNode
+
+  /**
    * Overrides the default user profile / settings controls.
    * If provided, the default user avatar will be hidden.
    */

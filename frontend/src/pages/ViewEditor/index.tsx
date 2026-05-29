@@ -452,6 +452,8 @@ function ViewEditorInner({
   connectorPanelAfterContentSlot,
   rightSlot: _rightSlot,
   mobileMenuSlot: _mobileMenuSlot,
+  settingsSlot: _settingsSlot,
+  mobileSettingsSlot: _mobileSettingsSlot,
   userControlsSlot: _userControlsSlot,
 }: Props) {
   const { id: viewIdParam } = useParams<{ id: string }>()
