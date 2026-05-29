@@ -164,6 +164,7 @@ interface NodeData extends PlacedElement {
   layerHighlightColor?: string
   forceShowTagPopup?: boolean
   isCanvasMoving?: boolean
+  isPendingElement?: boolean
   connectedHandleIds?: readonly string[]
   selectedHandleIds?: readonly string[]
   reconnectCandidates?: readonly { handleId: string; edgeId: string; endpoint: 'source' | 'target'; selected: boolean }[]
@@ -457,7 +458,7 @@ function PendingElementLabelEditor({
 
 function ElementNode({ data, selected }: Props) {
   const zoom = useStore(zoomSelector)
-  const isPending = !!data.pendingCreate
+  const isPending = !!data.isPendingElement || !!data.pendingCreate
 
   const connectedHandleIds = useMemo(
     () => new Set(data.connectedHandleIds ?? []),
@@ -1210,8 +1211,9 @@ function arePropsEqual(prev: Props, next: Props) {
   if (prev.selected !== next.selected) return false
   const p = prev.data
   const n = next.data
-  if (p.pendingCreate || n.pendingCreate) {
+  if (p.isPendingElement || n.isPendingElement || p.pendingCreate || n.pendingCreate) {
     return (
+      p.isPendingElement === n.isPendingElement &&
       p.pendingCreate === n.pendingCreate &&
       p.name === n.name &&
       p.kind === n.kind &&

@@ -2158,7 +2158,10 @@ function ViewEditorInner({
       position: pending.position,
       selected: false,
       dragging: pending.dragging,
+      draggable: !pending.preview,
+      selectable: !pending.preview,
       zIndex: 2000,
+      style: pending.preview ? { pointerEvents: 'none' } : undefined,
       data: {
         id: -1,
         view_id: viewId,
@@ -2194,11 +2197,12 @@ function ViewEditorInner({
         tagColors: EMPTY_TAG_COLORS,
         layerHighlightColor: undefined,
         forceShowTagPopup: false,
+        isPendingElement: true,
         connectedHandleIds: [],
         selectedHandleIds: [],
         reconnectCandidates: [],
         isConnectorHighlighted: false,
-        pendingCreate: {
+        pendingCreate: pending.preview ? undefined : {
           allElements,
           existingElementIds,
           allowCreate: true,
@@ -2280,7 +2284,7 @@ function ViewEditorInner({
 
   const pendingPreviewEdges = useMemo((): RFEdge[] => {
     const pending = canvas.pendingElement
-    if (!pending || !pendingElementNode || pending.sourceElementIds.length === 0) return []
+    if (!pending || pending.preview || !pendingElementNode || pending.sourceElementIds.length === 0) return []
 
     return pending.sourceElementIds
       .filter((sourceId) => sourceId !== -1)

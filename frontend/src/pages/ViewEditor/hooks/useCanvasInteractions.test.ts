@@ -6,6 +6,7 @@ import {
   applyPendingElementNodeChanges,
   getConnectorDeletionTarget,
   pendingElementPositionFromFlowPoint,
+  shouldDisplayConnectorDragPlaceholder,
   type PendingElementState,
 } from './useCanvasInteractions'
 
@@ -67,5 +68,37 @@ describe('pending element node state', () => {
 
   it('cancels pending node state when the node is removed', () => {
     expect(applyPendingElementNodeChanges(pending(), [{ id: PENDING_ELEMENT_NODE_ID, type: 'remove' }])).toBeNull()
+  })
+
+  it('keeps preview metadata while tracking position updates', () => {
+    const previewPending = { ...pending(), preview: true }
+    const changes: NodeChange[] = [{
+      id: PENDING_ELEMENT_NODE_ID,
+      type: 'position',
+      position: { x: 180, y: 260 },
+      dragging: false,
+    }]
+
+    expect(applyPendingElementNodeChanges(previewPending, changes)).toEqual({
+      ...previewPending,
+      position: { x: 180, y: 260 },
+      dragging: false,
+    })
+  })
+})
+
+describe('connector drag placeholder visibility', () => {
+  it('shows the placeholder over empty canvas', () => {
+    expect(shouldDisplayConnectorDragPlaceholder(null)).toBe(true)
+  })
+
+  it('shows the placeholder over the pending node itself to avoid self-flicker', () => {
+    expect(shouldDisplayConnectorDragPlaceholder({ nodeId: PENDING_ELEMENT_NODE_ID, isHandle: false })).toBe(true)
+  })
+
+  it('hides the placeholder over a node body or handle', () => {
+    expect(shouldDisplayConnectorDragPlaceholder({ nodeId: '12', isHandle: false })).toBe(false)
+    expect(shouldDisplayConnectorDragPlaceholder({ nodeId: '12', isHandle: true })).toBe(false)
+    expect(shouldDisplayConnectorDragPlaceholder({ isHandle: true })).toBe(false)
   })
 })

@@ -1,6 +1,7 @@
 import { expect, test } from '../../fixtures'
 import {
   createAndLoadDiagramWithNodes,
+  expectConnector,
   expectPlacement,
   listPlacements,
   nodeByName,
@@ -39,6 +40,66 @@ test('dragging a node persists its position after debounce and reload', async ({
 
   await page.reload()
   await expect(nodeByName(page, elements[0].name)).toBeVisible()
+})
+
+test('connector handle drag previews a pending placeholder only over empty canvas', async ({ page }) => {
+  const { elements } = await createAndLoadDiagramWithNodes(page, 2, 'Connector Placeholder')
+  const sourceNode = page.locator(`.react-flow__node[data-id="${elements[0].id}"]`)
+  const targetNode = page.locator(`.react-flow__node[data-id="${elements[1].id}"]`)
+  const sourceHandle = sourceNode.locator('.react-flow__handle[data-handleid="right-2"]')
+  const pendingNode = page.locator('.react-flow__node[data-id="pending-element"]')
+
+  await expect(sourceHandle).toBeVisible()
+  await expect(targetNode).toBeVisible()
+
+  const sourceBox = await sourceHandle.boundingBox()
+  const targetBox = await targetNode.boundingBox()
+  const paneBox = await reactFlowPaneBox(page)
+  expect(sourceBox).toBeTruthy()
+  expect(targetBox).toBeTruthy()
+
+  await page.mouse.move(sourceBox!.x + sourceBox!.width / 2, sourceBox!.y + sourceBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(paneBox.x + paneBox.width * 0.52, paneBox.y + paneBox.height * 0.72, { steps: 10 })
+
+  await expect(pendingNode).toBeVisible()
+  await expect(page.getByTestId('pending-element-label-input')).toHaveCount(0)
+
+  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 10 })
+  await expect(pendingNode).toHaveCount(0)
+
+  await page.mouse.move(paneBox.x + paneBox.width * 0.58, paneBox.y + paneBox.height * 0.74, { steps: 10 })
+  await expect(pendingNode).toBeVisible()
+
+  await page.mouse.up()
+  await expect(page.getByTestId('pending-element-label-input')).toBeVisible()
+})
+
+test('connector handle drag released over a node body creates a snapped connector', async ({ page }) => {
+  const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 2, 'Connector Body Drop')
+  const sourceNode = page.locator(`.react-flow__node[data-id="${elements[0].id}"]`)
+  const targetNode = page.locator(`.react-flow__node[data-id="${elements[1].id}"]`)
+  const sourceHandle = sourceNode.locator('.react-flow__handle[data-handleid="right-2"]')
+
+  await expect(sourceHandle).toBeVisible()
+  await expect(targetNode).toBeVisible()
+
+  const sourceBox = await sourceHandle.boundingBox()
+  const targetBox = await targetNode.boundingBox()
+  expect(sourceBox).toBeTruthy()
+  expect(targetBox).toBeTruthy()
+
+  await page.mouse.move(sourceBox!.x + sourceBox!.width / 2, sourceBox!.y + sourceBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 12 })
+  await expect(page.locator('.react-flow__node[data-id="pending-element"]')).toHaveCount(0)
+  await page.mouse.up()
+
+  await expectConnector(page, {
+    sourceElementId: elements[0].id,
+    targetElementId: elements[1].id,
+  }, true, diagram.id)
+  await expect(page.getByTestId('pending-element-label-input')).toHaveCount(0)
 })
 
 test('canvas context menu snap-to-grid toggle persists in local storage', async ({ page }) => {
