@@ -256,6 +256,7 @@ export function ExploreToolbar({
       zIndex={10}
       className="glass"
       borderRadius="lg"
+      boxShadow="0 5px 10px rgba(0,0,0,0.5)"
       px={2}
       py={1}
       opacity={showContent ? 1 : 0}

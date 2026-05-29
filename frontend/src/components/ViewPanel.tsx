@@ -46,7 +46,6 @@ interface Props {
   isInline?: boolean
   markdown?: ViewMarkdownDocument | null
   markdownLoading?: boolean
-  onCreateMarkdown?: (options?: { fileName?: string }) => Promise<void> | void
   onLinkMarkdown?: (path: string) => Promise<void> | void
   onUnlinkMarkdown?: (options?: { deleteManagedFile: boolean }) => Promise<void> | void
   onOpenMarkdown?: () => void
@@ -71,7 +70,6 @@ function ViewPanel({
   isInline = false,
   markdown = null,
   markdownLoading = false,
-  onCreateMarkdown,
   onLinkMarkdown,
   onUnlinkMarkdown,
   onOpenMarkdown,
@@ -96,9 +94,8 @@ function ViewPanel({
   const [loadingPopulate, setLoadingPopulate] = useState(false)
   const [searchedPopulate, setSearchedPopulate] = useState(false)
   const [markdownPath, setMarkdownPath] = useState('')
-  const [managedFileName, setManagedFileName] = useState('')
   const [deleteManagedFile, setDeleteManagedFile] = useState(true)
-  const [markdownAction, setMarkdownAction] = useState<'create' | 'link' | 'unlink' | null>(null)
+  const [markdownAction, setMarkdownAction] = useState<'link' | 'unlink' | null>(null)
   const [markdownOpen, setMarkdownOpen] = useState(!!markdown)
   const [populateOpen, setPopulateOpen] = useState(false)
 
@@ -109,7 +106,6 @@ function ViewPanel({
       setLevelLabel(view.level_label || '')
       setTags(view.tags || [])
       setMarkdownPath(markdown?.path ?? '')
-      setManagedFileName(markdown?.is_managed ? markdown.path.split('/').pop() ?? '' : '')
       setDeleteManagedFile(true)
       setMarkdownOpen(!!markdown)
 
@@ -188,35 +184,26 @@ function ViewPanel({
     }
   }
 
-  const handleCreateMarkdown = async () => {
-  if (!canEdit || !onCreateMarkdown) return
-  setMarkdownAction('create')
-  try {
-    await onCreateMarkdown({ fileName: managedFileName.trim() || undefined })
-  } finally {
-    setMarkdownAction(null)
-  }
-  }
 
   const handleLinkMarkdown = async () => {
-  if (!canEdit || !onLinkMarkdown || !markdownPath.trim()) return
-  setMarkdownAction('link')
-  try {
-    await onLinkMarkdown(markdownPath.trim())
-  } finally {
-    setMarkdownAction(null)
-  }
+    if (!canEdit || !onLinkMarkdown || !markdownPath.trim()) return
+    setMarkdownAction('link')
+    try {
+      await onLinkMarkdown(markdownPath.trim())
+    } finally {
+      setMarkdownAction(null)
+    }
   }
 
   const handleUnlinkMarkdown = async () => {
-  if (!canEdit || !onUnlinkMarkdown) return
-  setMarkdownAction('unlink')
-  try {
-    await onUnlinkMarkdown({ deleteManagedFile })
-    setMarkdownPath('')
-  } finally {
-    setMarkdownAction(null)
-  }
+    if (!canEdit || !onUnlinkMarkdown) return
+    setMarkdownAction('unlink')
+    try {
+      await onUnlinkMarkdown({ deleteManagedFile })
+      setMarkdownPath('')
+    } finally {
+      setMarkdownAction(null)
+    }
   }
 
   return (
@@ -311,7 +298,7 @@ function ViewPanel({
                 <Collapse in={markdownOpen} animateOpacity>
                   <VStack align="stretch" spacing={3} pt={1}>
                     <Text fontSize="xs" color="gray.400">
-                      Attach a markdown document to this view. Managed files are created alongside the local data directory.
+                      Attach a markdown file to this view.
                     </Text>
 
                     {markdownLoading ? (
@@ -326,17 +313,12 @@ function ViewPanel({
                       >
                         <VStack align="stretch" spacing={2.5}>
                           <HStack justify="space-between" align="start">
-                            <VStack align="start" spacing={0.5}>
-                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">
-                                {markdown.is_managed ? 'Managed markdown file' : 'Linked markdown file'}
-                              </Text>
-                              <Text fontSize="xs" color="gray.400" wordBreak="break-all">
-                                {markdown.path}
-                              </Text>
-                            </VStack>
+                            <Text fontSize="xs" color="gray.400" wordBreak="break-all" flex={1} mr={2}>
+                              {markdown.path}
+                            </Text>
                             {onOpenMarkdown && (
                               <Button data-testid="view-panel-markdown-open" size="xs" variant="outline" onClick={onOpenMarkdown}>
-                                Open editor
+                                Edit
                               </Button>
                             )}
                           </HStack>
@@ -351,7 +333,7 @@ function ViewPanel({
                               isChecked={deleteManagedFile}
                               onChange={(event) => setDeleteManagedFile(event.target.checked)}
                             >
-                              <Text fontSize="xs" color="gray.300">Delete the managed file when unlinking</Text>
+                              <Text fontSize="xs" color="gray.300">Also delete file</Text>
                             </Checkbox>
                           )}
                           {canEdit && (
@@ -363,44 +345,21 @@ function ViewPanel({
                               onClick={() => { void handleUnlinkMarkdown() }}
                               isLoading={markdownAction === 'unlink'}
                             >
-                              Unlink Markdown
+                              Unlink
                             </Button>
                           )}
                         </VStack>
                       </Box>
                     ) : (
                       <Text fontSize="xs" color="gray.500">
-                        No markdown document is attached to this view yet.
+                        No file attached.
                       </Text>
-                    )}
-
-                    {canEdit && !markdown && (
-                      <>
-                        <FormControl>
-                          <FormLabel fontSize="xs" color="gray.400">Managed File Name</FormLabel>
-                          <Input
-                            data-testid="view-panel-markdown-managed-name"
-                            size="sm"
-                            value={managedFileName}
-                            onChange={(event) => setManagedFileName(event.target.value)}
-                            placeholder="view-notes.md"
-                          />
-                        </FormControl>
-                        <Button
-                          data-testid="view-panel-markdown-create"
-                          size="sm"
-                          onClick={() => { void handleCreateMarkdown() }}
-                          isLoading={markdownAction === 'create'}
-                        >
-                          Create Managed File
-                        </Button>
-                      </>
                     )}
 
                     {canEdit && (
                       <>
                         <FormControl>
-                          <FormLabel fontSize="xs" color="gray.400">Link Existing Markdown File</FormLabel>
+                          <FormLabel fontSize="xs" color="gray.400">Link Existing File</FormLabel>
                           <Input
                             data-testid="view-panel-markdown-path"
                             size="sm"
@@ -417,7 +376,7 @@ function ViewPanel({
                           isLoading={markdownAction === 'link'}
                           isDisabled={!markdownPath.trim()}
                         >
-                          {markdown ? 'Relink Markdown File' : 'Link Markdown File'}
+                          {markdown ? 'Relink File' : 'Link File'}
                         </Button>
                       </>
                     )}
@@ -452,99 +411,99 @@ function ViewPanel({
 
                 <Collapse in={populateOpen} animateOpacity>
                   <VStack align="stretch" spacing={3}>
-                <Text fontSize="xs" color="gray.400">
-                  Find high-level scanned resources from your codebase and place them inside the view.
-                  Requires "tld analyze" with a configured embedding model provider.
-                </Text>
+                    <Text fontSize="xs" color="gray.400">
+                      Find high-level scanned resources from your codebase and place them inside the view.
+                      Requires "tld analyze" with a configured embedding model provider.
+                    </Text>
 
-                <FormControl>
-                  <FormLabel fontSize="xs" color="gray.400">Search Query</FormLabel>
-                  <Input
-                    size="sm"
-                    value={populateQuery}
-                    onChange={(e) => setPopulateQuery(e.target.value)}
-                    placeholder="Describe the architecture component..."
-                  />
-                </FormControl>
+                    <FormControl>
+                      <FormLabel fontSize="xs" color="gray.400">Search Query</FormLabel>
+                      <Input
+                        size="sm"
+                        value={populateQuery}
+                        onChange={(e) => setPopulateQuery(e.target.value)}
+                        placeholder="Describe the architecture component..."
+                      />
+                    </FormControl>
 
-                <HStack spacing={4} align="flex-end">
-                  <FormControl>
-                    <FormLabel fontSize="xs" color="gray.400">Limit (N)</FormLabel>
-                    <Input
-                      type="number"
-                      size="sm"
-                      value={populateLimit}
-                      onChange={(e) => setPopulateLimit(Math.max(1, parseInt(e.target.value) || 5))}
-                      min={1}
-                      max={50}
-                    />
-                  </FormControl>
-                  <Button
-                    size="sm"
-                    colorScheme="blue"
-                    onClick={handleRunPopulate}
-                    isLoading={loadingPopulate}
-                    px={5}
-                  >
-                    Find
-                  </Button>
-                </HStack>
-
-                {searchedPopulate && !loadingPopulate && populateResults.length > 0 && (
-                  <VStack
-                    align="stretch"
-                    spacing={2.5}
-                    mt={1}
-                    maxH="220px"
-                    overflowY="auto"
-                    p={3}
-                    bg="whiteAlpha.50"
-                    borderRadius="md"
-                    border="1px solid"
-                    borderColor="whiteAlpha.100"
-                  >
-                    {populateResults.map((result) => (
-                      <HStack key={result.id} justify="space-between" align="center">
-                        <Checkbox
+                    <HStack spacing={4} align="flex-end">
+                      <FormControl>
+                        <FormLabel fontSize="xs" color="gray.400">Limit (N)</FormLabel>
+                        <Input
+                          type="number"
                           size="sm"
-                          isChecked={selectedPopulateIds.includes(result.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedPopulateIds([...selectedPopulateIds, result.id])
-                            } else {
-                              setSelectedPopulateIds(selectedPopulateIds.filter((id) => id !== result.id))
-                            }
-                          }}
-                        >
-                          <VStack align="start" spacing={0} maxW="160px">
-                            <Text fontSize="xs" fontWeight="medium" color="white" isTruncated maxW="160px">
-                              {result.name}
-                            </Text>
-                            <Text fontSize="10px" color="gray.500" isTruncated maxW="160px">
-                              {[result.kind, result.file_path].filter(Boolean).join(' · ')}
-                            </Text>
-                          </VStack>
-                        </Checkbox>
-                        <HStack spacing={1.5}>
-                          {result.technology && (
-                            <Text fontSize="9px" color="gray.400" bg="whiteAlpha.100" px={1.5} py={0.5} borderRadius="sm">
-                              {result.technology}
-                            </Text>
-                          )}
-                          <Text fontSize="10px" fontWeight="bold" color="blue.300">
-                            {Math.round(result.similarity_score * 100)}
-                          </Text>
-                        </HStack>
-                      </HStack>
-                    ))}
-                  </VStack>
-                )}
+                          value={populateLimit}
+                          onChange={(e) => setPopulateLimit(Math.max(1, parseInt(e.target.value) || 5))}
+                          min={1}
+                          max={50}
+                        />
+                      </FormControl>
+                      <Button
+                        size="sm"
+                        colorScheme="blue"
+                        onClick={handleRunPopulate}
+                        isLoading={loadingPopulate}
+                        px={5}
+                      >
+                        Find
+                      </Button>
+                    </HStack>
 
-                {searchedPopulate && !loadingPopulate && populateResults.length === 0 && (
-                  <Text fontSize="xs" color="gray.500" py={2} textAlign="center">
-                    No similar elements found.
-                  </Text>
-                )}
+                    {searchedPopulate && !loadingPopulate && populateResults.length > 0 && (
+                      <VStack
+                        align="stretch"
+                        spacing={2.5}
+                        mt={1}
+                        maxH="220px"
+                        overflowY="auto"
+                        p={3}
+                        bg="whiteAlpha.50"
+                        borderRadius="md"
+                        border="1px solid"
+                        borderColor="whiteAlpha.100"
+                      >
+                        {populateResults.map((result) => (
+                          <HStack key={result.id} justify="space-between" align="center">
+                            <Checkbox
+                              size="sm"
+                              isChecked={selectedPopulateIds.includes(result.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedPopulateIds([...selectedPopulateIds, result.id])
+                                } else {
+                                  setSelectedPopulateIds(selectedPopulateIds.filter((id) => id !== result.id))
+                                }
+                              }}
+                            >
+                              <VStack align="start" spacing={0} maxW="160px">
+                                <Text fontSize="xs" fontWeight="medium" color="white" isTruncated maxW="160px">
+                                  {result.name}
+                                </Text>
+                                <Text fontSize="10px" color="gray.500" isTruncated maxW="160px">
+                                  {[result.kind, result.file_path].filter(Boolean).join(' · ')}
+                                </Text>
+                              </VStack>
+                            </Checkbox>
+                            <HStack spacing={1.5}>
+                              {result.technology && (
+                                <Text fontSize="9px" color="gray.400" bg="whiteAlpha.100" px={1.5} py={0.5} borderRadius="sm">
+                                  {result.technology}
+                                </Text>
+                              )}
+                              <Text fontSize="10px" fontWeight="bold" color="blue.300">
+                                {Math.round(result.similarity_score * 100)}
+                              </Text>
+                            </HStack>
+                          </HStack>
+                        ))}
+                      </VStack>
+                    )}
+
+                    {searchedPopulate && !loadingPopulate && populateResults.length === 0 && (
+                      <Text fontSize="xs" color="gray.500" py={2} textAlign="center">
+                        No similar elements found.
+                      </Text>
+                    )}
                   </VStack>
                 </Collapse>
               </VStack>

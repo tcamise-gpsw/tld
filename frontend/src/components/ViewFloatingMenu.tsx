@@ -162,7 +162,7 @@ function ViewFloatingMenu({
         border="1px solid"
         borderColor="whiteAlpha.100"
         rounded="xl"
-        boxShadow="0 8px 32px rgba(0,0,0,0.5)"
+        boxShadow="0 5px 10px rgba(0,0,0,0.5)"
         backdropFilter="blur(20px)"
         px={1.5}
         py={1.5}

@@ -32,19 +32,36 @@ export const ElementContainer = memo(forwardRef<ElementContainerProps, 'div'>(({
         ? accent
         : brandedBorder
 
-  // Shadows matching ZUICanvas / high-fidelity look
-  const selectionShadow      = `0 0 0 3px rgba(${accentRgb}, 0.35), 0 10px 36px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.4)`
-  const sourceShadow         = `0 0 0 3px rgba(${accentRgb}, 0.55), 0 0 24px rgba(${accentRgb}, 0.25)`
-  const edgeHighlightShadow  = `0 0 0 2px rgba(${accentRgb}, 0.2), 0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35)`
-  const restingShadow        = '0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35)'
-  const hoverShadow          = isSource ? sourceShadow : isSelected ? selectionShadow : '0 12px 40px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.4)'
+  const restingShadow = '0 6px 10px rgba(0,0,0,0.35)'
+  const hoverDepthShadow = '0 8px 14px rgba(0,0,0,0.42)'
+  const stackShadow = 'drop-shadow(0 8px 10px rgba(0,0,0,0.7))'
+  const stackHoverShadow = 'drop-shadow(0 10px 12px rgba(0,0,0,0.9))'
+  const stateRing = isSource
+    ? `0 0 0 2px rgba(${accentRgb}, 0.5)`
+    : isSelected
+      ? `0 0 0 2px rgba(${accentRgb}, 0.35)`
+      : isConnectorHighlighted
+        ? `0 0 0 1px rgba(${accentRgb}, 0.25)`
+        : null
 
-  const boxShadow = isSource ? sourceShadow : isSelected ? selectionShadow : isConnectorHighlighted ? edgeHighlightShadow : restingShadow
+  const boxShadow = hasStack
+    ? stateRing ?? 'none'
+    : stateRing ? `${stateRing}, ${restingShadow}` : restingShadow
+  const hoverShadow = hasStack
+    ? stateRing ?? 'none'
+    : stateRing ? `${stateRing}, ${hoverDepthShadow}` : hoverDepthShadow
 
   const finalBorderColor = borderColor
 
   return (
-    <Box position="relative" zIndex={1}>
+    <Box
+      position="relative"
+      zIndex={1}
+      role="group"
+      filter={hasStack ? stackShadow : undefined}
+      transition="filter var(--chakra-transitions-duration-fast) var(--chakra-transitions-easing-pop)"
+      _hover={hasStack ? { filter: stackHoverShadow } : undefined}
+    >
       {hasStack && (
         <>
           {/* Stack effect matching ZUI renderer.ts (offset 4px and 8px) */}
@@ -81,6 +98,10 @@ export const ElementContainer = memo(forwardRef<ElementContainerProps, 'div'>(({
         boxShadow={boxShadow}
         transition="all var(--chakra-transitions-duration-fast) var(--chakra-transitions-easing-pop)"
         position="relative"
+        _groupHover={hasStack ? {
+          borderColor: isSource ? accent : isTarget ? 'teal.200' : accent,
+          boxShadow: hoverShadow,
+        } : undefined}
         _hover={{
           borderColor: isSource ? accent : isTarget ? 'teal.200' : accent,
           boxShadow: hoverShadow,

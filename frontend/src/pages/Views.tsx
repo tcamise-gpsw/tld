@@ -128,7 +128,7 @@ function DiagramJumpToolbar({
           px={1.5}
           py={1.5}
           gap={1.5}
-          boxShadow="0 8px 32px rgba(0,0,0,0.5)"
+          boxShadow="0 5px 10px rgba(0,0,0,0.5)"
           align="center"
           w={isMobileLayout ? "full" : "auto"}
           maxW="full"
