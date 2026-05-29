@@ -73,6 +73,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Inventory", path: "/inventory", icon: InventoryIcon, shortcutKey: "3" },
 ]
 
+const NAV_SHORTCUT_PATHS: ReadonlyMap<string, string> = new Map(
+  NAV_ITEMS.map((item) => [item.shortcutKey, item.path]),
+)
+
 export default function TopMenuBar({
   children,
   hideMobileBar,
@@ -116,8 +120,6 @@ export default function TopMenuBar({
   }, [appearancePopover])
 
   useEffect(() => {
-    const shortcutItems = new Map(NAV_ITEMS.map((item) => [item.shortcutKey, item.path]))
-
     const resetCommandState = () => setIsCommandPressed(false)
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -125,7 +127,7 @@ export default function TopMenuBar({
       setIsCommandPressed(isModifierPressed)
       if (!isModifierPressed || event.altKey || event.shiftKey) return
 
-      const shortcutPath = shortcutItems.get(event.key)
+      const shortcutPath = NAV_SHORTCUT_PATHS.get(event.key)
       if (!shortcutPath) return
 
       event.preventDefault()
