@@ -92,19 +92,19 @@ export async function addNodeWithCanvasContextMenu(page: Page, name = uniqueName
 export async function addExistingNodeWithInlineSearch(page: Page, name: string) {
   await page.getByTestId('vieweditor-canvas').click({ position: { x: 600, y: 100 } })
   await page.keyboard.press('c')
-  const input = page.getByTestId('inline-element-adder-input')
+  const input = page.getByTestId('pending-element-label-input')
   await input.fill(name)
-  await expect(page.getByTestId('inline-element-adder-existing-option').filter({ hasText: name }).first()).toBeVisible()
+  await expect(page.getByTestId('pending-element-existing-option').filter({ hasText: name }).first()).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await expect(nodeByName(page, name)).toBeVisible()
 }
 
 export async function confirmInlineNewElement(page: Page, name: string) {
-  const input = page.getByTestId('inline-element-adder-input')
+  const input = page.getByTestId('pending-element-label-input')
   await expect(input).toBeVisible()
   await input.fill(name)
-  await expect(page.getByTestId('inline-element-adder-create-option').filter({ hasText: name }).first()).toBeVisible()
+  await expect(page.getByTestId('pending-element-create-option').filter({ hasText: name }).first()).toBeVisible()
   await input.press('Enter')
 }
 

@@ -7,6 +7,7 @@ import { SafeBackground } from '../../components/SafeBackground'
 import ReactFlow, {
   BackgroundVariant,
   ConnectionMode,
+  MarkerType,
   PanOnScrollMode,
   ReactFlowProvider,
   useReactFlow,
@@ -63,7 +64,6 @@ import type {
   ViewRealtimeConnection,
   ViewRealtimeHandlers,
 } from '../../platform/types'
-import InlineElementAdder from '../../components/InlineElementAdder'
 import ExportModal, { type ExportOptions } from '../../components/ExportModal'
 import ImportModal from '../../components/ImportModal'
 import { KbdHint } from '../../components/PanelUI'
@@ -93,11 +93,12 @@ import type { ExtensionToWebviewMessage } from '../../types/vscode-messages'
 import { ViewEditorContext } from './context'
 import { useViewData } from './hooks/useViewData'
 import { useDrawingEngine } from './hooks/useDrawingEngine'
-import { applyNodeChangesWithStructuralSharing, useCanvasInteractions } from './hooks/useCanvasInteractions'
+import { PENDING_ELEMENT_NODE_ID, applyNodeChangesWithStructuralSharing, useCanvasInteractions } from './hooks/useCanvasInteractions'
 import { useViewEditHistory } from './hooks/useViewEditHistory'
 import { useOverlapDetection } from './hooks/useOverlapDetection'
 import { removeCollisions } from '../../utils/layout'
 import { connectorToConnector, findClosestHandles, sanitizeExportFilename, triggerBlobDownload, triggerDownload } from './utils'
+import { DEFAULT_SOURCE_HANDLE_SIDE, DEFAULT_TARGET_HANDLE_SIDE, ensureVisualHandleId } from '../../utils/edgeDistribution'
 import { pickUnusedColor } from '../../components/ViewExplorer/utils'
 
 import { EmptyCanvasState } from './components/EmptyCanvasState'
@@ -129,6 +130,9 @@ const nodeTypes = {
 }
 const edgeTypes = { default: ViewBezierConnector, contextStraightConnector: ContextStraightConnector, proxyConnectorEdge: ProxyConnectorEdge }
 const EMPTY_LINKS: ViewConnector[] = []
+const EMPTY_TAG_COLORS: Record<string, Tag> = {}
+const noop = () => { }
+const noopAsync = async () => { }
 const VIEW_EDITOR_MIN_ZOOM_FLOOR = 0.12
 const VIEW_EDITOR_INITIAL_FIT_PADDING = 0.25
 const VIEW_EDITOR_FOCUS_FIT_PADDING = 0.35
@@ -2144,12 +2148,87 @@ function ViewEditorInner({
   const fadedNodeCacheRef = useRef<WeakMap<RFNode, RFNode>>(new WeakMap())
   const fadedEdgeCacheRef = useRef<WeakMap<RFEdge, RFEdge>>(new WeakMap())
 
+  const pendingElementNode = useMemo((): RFNode | null => {
+    const pending = canvas.pendingElement
+    if (!pending || viewId === null) return null
+
+    return {
+      id: pending.id,
+      type: 'elementNode',
+      position: pending.position,
+      selected: false,
+      dragging: pending.dragging,
+      zIndex: 2000,
+      data: {
+        id: -1,
+        view_id: viewId,
+        element_id: -1,
+        position_x: pending.position.x,
+        position_y: pending.position.y,
+        name: '',
+        description: null,
+        kind: null,
+        technology: null,
+        url: null,
+        logo_url: null,
+        technology_connectors: [],
+        tags: [],
+        has_view: false,
+        view_label: null,
+        links: EMPTY_LINKS,
+        parentLinks: EMPTY_LINKS,
+        parentViewId: null,
+        onZoomIn: noopAsync,
+        onZoomOut: noopAsync,
+        onNavigateToDiagram: noop,
+        onSelect: noop,
+        onOpenCodePreview: noop,
+        onInteractionStart: noop,
+        onConnectTo: noopAsync,
+        onStartHandleReconnect: undefined,
+        onRemove: noopAsync,
+        onHoverZoom: noop,
+        isZoomHovered: null,
+        interactionSourceId: null,
+        isClickConnectMode: false,
+        tagColors: EMPTY_TAG_COLORS,
+        layerHighlightColor: undefined,
+        forceShowTagPopup: false,
+        connectedHandleIds: [],
+        selectedHandleIds: [],
+        reconnectCandidates: [],
+        isConnectorHighlighted: false,
+        pendingCreate: {
+          allElements,
+          existingElementIds,
+          allowCreate: true,
+          getSecondaryLabel: pending.mode === 'connect'
+            ? (obj: WorkspaceElement) => placementSummaryByElementId[obj.id] ?? obj.technology ?? null
+            : undefined,
+          onConfirmNew: canvas.handleConfirmNewElement,
+          onConfirmExisting: canvas.handleConfirmExistingElement,
+          onCancel: canvas.cancelPendingElement,
+        },
+      },
+    }
+  }, [
+    allElements,
+    canvas.cancelPendingElement,
+    canvas.handleConfirmExistingElement,
+    canvas.handleConfirmNewElement,
+    canvas.pendingElement,
+    existingElementIds,
+    placementSummaryByElementId,
+    viewId,
+  ])
+
   const flowNodes = useMemo(() => {
-    const allNodes = liveContextNodes.length === 0
+    const baseNodes = liveContextNodes.length === 0
       ? rfNodes
       : rfNodes.length === 0
         ? liveContextNodes
         : [...liveContextNodes, ...rfNodes]
+    const allNodes = pendingElementNode ? [...baseNodes, pendingElementNode] : baseNodes
 
     let hasNodeSel = false
     const selectedNodeIds = new Set<string>()
@@ -2185,6 +2264,7 @@ function ViewEditorInner({
 
     const cache = fadedNodeCacheRef.current
     return allNodes.map((n) => {
+      if (n.id === PENDING_ELEMENT_NODE_ID) return n
       const isHighlighted = selectedNodeIds.has(n.id) || selectedEdgeEndPoints.has(n.id) || neighborNodeIds.has(n.id)
       if (isHighlighted) return n
       const cached = cache.get(n)
@@ -2196,19 +2276,72 @@ function ViewEditorInner({
       cache.set(n, faded)
       return faded
     })
-  }, [liveContextNodes, rfNodes, contextConnectors, rfEdgesWithProxyBadges])
+  }, [liveContextNodes, rfNodes, pendingElementNode, contextConnectors, rfEdgesWithProxyBadges])
+
+  const pendingPreviewEdges = useMemo((): RFEdge[] => {
+    const pending = canvas.pendingElement
+    if (!pending || !pendingElementNode || pending.sourceElementIds.length === 0) return []
+
+    return pending.sourceElementIds
+      .filter((sourceId) => sourceId !== -1)
+      .map((sourceId) => {
+        const sourceNode = rfNodes.find((node) => node.id === String(sourceId))
+        const handles = sourceNode
+          ? findClosestHandles(sourceNode, pendingElementNode)
+          : { sourceHandle: DEFAULT_SOURCE_HANDLE_SIDE, targetHandle: DEFAULT_TARGET_HANDLE_SIDE }
+        return {
+          id: `pending-element-edge-${sourceId}`,
+          source: String(sourceId),
+          target: pending.id,
+          sourceHandle: ensureVisualHandleId(pending.sourceHandle ?? handles.sourceHandle, DEFAULT_SOURCE_HANDLE_SIDE) ?? undefined,
+          targetHandle: ensureVisualHandleId(handles.targetHandle, DEFAULT_TARGET_HANDLE_SIDE) ?? undefined,
+          type: 'default',
+          label: '',
+          data: {
+            id: -sourceId,
+            view_id: viewId ?? -1,
+            source_element_id: sourceId,
+            target_element_id: -1,
+            label: null,
+            description: null,
+            relationship: null,
+            direction: 'forward',
+            style: 'bezier',
+            url: null,
+            source_handle: pending.sourceHandle ?? handles.sourceHandle,
+            target_handle: handles.targetHandle,
+            tags: [],
+            created_at: '',
+            updated_at: '',
+          },
+          style: {
+            stroke: 'var(--accent)',
+            strokeWidth: 2,
+            opacity: 0.55,
+            pointerEvents: 'none',
+            strokeDasharray: '6 5',
+          },
+          labelStyle: { fontSize: 11, fill: 'var(--accent)', opacity: 0.55 },
+          labelBgStyle: { fill: 'var(--chakra-colors-gray-900)', fillOpacity: 0.55 },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'var(--accent)' },
+          zIndex: 1500,
+        }
+      })
+  }, [canvas.pendingElement, pendingElementNode, rfNodes, viewId])
 
   const flowEdges = useMemo(() => {
-    const allEdges = contextConnectors.length === 0
+    const baseEdges = contextConnectors.length === 0
       ? rfEdgesWithProxyBadges
       : rfEdgesWithProxyBadges.length === 0
         ? contextConnectors
         : [...contextConnectors, ...rfEdgesWithProxyBadges]
-    const allNodes = liveContextNodes.length === 0
+    const allEdges = pendingPreviewEdges.length === 0 ? baseEdges : [...baseEdges, ...pendingPreviewEdges]
+    const baseNodes = liveContextNodes.length === 0
       ? rfNodes
       : rfNodes.length === 0
         ? liveContextNodes
         : [...liveContextNodes, ...rfNodes]
+    const allNodes = pendingElementNode ? [...baseNodes, pendingElementNode] : baseNodes
 
     const selectedNodeIds = new Set<string>()
     let hasNodeSel = false
@@ -2222,6 +2355,7 @@ function ViewEditorInner({
 
     const cache = fadedEdgeCacheRef.current
     return allEdges.map((e) => {
+      if (e.id.startsWith('pending-element-edge-')) return e
       const isHighlighted = e.selected || selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target)
       if (isHighlighted) return e
       const cached = cache.get(e)
@@ -2238,7 +2372,7 @@ function ViewEditorInner({
       cache.set(e, faded)
       return faded
     })
-  }, [contextConnectors, rfEdgesWithProxyBadges, liveContextNodes, rfNodes])
+  }, [contextConnectors, rfEdgesWithProxyBadges, pendingPreviewEdges, liveContextNodes, rfNodes, pendingElementNode])
 
   // Route onNodesChange: context node changes (dimensions, selection) go to
   // liveContextNodes state; main node changes go to the canvas handler.
@@ -2292,9 +2426,8 @@ function ViewEditorInner({
 
   const {
     canvasMenu, setCanvasMenu,
-    addingElementAt, setAddingElementAt,
-    connectGhostPos, clickConnectMode, clickConnectCursorPos,
-    setPendingConnectionSource,
+    pendingElement,
+    clickConnectMode, clickConnectCursorPos,
     reconnectPicking, setReconnectPicking, reconnectPickingRef,
     connectorLongPressMenu, setConnectorLongPressMenu,
     lastMousePosRef,
@@ -2307,7 +2440,6 @@ function ViewEditorInner({
     onTouchStart, onTouchMove, onTouchEnd,
     onContainerPointerDown, onContainerPointerMove, onContainerPointerUp,
     onDragOver, onDrop, onWheelCapture,
-    handleConfirmNewElement, handleConfirmExistingElement, handleConfirmConnectExistingElement,
   } = canvas
 
   const handleRealtimeCanvasMouseMove = useCallback((event: React.MouseEvent) => {
@@ -2719,7 +2851,7 @@ function ViewEditorInner({
   }, [viewName, viewElements, connectors, toast])
 
   const handlePasteMermaidImport = useCallback(async (event: ClipboardEvent) => {
-    if (!canEdit || isPasteImportingRef.current || textEditorState || addingElementAt) return
+    if (!canEdit || isPasteImportingRef.current || textEditorState || pendingElement) return
     const target = event.target as HTMLElement | null
     const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' ||
       target?.tagName === 'SELECT' || target?.isContentEditable
@@ -2801,7 +2933,7 @@ function ViewEditorInner({
     } finally {
       isPasteImportingRef.current = false
     }
-  }, [addingElementAt, canEdit, clearEditHistory, refreshElements, textEditorState, toast, viewIdRef])
+  }, [pendingElement, canEdit, clearEditHistory, refreshElements, textEditorState, toast, viewIdRef])
 
   useEffect(() => {
     window.addEventListener('paste', handlePasteMermaidImport)
@@ -3056,11 +3188,10 @@ function ViewEditorInner({
               onUpdateTags={handleUpdateTags}
               onCreateTag={handleCreateTag}
               suppressed={elementPanel.isOpen || connectorPanel.isOpen || viewDetails.isOpen}
-              noFocusLock={!!addingElementAt || !!textEditorState}
+              noFocusLock={!!pendingElement || !!textEditorState}
             />
 
             <EditorOverlays
-              connectGhostPos={connectGhostPos}
               clickConnectMode={clickConnectMode}
               clickConnectCursorPos={clickConnectCursorPos}
               handleReconnectDrag={canvas.handleReconnectDrag}
@@ -3184,24 +3315,7 @@ function ViewEditorInner({
               onCopyMermaid={handleCopyMermaidDirect}
             />
 
-            {/* Inline element adder */}
-            {addingElementAt && (
-              <InlineElementAdder
-                x={addingElementAt.x} y={addingElementAt.y} expandResults={addingElementAt.expandResults}
-                allElements={allElements} existingElementIds={existingElementIds}
-                allowCreate={addingElementAt.mode === 'add'}
-                title={addingElementAt.mode === 'connect' ? 'Connect To Off-View Element' : undefined}
-                placeholder={addingElementAt.mode === 'connect' ? 'Search workspace elements...' : undefined}
-                getSecondaryLabel={addingElementAt.mode === 'connect'
-                  ? (obj) => placementSummaryByElementId[obj.id] ?? obj.technology ?? null
-                  : undefined}
-                onConfirmNew={handleConfirmNewElement}
-                onConfirmExisting={addingElementAt.mode === 'connect' ? handleConfirmConnectExistingElement : handleConfirmExistingElement}
-                onCancel={() => { setAddingElementAt(null); setPendingConnectionSource(null) }}
-              />
-            )}
-
-            <EmptyCanvasState isMobile={isMobileLayout} hasNodes={rfNodes.length > 0} />
+            <EmptyCanvasState isMobile={isMobileLayout} hasNodes={rfNodes.length > 0 || !!pendingElement} />
 
             <SelectionBulkBar
               count={drawingMode ? 0 : selectedCanvasElementIds.length}
@@ -3325,7 +3439,7 @@ function ViewEditorInner({
           onFindElement={handleFindElement}
           onTouchDrop={canEdit ? handleTouchDrop : undefined}
           deletedElementIds={deletedLibraryElementIds}
-          noFocusLock={!!addingElementAt || !!textEditorState}
+          noFocusLock={!!pendingElement || !!textEditorState}
         />
 
         <ElementPanel
@@ -3347,7 +3461,7 @@ function ViewEditorInner({
           parentLinks={selectedElement ? (parentLinksMap[selectedElement.id] || EMPTY_LINKS) : EMPTY_LINKS}
           hasBackdrop={isMobileLayout}
           availableTags={availableTags}
-          noFocusLock={!!addingElementAt || !!textEditorState}
+          noFocusLock={!!pendingElement || !!textEditorState}
           elementPanelAfterContentSlot={elementPanelAfterContentSlot}
         />
 
@@ -3363,7 +3477,7 @@ function ViewEditorInner({
           onDemoteVisibility={(id) => handleVisibilityOverride('connector', id, 'demote')}
           onResetVisibility={(id) => handleVisibilityOverride('connector', id, 'reset')}
           hasBackdrop={isMobileLayout}
-          noFocusLock={!!addingElementAt || !!textEditorState}
+          noFocusLock={!!pendingElement || !!textEditorState}
           connectorPanelAfterContentSlot={connectorPanelAfterContentSlot}
         />
         <ProxyConnectorPanel

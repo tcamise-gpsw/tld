@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Box, Badge, HStack, Input, Text, VStack } from '@chakra-ui/react'
+import { Box, Input, Text } from '@chakra-ui/react'
 import type { LibraryElement } from '../types'
-import { TYPE_COLORS } from '../types'
 import { useElementSearch } from '../hooks/useElementSearch'
+import ElementCreateSearchResults from './ElementCreateSearchResults'
+import { buildElementCreateSearchResults } from './elementCreateSearch'
 
 interface Props {
   x: number
@@ -56,29 +57,7 @@ export default function InlineElementAdder({
     }
   }, [focusInput])
 
-  const filtered = (() => {
-    if (!query.trim()) return []
-    const byID = new Map<number, LibraryElement>()
-    remoteElements.forEach((element) => byID.set(element.id, element))
-    allElements.forEach((element) => byID.set(element.id, element))
-    const candidates = Array.from(byID.values())
-    try {
-      const re = new RegExp(query, 'i')
-      return candidates.filter((o) => re.test(o.name)).slice(0, 8)
-    } catch {
-      const q = query.toLowerCase()
-      return candidates.filter((o) => o.name.toLowerCase().includes(q)).slice(0, 8)
-    }
-  })()
-
-  type ResultItem =
-    | { kind: 'new'; label: string }
-    | { kind: 'existing'; obj: LibraryElement }
-
-  const results: ResultItem[] = [
-    ...(allowCreate ? [{ kind: 'new', label: query.trim() || 'Unnamed' } as ResultItem] : []),
-    ...filtered.map((obj): ResultItem => ({ kind: 'existing', obj })),
-  ]
+  const results = buildElementCreateSearchResults({ query, allElements, remoteElements, allowCreate })
 
   useEffect(() => { setActiveIndex(0) }, [query])
 
@@ -171,64 +150,17 @@ export default function InlineElementAdder({
             overflowY="auto"
             flexShrink={0}
           >
-            <VStack spacing={0} align="stretch">
-              {results.map((item, i) => (
-                <Box
-                  data-testid={item.kind === 'new' ? 'inline-element-adder-create-option' : 'inline-element-adder-existing-option'}
-                  key={i}
-                  px={3}
-                  py={1.5}
-                  bg={i === activeIndex ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent'}
-                  cursor={busy ? 'not-allowed' : 'pointer'}
-                  _hover={{ bg: i === activeIndex ? 'rgba(var(--accent-rgb), 0.12)' : 'whiteAlpha.100' }}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  onClick={() => !busy && confirm(i)}
-                  transition="background 0.1s"
-                >
-                  {item.kind === 'new' ? (
-                    <HStack spacing={1.5}>
-                      <Text fontSize="10px" color="var(--accent)" fontWeight="bold" flexShrink={0}>
-                        + Create
-                      </Text>
-                      <Text
-                        fontSize="sm"
-                        color="white"
-                        noOfLines={1}
-                        fontStyle={!query.trim() ? 'italic' : 'normal'}
-                        pr={1}
-                      >
-                        {item.label}
-                      </Text>
-                    </HStack>
-                  ) : (
-                    <HStack spacing={2}>
-                      <Box flex={1} minW={0}>
-                        <Text fontSize="sm" color="gray.200" noOfLines={1}>
-                          {item.obj.name}
-                        </Text>
-                        {(getSecondaryLabel?.(item.obj) || item.obj.technology) && (
-                          <Text fontSize="10px" color="gray.500" noOfLines={1}>
-                            {getSecondaryLabel?.(item.obj) || item.obj.technology}
-                          </Text>
-                        )}
-                      </Box>
-                      <Badge
-                        colorScheme={TYPE_COLORS[item.obj.kind ?? ''] ?? 'gray'}
-                        fontSize="8px"
-                        flexShrink={0}
-                      >
-                        {item.obj.kind}
-                      </Badge>
-                      {existingElementIds.has(item.obj.id) && (
-                        <Text fontSize="9px" color="gray.500" flexShrink={0}>
-                          on canvas
-                        </Text>
-                      )}
-                    </HStack>
-                  )}
-                </Box>
-              ))}
-            </VStack>
+            <ElementCreateSearchResults
+              results={results}
+              activeIndex={activeIndex}
+              busy={busy}
+              query={query}
+              existingElementIds={existingElementIds}
+              testIdPrefix="inline-element-adder"
+              getSecondaryLabel={getSecondaryLabel}
+              onActiveIndexChange={setActiveIndex}
+              onConfirm={confirm}
+            />
           </Box>
         )}
       </Box>

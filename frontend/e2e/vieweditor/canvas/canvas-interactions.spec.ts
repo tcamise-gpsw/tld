@@ -55,9 +55,9 @@ test('Escape cancels an inline add operation without creating a placement', asyn
   const name = uniqueName('Canceled Node')
   await page.getByTestId('vieweditor-canvas').click()
   await page.keyboard.press('c')
-  await page.getByTestId('inline-element-adder-input').fill(name)
+  await page.getByTestId('pending-element-label-input').fill(name)
   await page.keyboard.press('Escape')
 
-  await expect(page.getByTestId('inline-element-adder-input')).toHaveCount(0)
+  await expect(page.getByTestId('pending-element-label-input')).toHaveCount(0)
   await expectPlacement(page, name, false)
 })
