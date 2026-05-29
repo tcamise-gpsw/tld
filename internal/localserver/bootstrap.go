@@ -14,6 +14,7 @@ import (
 	"github.com/mertcikla/tld/v2/internal/server"
 	"github.com/mertcikla/tld/v2/internal/store"
 	"github.com/mertcikla/tld/v2/internal/workspace"
+	"github.com/mertcikla/tld/v2/pkg/dbrepo"
 )
 
 var localWorkspaceID = uuid.Nil
@@ -67,12 +68,11 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 		o = opts[0]
 	}
 	dbPath := DatabasePath(dataDir)
-	initializedData := false
-	if _, err := os.Stat(dbPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	initializedData := localSQLiteWillBeInitialized(o.Config, dbPath)
+	if usesLocalSQLite(o.Config) {
+		if _, err := os.Stat(dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-		initializedData = true
 	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
@@ -96,6 +96,11 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	dbDriver := sqliteStore.Dialect()
+	if dbDriver != dbrepo.DialectSQLite {
+		dbPath = ""
+		initializedData = false
 	}
 
 	apiStore := store.NewAPIAdapter(sqliteStore, dataDir)
@@ -128,7 +133,7 @@ func Bootstrap(dataDir string, opts ...ServeOptions) (*App, error) {
 	return &App{
 		Addr:            addr,
 		DBPath:          dbPath,
-		DBDriver:        string(sqliteStore.Dialect()),
+		DBDriver:        string(dbDriver),
 		InitializedData: initializedData,
 		Resources: ResourceCounts{
 			Views:      views,
@@ -154,6 +159,22 @@ func ResolveAddr(o ServeOptions) string {
 		port = o.Port
 	}
 	return host + ":" + port
+}
+
+func localSQLiteWillBeInitialized(cfg *workspace.Config, dbPath string) bool {
+	if !usesLocalSQLite(cfg) {
+		return false
+	}
+	_, err := os.Stat(dbPath)
+	return errors.Is(err, os.ErrNotExist)
+}
+
+func usesLocalSQLite(cfg *workspace.Config) bool {
+	if cfg == nil {
+		return true
+	}
+	driver := strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
+	return driver == "" || driver == string(dbrepo.DialectSQLite)
 }
 
 func DisplayURL(o ServeOptions, addr string) string {
