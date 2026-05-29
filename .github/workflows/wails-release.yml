@@ -34,7 +34,7 @@ jobs:
   build-macos:
     name: Build & Sign macOS App
     if: ${{ github.event_name == 'push' || github.event.inputs.target == 'macos' || github.event.inputs.target == 'all' }}
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
