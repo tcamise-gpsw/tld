@@ -8,6 +8,7 @@ import {
   Tooltip,
   VStack,
 } from '@chakra-ui/react'
+import { ExternalLinkIcon } from '@chakra-ui/icons'
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -43,6 +44,7 @@ interface Props {
   onChange: (markdown: string) => void
   onSave: (markdown: string) => Promise<void> | void
   onSaveAs?: (markdown: string) => Promise<void> | void
+  onOpenInEditor?: () => void
   onReload?: () => Promise<void> | void
 }
 
@@ -59,6 +61,7 @@ function ViewMarkdownPanel({
   onChange,
   onSave,
   onSaveAs,
+  onOpenInEditor,
   onReload,
 }: Props) {
   const editorRef = useRef<MDXEditorMethods>(null)
@@ -136,6 +139,21 @@ function ViewMarkdownPanel({
                   </Box>
                 </Tooltip>
               )}
+              {onOpenInEditor && (
+                <Tooltip label="Open in Editor" hasArrow openDelay={200}>
+                  <Box as="span">
+                    <IconButton
+                      aria-label="Open in Editor"
+                      size="xs"
+                      variant="ghost"
+                      className="tld-markdown-toolbar-action"
+                      icon={<ExternalLinkIcon />}
+                      onClick={onOpenInEditor}
+                      isDisabled={isLoading || !markdown}
+                    />
+                  </Box>
+                </Tooltip>
+              )}
               <Tooltip label="Close" hasArrow openDelay={200}>
                 <Box as="span">
                   <IconButton
@@ -155,7 +173,7 @@ function ViewMarkdownPanel({
     ]
 
     return base
-  }, [canEdit, isDirty, isLoading, isSaving, markdown, onClose, onReload, onSave, onSaveAs])
+  }, [canEdit, isDirty, isLoading, isSaving, markdown, onClose, onOpenInEditor, onReload, onSave, onSaveAs])
 
   if (!isOpen) return null
 

@@ -24,7 +24,7 @@ import { hexToRgba } from "../constants/colors"
 import AppearanceSettings from "../pages/AppearanceSettings"
 import ExperimentalSettings from "../pages/ExperimentalSettings"
 import UpdateSettings from "../pages/UpdateSettings"
-import { isWailsApp, isWailsMac, isWailsWindows, tldVersion } from "../config/runtime"
+import { isWailsApp, isWailsMac, isWailsWindows } from "../config/runtime"
 import WindowsWindowControls from "./WindowsWindowControls"
 import { KbdHint } from "./PanelUI"
 
@@ -98,7 +98,6 @@ export default function TopMenuBar({
   const appearanceContentRef = useRef<HTMLElement | null>(null)
   const isMacShortcutPlatform = isWailsMac || (typeof navigator !== "undefined" && /mac|iphone|ipad|ipod/i.test(navigator.platform))
   const shortcutModifier = isMacShortcutPlatform ? "⌘" : "Ctrl"
-  const displayVersion = tldVersion.startsWith("v") ? tldVersion : `v${tldVersion}`
 
   useEffect(() => {
     if (!appearancePopover.isOpen) return

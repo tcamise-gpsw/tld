@@ -1,4 +1,5 @@
 import type { LibraryElement } from './index'
+import type { ViewMarkdownDocument } from './index'
 
 export interface WorkspaceSymbol {
   name: string
@@ -15,6 +16,7 @@ export type ExtensionToWebviewMessage =
   | { type: 'focus-element'; elementId: number }
   | { type: 'diagnostics-update'; elementId: number; severity: string; message: string }
   | { type: 'file-content'; requestId: string; content: string; startLineOffset: number }
+  | { type: 'markdown-saved'; viewId: number; markdown: ViewMarkdownDocument; content: string }
 
 // Messages sent from the webview to the VS Code extension host
 export type WebviewToExtensionMessage =
@@ -25,6 +27,14 @@ export type WebviewToExtensionMessage =
       startLine?: number
       symbolName?: string
       symbolKind?: string
+      viewColumn?: 'active' | 'beside'
+    }
+  | {
+      type: 'open-markdown'
+      viewId: number
+      path: string
+      content?: string
+      viewColumn?: 'active' | 'beside'
     }
   | { type: 'request-workspace-files'; requestId: string; pattern: string }
   | { type: 'request-symbol-list-for-file'; requestId: string; filePath: string }

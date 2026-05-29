@@ -1169,6 +1169,17 @@ function ViewEditorInner({
   const markdownDirty = viewMarkdownContent !== loadedViewMarkdownContent
   const markdownBusy = isMarkdownLoading || isMarkdownMutating || isMarkdownSaving
 
+  const openMarkdownPathInEditor = useCallback((path?: string | null, content = viewMarkdownContent) => {
+    if (!path || viewId === null) return
+    vscodeBridge.postMessage({
+      type: 'open-markdown',
+      viewId,
+      path,
+      content,
+      viewColumn: 'beside',
+    })
+  }, [viewId, viewMarkdownContent])
+
   const handleMarkdownResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!isMarkdownOpen) return
     markdownResizeStateRef.current = {
@@ -1180,38 +1191,54 @@ function ViewEditorInner({
   }, [isMarkdownOpen, markdownPaneWidth])
 
   const handleCreateManagedMarkdown = useCallback(async (options: { fileName?: string; initialContent?: string; openEditor?: boolean } = {}) => {
-    if (!canEdit || viewId === null) return
+    if (!canEdit || viewId === null) return null
     setIsMarkdownMutating(true)
     try {
       await api.workspace.views.markdown.create(viewId, {
         fileName: options.fileName,
         initialContent: options.initialContent ?? initialViewMarkdown(view?.name),
       })
-      await loadViewMarkdown(viewId)
+      const loadedMarkdown = await loadViewMarkdown(viewId)
       if (options.openEditor !== false) setIsMarkdownOpen(true)
+      return loadedMarkdown
     } catch (error) {
       toast({
         status: 'error',
         title: 'Failed to create markdown',
         description: error instanceof Error ? error.message : String(error),
       })
+      return null
     } finally {
       setIsMarkdownMutating(false)
     }
   }, [canEdit, loadViewMarkdown, toast, view?.name, viewId])
 
   const handleToggleMarkdown = useCallback(() => {
+    if (window.__TLD_VSCODE__) {
+      if (!viewMarkdown) {
+        void handleCreateManagedMarkdown({ openEditor: false }).then((result) => {
+          openMarkdownPathInEditor(result?.markdown.path, result?.content ?? '')
+        })
+        return
+      }
+      openMarkdownPathInEditor(viewMarkdown.path)
+      return
+    }
     if (!viewMarkdown) {
       void handleCreateManagedMarkdown({ openEditor: true })
       return
     }
     setIsMarkdownOpen((prev) => !prev)
-  }, [handleCreateManagedMarkdown, viewMarkdown])
+  }, [handleCreateManagedMarkdown, openMarkdownPathInEditor, viewMarkdown])
 
   const handleOpenMarkdown = useCallback(() => {
     if (!viewMarkdown) return
+    if (window.__TLD_VSCODE__) {
+      openMarkdownPathInEditor(viewMarkdown.path)
+      return
+    }
     setIsMarkdownOpen(true)
-  }, [viewMarkdown])
+  }, [openMarkdownPathInEditor, viewMarkdown])
 
   const handleReloadMarkdown = useCallback(async () => {
     if (viewId === null) return
@@ -1290,6 +1317,10 @@ function ViewEditorInner({
       })
     }
   }, [toast, view?.name])
+
+  const handleOpenMarkdownInEditor = useCallback(() => {
+    openMarkdownPathInEditor(viewMarkdown?.path)
+  }, [openMarkdownPathInEditor, viewMarkdown?.path])
 
   const handleElementPermanentlyDeletedEverywhere = useCallback((elementId: number) => {
     handleElementPermanentlyDeleted(elementId)
@@ -1451,6 +1482,13 @@ function ViewEditorInner({
         } catch (e) {
           console.error('Failed to place element from VS Code:', e)
         }
+      } else if (msg.type === 'markdown-saved') {
+        if (!window.__TLD_VSCODE__) return
+        if (viewId === null || msg.viewId !== viewId) return
+        setViewMarkdown(msg.markdown)
+        setViewMarkdownContent(msg.content)
+        setLoadedViewMarkdownContent(msg.content)
+        setViewMarkdownSyncToken((prev) => prev + 1)
       }
     })
     return unsub
@@ -3467,6 +3505,7 @@ function ViewEditorInner({
                   onChange={setViewMarkdownContent}
                   onSave={handleSaveMarkdown}
                   onSaveAs={handleSaveMarkdownAs}
+                  onOpenInEditor={window.__TLD_VSCODE__ ? handleOpenMarkdownInEditor : undefined}
                   onReload={handleReloadMarkdown}
                 />
               </Box>

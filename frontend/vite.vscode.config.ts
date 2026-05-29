@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import * as path from 'path'
+import * as fs from 'fs'
 
 const overrides: Record<string, string> = {
   [path.resolve(__dirname, 'src/api/transport.ts')]:
@@ -12,7 +13,13 @@ const overrides: Record<string, string> = {
     path.resolve(__dirname, 'src/components/CodePreviewPanel-vscode.tsx'),
 }
 
-const localNodeModules = path.resolve(__dirname, 'node_modules')
+const nodeModuleCandidates = [
+  path.resolve(__dirname, 'node_modules'),
+  path.resolve(__dirname, '../../node_modules'),
+]
+const localNodeModules = nodeModuleCandidates.find((candidate) => {
+  return fs.existsSync(path.resolve(candidate, 'react/jsx-runtime.js'))
+}) ?? nodeModuleCandidates[0]
 
 function vscodeOverridesPlugin(): Plugin {
   return {
