@@ -74,8 +74,8 @@ test('new element action opens an inline creator from the library', async ({ pag
   const name = uniqueName('Library New Node')
 
   await page.getByTestId('element-library-new').click()
-  await page.getByTestId('inline-element-adder-input').fill(name)
-  await page.getByTestId('inline-element-adder-input').press('Enter')
+  await page.getByTestId('pending-element-label-input').fill(name)
+  await page.getByTestId('pending-element-label-input').press('Enter')
 
   await expect(nodeByName(page, name)).toBeVisible()
   await expectPlacement(page, name, true)

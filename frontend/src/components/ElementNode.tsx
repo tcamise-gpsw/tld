@@ -1,9 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Handle, Position, useStore } from 'reactflow'
-import { Box, Flex, Text, Tooltip, HStack, Button, Divider, VStack } from '@chakra-ui/react'
+import { Box, Flex, Text, Tooltip, HStack, Button, Divider, Input, VStack } from '@chakra-ui/react'
 import { LinkIcon } from '@chakra-ui/icons'
 
-import type { PlacedElement, ViewConnector, Tag } from '../types'
+import type { LibraryElement, PlacedElement, ViewConnector, Tag } from '../types'
 import { ElementContainer } from './NodeContainer'
 import { ElementBody } from './NodeBody'
 import { resolveElementIconUrl } from '../utils/elementIcon'
@@ -11,6 +11,9 @@ import { ZoomInIcon, ZoomOutIcon, TrashIcon as TrashSvg, DrawIcon as EditSvg } f
 import { vscodeBridge } from '../lib/vscodeBridge'
 import { openExternalUrl } from '../lib/desktop'
 import type { ExtensionToWebviewMessage } from '../types/vscode-messages'
+import { useElementSearch } from '../hooks/useElementSearch'
+import ElementCreateSearchResults from './ElementCreateSearchResults'
+import { buildElementCreateSearchResults } from './elementCreateSearch'
 import {
   getVisualHandleId,
   getVisualHandleStyle,
@@ -161,12 +164,24 @@ interface NodeData extends PlacedElement {
   layerHighlightColor?: string
   forceShowTagPopup?: boolean
   isCanvasMoving?: boolean
+  isPendingElement?: boolean
   connectedHandleIds?: readonly string[]
   selectedHandleIds?: readonly string[]
   reconnectCandidates?: readonly { handleId: string; edgeId: string; endpoint: 'source' | 'target'; selected: boolean }[]
   isConnectorHighlighted?: boolean
   versionChangeType?: 'added' | 'updated' | 'deleted' | 'initialized'
   versionLineDelta?: { added: number; removed: number }
+  pendingCreate?: PendingElementCreateData
+}
+
+export interface PendingElementCreateData {
+  allElements: LibraryElement[]
+  existingElementIds: Set<number>
+  allowCreate?: boolean
+  getSecondaryLabel?: (obj: LibraryElement) => string | null
+  onConfirmNew: (name: string) => Promise<void>
+  onConfirmExisting: (obj: LibraryElement) => Promise<void>
+  onCancel: () => void
 }
 
 interface Props {
@@ -295,8 +310,155 @@ function getReconnectZoneStyle(position: Position, slot: number): React.CSSPrope
   }
 }
 
+function PendingElementLabelEditor({
+  config,
+}: {
+  config: PendingElementCreateData
+}) {
+  const { query, setQuery, remoteElements } = useElementSearch()
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const results = buildElementCreateSearchResults({
+    query,
+    allElements: config.allElements,
+    remoteElements,
+    allowCreate: config.allowCreate ?? true,
+  })
+  const inputWidth = `clamp(156px, ${Math.max(query.length + 1, 2)}ch, 206px)`
+
+  const focusInput = useCallback(() => {
+    inputRef.current?.focus({ preventScroll: true })
+    inputRef.current?.select()
+  }, [])
+
+  useEffect(() => {
+    focusInput()
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(focusInput) : null
+    const timers = [0, 50, 100, 200, 350].map((delay) => setTimeout(focusInput, delay))
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf)
+      timers.forEach(clearTimeout)
+    }
+  }, [focusInput])
+
+  useEffect(() => { setActiveIndex(0) }, [query])
+
+  const confirm = useCallback(async (idx: number) => {
+    const item = results[idx]
+    if (!item || busy) return
+    setBusy(true)
+    try {
+      if (item.kind === 'new') {
+        await config.onConfirmNew(item.label)
+      } else {
+        await config.onConfirmExisting(item.obj)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, config, results])
+
+  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      config.onCancel()
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      e.stopPropagation()
+      void confirm(activeIndex)
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      e.stopPropagation()
+      setActiveIndex((i) => Math.min(i + 1, results.length - 1))
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      e.stopPropagation()
+      setActiveIndex((i) => Math.max(i - 1, 0))
+    }
+  }, [activeIndex, config, confirm, results.length])
+
+  return (
+    <Box
+      position="relative"
+      display="inline-flex"
+      justifyContent="center"
+      maxW="100%"
+      minW={0}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Input
+        data-testid="pending-element-label-input"
+        aria-label="Element name"
+        ref={inputRef}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={onKeyDown}
+        variant="unstyled"
+        textAlign="center"
+        fontSize="xl"
+        fontWeight="semibold"
+        lineHeight={1.15}
+        color="gray.100"
+        minW={0}
+        w={inputWidth}
+        maxW="100%"
+        border={0}
+        boxShadow="none"
+        px={1}
+        py={0}
+        h="32px"
+        isDisabled={busy}
+        autoComplete="off"
+        sx={{ caretColor: 'var(--accent)' }}
+      />
+      {results.length > 0 && (
+        <Box
+          position="absolute"
+          left="calc(100% + 14px)"
+          top="50%"
+          transform="translateY(-50%)"
+          zIndex={1200}
+          bg="var(--bg-panel)"
+          border="1px solid"
+          borderColor="whiteAlpha.100"
+          rounded="xl"
+          shadow="0 8px 32px rgba(0,0,0,0.5)"
+          minW="220px"
+          maxW="340px"
+          w="max-content"
+          maxH="300px"
+          overflowY="auto"
+          pointerEvents="auto"
+        >
+          <ElementCreateSearchResults
+            results={results}
+            activeIndex={activeIndex}
+            busy={busy}
+            query={query}
+            existingElementIds={config.existingElementIds}
+            testIdPrefix="pending-element"
+            getSecondaryLabel={config.getSecondaryLabel}
+            onActiveIndexChange={setActiveIndex}
+            onConfirm={(idx) => { void confirm(idx) }}
+          />
+        </Box>
+      )}
+    </Box>
+  )
+}
+
 function ElementNode({ data, selected }: Props) {
   const zoom = useStore(zoomSelector)
+  const isPending = !!data.isPendingElement || !!data.pendingCreate
 
   const connectedHandleIds = useMemo(
     () => new Set(data.connectedHandleIds ?? []),
@@ -377,6 +539,7 @@ function ElementNode({ data, selected }: Props) {
 
   const handleZoomOutClick = (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (isPending) return
     if (data.parentLinks.length > 1) {
       menuRef.current = { type: 'out', links: data.parentLinks }
       setMenuVisible(true)
@@ -387,6 +550,7 @@ function ElementNode({ data, selected }: Props) {
 
   const handleZoomInClick = (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (isPending) return
     if (data.links.length > 1) {
       menuRef.current = { type: 'in', links: data.links }
       setMenuVisible(true)
@@ -417,6 +581,7 @@ function ElementNode({ data, selected }: Props) {
   const pointerStart = useRef<{ x: number; y: number } | null>(null)
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (isPending) return
     if ((e.target as Element).closest('.react-flow__handle')) return
     pointerStart.current = { x: e.clientX, y: e.clientY }
     longPressActivated.current = false
@@ -427,6 +592,7 @@ function ElementNode({ data, selected }: Props) {
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (isPending) return
     if (!pointerStart.current || !longPressTimer.current) return
     const dx = e.clientX - pointerStart.current.x
     const dy = e.clientY - pointerStart.current.y
@@ -444,6 +610,10 @@ function ElementNode({ data, selected }: Props) {
   }
 
   const handleBodyClick = (e: React.MouseEvent) => {
+    if (isPending) {
+      e.stopPropagation()
+      return
+    }
     if (longPressActivated.current) {
       longPressActivated.current = false
       return
@@ -465,7 +635,7 @@ function ElementNode({ data, selected }: Props) {
   const isSource = data.interactionSourceId === data.element_id
   const isTarget = !!data.interactionSourceId && !isSource
 
-  const bodyCursor = isSource ? 'crosshair' : isTarget ? 'cell' : 'pointer'
+  const bodyCursor = isPending ? 'grab' : isSource ? 'crosshair' : isTarget ? 'cell' : 'pointer'
   const versionColor = data.versionChangeType === 'added'
     ? 'green.300'
     : data.versionChangeType === 'deleted'
@@ -479,6 +649,7 @@ function ElementNode({ data, selected }: Props) {
       data-testid="vieweditor-node"
       data-element-id={data.element_id}
       data-node-name={data.name}
+      data-pending={isPending ? 'true' : undefined}
       isSelected={selected}
       isSource={isSource}
       isTarget={isTarget}
@@ -527,7 +698,9 @@ function ElementNode({ data, selected }: Props) {
                 position={position}
                 id={handleId}
                 className={className}
+                isConnectable={!isPending}
                 onClick={(e: React.MouseEvent) => {
+                  if (isPending) return
                   e.preventDefault()
                   e.stopPropagation()
                   data.onInteractionStart(data.element_id, {
@@ -538,7 +711,8 @@ function ElementNode({ data, selected }: Props) {
                 }}
                 style={{
                   ...getVisualHandleStyle(position, slot),
-                  background: 'var(--accent)',
+                  background: isPending ? 'rgba(var(--accent-rgb), 0.45)' : 'var(--accent)',
+                  pointerEvents: isPending ? 'none' : undefined,
                 }}
               />
               {data.onStartHandleReconnect && reconnectCandidateByHandle.has(handleId) && (
@@ -582,21 +756,23 @@ function ElementNode({ data, selected }: Props) {
         zIndex={1}
         pointerEvents="none"
       >
-        <LayerButton
-          label={parentLabel}
-          active={hasParent}
-          variant="out"
-          count={data.parentLinks.length}
-          onClick={handleZoomOutClick}
-          onMouseEnter={() => data.onHoverZoom(data.element_id, 'out')}
-          onMouseLeave={() => data.onHoverZoom(data.element_id, null)}
-          isDisabled={data.isCanvasMoving}
-        >
-          <ZoomOutIcon size={12} strokeWidth={2.5} />
-        </LayerButton>
+        {!isPending && (
+          <LayerButton
+            label={parentLabel}
+            active={hasParent}
+            variant="out"
+            count={data.parentLinks.length}
+            onClick={handleZoomOutClick}
+            onMouseEnter={() => data.onHoverZoom(data.element_id, 'out')}
+            onMouseLeave={() => data.onHoverZoom(data.element_id, null)}
+            isDisabled={data.isCanvasMoving}
+          >
+            <ZoomOutIcon size={12} strokeWidth={2.5} />
+          </LayerButton>
+        )}
 
         <Flex flex={1} justify="center" align="center" minW={0} pointerEvents="none">
-          {nodeLogoUrl && (
+          {!isPending && nodeLogoUrl && (
             <Box
               as="img"
               src={nodeLogoUrl}
@@ -609,22 +785,24 @@ function ElementNode({ data, selected }: Props) {
           )}
         </Flex>
 
-        <LayerButton
-          label={childLabel}
-          active={hasChild}
-          variant="in"
-          count={data.links.length}
-          onClick={handleZoomInClick}
-          onMouseEnter={() => data.onHoverZoom(data.element_id, 'in')}
-          onMouseLeave={() => data.onHoverZoom(data.element_id, null)}
-          isDisabled={data.isCanvasMoving}
-        >
-          <ZoomInIcon size={12} strokeWidth={2.5} />
-        </LayerButton>
+        {!isPending && (
+          <LayerButton
+            label={childLabel}
+            active={hasChild}
+            variant="in"
+            count={data.links.length}
+            onClick={handleZoomInClick}
+            onMouseEnter={() => data.onHoverZoom(data.element_id, 'in')}
+            onMouseLeave={() => data.onHoverZoom(data.element_id, null)}
+            isDisabled={data.isCanvasMoving}
+          >
+            <ZoomInIcon size={12} strokeWidth={2.5} />
+          </LayerButton>
+        )}
       </Flex>
 
       {/* ── Zoom hover effect ── */}
-      {data.isZoomHovered && (
+      {!isPending && data.isZoomHovered && (
         <Box
           position="absolute"
           inset="-3px"
@@ -648,6 +826,7 @@ function ElementNode({ data, selected }: Props) {
       {/* ── Body: name vertically centred, long-press to connect, click to edit ── */}
       <ElementBody
         name={data.name}
+        nameContent={data.pendingCreate ? <PendingElementLabelEditor config={data.pendingCreate} /> : undefined}
         type={data.kind ?? ''}
         technology={technologyText}
         logoUrl={undefined}
@@ -658,7 +837,7 @@ function ElementNode({ data, selected }: Props) {
       />
 
       {/* Tags Dots & Hover Overlay */}
-      {data.tags && data.tags.length > 0 && (
+      {!isPending && data.tags && data.tags.length > 0 && (
         <Box
           position="absolute"
           bottom="8px"
@@ -724,7 +903,7 @@ function ElementNode({ data, selected }: Props) {
       )}
 
       {/* Code Preview Icon/Link in Bottom Right Corner */}
-      {!window.__TLD_VSCODE__ && ((data.repo || data.url) || data.versionLineDelta) && (
+      {!isPending && !window.__TLD_VSCODE__ && ((data.repo || data.url) || data.versionLineDelta) && (
         <HStack
           position="absolute"
           bottom="8px"
@@ -792,7 +971,7 @@ function ElementNode({ data, selected }: Props) {
       )}
 
       {/* VSCode specific file link with hover preview */}
-      {window.__TLD_VSCODE__ && data.file_path && (
+      {!isPending && window.__TLD_VSCODE__ && data.file_path && (
         <HStack
           position="absolute"
           bottom="8px"
@@ -830,7 +1009,7 @@ function ElementNode({ data, selected }: Props) {
         </HStack>
       )}
 
-      {selected && !isSource && (
+      {!isPending && selected && !isSource && (
         <HStack
           position="absolute"
           top="-20px"
@@ -865,7 +1044,7 @@ function ElementNode({ data, selected }: Props) {
       )}
 
       {/* Interaction-mode menu + badge on the source element */}
-      {isSource && !data.isCanvasMoving && (
+      {!isPending && isSource && !data.isCanvasMoving && (
         <>
           {!data.isClickConnectMode && (
             <Box
@@ -954,7 +1133,7 @@ function ElementNode({ data, selected }: Props) {
       )}
 
       {/* Drill-down menu for multiple connectors */}
-      {menuVisible && menuRef.current && !data.isCanvasMoving && (
+      {!isPending && menuVisible && menuRef.current && !data.isCanvasMoving && (
         <Box
           position="absolute"
           top={menuRef.current.type === 'in' ? '30px' : '-2px'}
@@ -1032,6 +1211,15 @@ function arePropsEqual(prev: Props, next: Props) {
   if (prev.selected !== next.selected) return false
   const p = prev.data
   const n = next.data
+  if (p.isPendingElement || n.isPendingElement || p.pendingCreate || n.pendingCreate) {
+    return (
+      p.isPendingElement === n.isPendingElement &&
+      p.pendingCreate === n.pendingCreate &&
+      p.name === n.name &&
+      p.kind === n.kind &&
+      p.isCanvasMoving === n.isCanvasMoving
+    )
+  }
   return (
     p.element_id === n.element_id &&
     p.name === n.name &&

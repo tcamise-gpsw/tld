@@ -1,5 +1,4 @@
 import React from 'react'
-import { Box } from '@chakra-ui/react'
 import { useViewport, type Node as RFNode } from 'reactflow'
 import {
   DEFAULT_SOURCE_HANDLE_SIDE,
@@ -9,7 +8,6 @@ import {
 } from '../../../utils/edgeDistribution'
 
 interface EditorOverlaysProps {
-  connectGhostPos: { x: number; y: number } | null
   clickConnectMode: { sourceNodeId: string; sourceHandle: string; targetHandle?: string } | null
   clickConnectCursorPos: { x: number; y: number } | null
   handleReconnectDrag: {
@@ -23,7 +21,6 @@ interface EditorOverlaysProps {
 }
 
 export const EditorOverlays: React.FC<EditorOverlaysProps> = React.memo(({
-  connectGhostPos,
   clickConnectMode,
   clickConnectCursorPos,
   handleReconnectDrag,
@@ -33,19 +30,6 @@ export const EditorOverlays: React.FC<EditorOverlaysProps> = React.memo(({
   
   return (
     <>
-      {/* Ghost node during connector drag */}
-      {connectGhostPos && (
-        <Box position="fixed" left={`${connectGhostPos.x - 90}px`} top={`${connectGhostPos.y - 42}px`}
-          width="180px" minHeight="85px" bg="rgba(var(--bg-element-rgb), 0.4)"
-          border="1px solid rgba(113, 128, 150, 0.45)" rounded="lg"
-          boxShadow="0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.25)"
-          pointerEvents="none" zIndex={9999} display="flex" flexDir="column"
-          alignItems="center" justifyContent="center" gap="6px" py={3} backdropFilter="blur(4px)">
-          <Box w="60%" h="10px" bg="rgba(226,232,240,0.18)" rounded="sm" />
-          <Box w="38%" h="7px" bg="rgba(var(--accent-rgb), 0.22)" rounded="sm" />
-        </Box>
-      )}
-
       {/* Click-connect ghost connector */}
       {clickConnectMode && clickConnectCursorPos && (() => {
         const sourceNode = rfNodes.find((n) => n.id === clickConnectMode.sourceNodeId)

@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react'
 import { Box, Flex, Text, FlexProps } from '@chakra-ui/react'
 import { TYPE_COLORS } from '../types'
 
 interface ElementBodyProps extends FlexProps {
   name: string
+  nameContent?: ReactNode
   type: string
   technology?: string
   logoUrl?: string
@@ -13,6 +15,7 @@ interface ElementBodyProps extends FlexProps {
 
 export const ElementBody = ({
   name,
+  nameContent,
   type,
   technology,
   logoUrl,
@@ -55,16 +58,18 @@ export const ElementBody = ({
       )}
 
       <Flex flexDir="column" align={hasLogo ? 'flex-start' : 'center'} justify="center" flex={1} minW={0}>
-        <Text
-          fontWeight="semibold"
-          fontSize={nameSize}
-          noOfLines={2}
-          textAlign={hasLogo ? 'left' : 'center'}
-          color="gray.100"
-          lineHeight={1.15}
-        >
-          {name}
-        </Text>
+        {nameContent ?? (
+          <Text
+            fontWeight="semibold"
+            fontSize={nameSize}
+            noOfLines={2}
+            textAlign={hasLogo ? 'left' : 'center'}
+            color="gray.100"
+            lineHeight={1.15}
+          >
+            {name}
+          </Text>
+        )}
         {!!type && (
           <Text
             fontSize={typeSize}

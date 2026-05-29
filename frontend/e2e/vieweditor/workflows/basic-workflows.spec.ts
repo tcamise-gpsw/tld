@@ -69,9 +69,9 @@ test('canceling inline add from keyboard leaves no new placement', async ({ page
 
   await page.getByTestId('vieweditor-canvas').click()
   await page.keyboard.press('c')
-  await page.getByTestId('inline-element-adder-input').fill('Should Not Exist')
+  await page.getByTestId('pending-element-label-input').fill('Should Not Exist')
   await page.keyboard.press('Escape')
 
-  await expect(page.getByTestId('inline-element-adder-input')).toHaveCount(0)
+  await expect(page.getByTestId('pending-element-label-input')).toHaveCount(0)
   await expect(nodeByName(page, 'Should Not Exist')).toHaveCount(0)
 })
