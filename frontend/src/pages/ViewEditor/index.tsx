@@ -711,6 +711,7 @@ function ViewEditorInner({
   const needsFitView = useRef(true)
   const rfReadyRef = useRef(false)
   const fittedContextForViewRef = useRef<number | null>(null)
+  const [initialViewportReady, setInitialViewportReady] = useState(false)
   const interactionSourceIdRef = useRef<number | null>(null)
   const multiConnectionSourceIdsRef = useRef<number[] | null>(null)
   const [deletedLibraryElementIds, setDeletedLibraryElementIds] = useState<number[]>([])
@@ -2505,7 +2506,12 @@ function ViewEditorInner({
   const maybeFitView = useCallback(() => {
     if (!rfReadyRef.current || !needsFitView.current) return
     const mainNodes = rfNodesRef.current
-    if (mainNodes.length === 0) return
+    if (mainNodes.length === 0) {
+      if (viewElementsRef.current.length === 0 && view?.id === viewIdRef.current) {
+        setInitialViewportReady(true)
+      }
+      return
+    }
     if (!nodesMatchCurrentView(mainNodes, viewElementsRef.current, viewIdRef.current)) return
 
     const contextFitNodes = crossBranchSettings.enabled
@@ -2519,7 +2525,10 @@ function ViewEditorInner({
 
     if (clampedRevealProgress !== null) {
       const ok = applyDemoRevealViewport()
-      if (ok && clampedRevealProgress >= 0.999) needsFitView.current = false
+      if (ok) {
+        setInitialViewportReady(true)
+        if (clampedRevealProgress >= 0.999) needsFitView.current = false
+      }
       else if (!ok) setTimeout(() => { if (needsFitView.current) maybeFitView() }, 50)
       return
     }
@@ -2534,6 +2543,7 @@ function ViewEditorInner({
     if (ok) {
       if (contextFitNodes.length > 0) fittedContextForViewRef.current = viewIdRef.current
       needsFitView.current = false
+      setInitialViewportReady(true)
     }
     else setTimeout(() => { if (needsFitView.current) maybeFitView() }, 50)
   }, [
@@ -2543,6 +2553,7 @@ function ViewEditorInner({
     crossBranchSettings.enabled,
     liveContextNodes,
     safeFitView,
+    view,
     rfNodesRef,
     viewElementsRef,
     viewIdRef,
@@ -2557,6 +2568,7 @@ function ViewEditorInner({
   useEffect(() => {
     needsFitView.current = true
     fittedContextForViewRef.current = null
+    setInitialViewportReady(false)
   }, [viewId])
 
   useEffect(() => { maybeFitView() }, [rfNodes, liveContextNodes, maybeFitView])
@@ -3102,6 +3114,11 @@ function ViewEditorInner({
               onTouchMove={onTouchMove}
               onTouchEnd={onTouchEnd}
               sx={{
+                '.react-flow__nodes, .react-flow__edges, .react-flow__edgelabel-renderer': {
+                  opacity: initialViewportReady ? 1 : 0,
+                  pointerEvents: initialViewportReady ? undefined : 'none',
+                  transition: initialViewportReady ? 'opacity 80ms ease-out' : 'none',
+                },
                 '.react-flow__edgelabel-renderer': {
                   zIndex: 1002,
                 },
