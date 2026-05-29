@@ -45,22 +45,22 @@ export const ConnectorContextMenu: React.FC<ConnectorContextMenuProps> = React.m
       backdropFilter="blur(20px)" p={1.5} minW="192px"
       onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
       <VStack spacing={0} align="stretch">
-        <Button size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="gray.200" _hover={{ bg: 'whiteAlpha.100' }}
+        <Button data-testid="connector-context-edit" size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="gray.200" _hover={{ bg: 'whiteAlpha.100' }}
           onClick={() => onEdit(menu.edgeId)}>
           <HStack spacing={2} w="full"><PencilSvg /><Text fontSize="xs" fontWeight="normal" flex={1}>Edit Connector</Text></HStack>
         </Button>
         {canEdit && (
           <>
-            <Button size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="gray.200" _hover={{ bg: 'whiteAlpha.100' }}
+            <Button data-testid="connector-context-move-source" size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="gray.200" _hover={{ bg: 'whiteAlpha.100' }}
               onClick={() => onMoveSource(menu.edgeId)}>
               <HStack spacing={2} w="full"><MoveSourceSvg /><Text fontSize="xs" fontWeight="normal" flex={1}>Move Source</Text></HStack>
             </Button>
-            <Button size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="gray.200" _hover={{ bg: 'whiteAlpha.100' }}
+            <Button data-testid="connector-context-move-target" size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="gray.200" _hover={{ bg: 'whiteAlpha.100' }}
               onClick={() => onMoveTarget(menu.edgeId)}>
               <HStack spacing={2} w="full"><MoveTargetSvg /><Text fontSize="xs" fontWeight="normal" flex={1}>Move Target</Text></HStack>
             </Button>
             <Divider borderColor="whiteAlpha.100" my={1} />
-            <Button size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="red.400" _hover={{ bg: 'rgba(254,178,178,0.08)', color: 'red.300' }}
+            <Button data-testid="connector-context-delete" size="sm" variant="ghost" h="30px" px={2.5} justifyContent="flex-start" color="red.400" _hover={{ bg: 'rgba(254,178,178,0.08)', color: 'red.300' }}
               onClick={() => onDelete(menu.edgeId)}>
               <HStack spacing={2} w="full"><TrashSvg /><Text fontSize="xs" fontWeight="normal" flex={1}>Delete</Text></HStack>
             </Button>

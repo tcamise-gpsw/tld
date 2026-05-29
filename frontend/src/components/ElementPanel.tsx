@@ -1160,6 +1160,7 @@ function ElementPanel({
                 )}
                 {isEdit && canEdit && onMerge && (
                   <Button
+                    data-testid="element-panel-merge"
                     variant="outline"
                     size="sm"
                     borderColor="teal.700"

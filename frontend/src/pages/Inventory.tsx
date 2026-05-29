@@ -940,6 +940,7 @@ export default function Inventory() {
                         <HStack spacing={1.5} flex={1} minW={0}>
                           <Menu>
                             <MenuButton
+                              data-testid="inventory-bulk-add-tag"
                               as={Button}
                               size="xs"
                               variant="outline"
@@ -954,7 +955,7 @@ export default function Inventory() {
                             </MenuButton>
                             <MenuList maxH="240px" overflowY="auto">
                               {availableTags.map((tag) => (
-                                <MenuItem key={tag} onClick={() => void handleBulkAddTag(tag)}>{tag}</MenuItem>
+                                <MenuItem data-testid={`inventory-bulk-add-tag-${tag}`} key={tag} onClick={() => void handleBulkAddTag(tag)}>{tag}</MenuItem>
                               ))}
                               {availableTags.length === 0 && (
                                 <MenuItem isDisabled>No tags available</MenuItem>
@@ -964,6 +965,7 @@ export default function Inventory() {
                           {Object.keys(tagsInSelection).length > 0 && (
                             <Menu>
                               <MenuButton
+                                data-testid="inventory-bulk-remove-tag"
                                 as={Button}
                                 size="xs"
                                 variant="ghost"
@@ -976,7 +978,7 @@ export default function Inventory() {
                               </MenuButton>
                               <MenuList maxH="240px" overflowY="auto">
                                 {Object.keys(tagsInSelection).map((tag) => (
-                                  <MenuItem key={tag} onClick={() => void handleBulkRemoveTag(tag)}>
+                                  <MenuItem data-testid={`inventory-bulk-remove-tag-${tag}`} key={tag} onClick={() => void handleBulkRemoveTag(tag)}>
                                     <Flex justify="space-between" w="full">
                                       <Text>{tag}</Text>
                                       <Badge colorScheme="gray" ml={2}>{tagsInSelection[tag]}</Badge>
@@ -997,6 +999,7 @@ export default function Inventory() {
                             <Box>
                               <PopoverTrigger>
                                 <IconButton
+                                  data-testid="inventory-bulk-delete"
                                   aria-label="Delete selected"
                                   icon={<DeleteIcon />}
                                   size="xs"
@@ -1033,6 +1036,7 @@ export default function Inventory() {
                                   Cancel
                                 </Button>
                                 <Button
+                                  data-testid="inventory-bulk-delete-submit"
                                   size="xs"
                                   colorScheme="red"
                                   onClick={() => { void handleBulkDelete() }}
@@ -1094,6 +1098,7 @@ export default function Inventory() {
                           onClick={(e) => { e.stopPropagation(); toggleSelectKey(row.key) }}
                         >
                           <Checkbox
+                            data-testid={`inventory-row-select-${row.key}`}
                             isChecked={isSelected}
                             colorScheme="blue"
                             size="sm"

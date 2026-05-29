@@ -6,6 +6,7 @@ import {
   listConnectors,
   nodeByName,
   openConnectorPanelFromFirstEdge,
+  reloadView,
 } from '../../helpers/vieweditor'
 
 
@@ -69,4 +70,40 @@ test('connector metadata remains visible after reload', async ({ page }) => {
   await openConnectorPanelFromFirstEdge(page)
   await expect(page.getByTestId('connector-panel-label-input')).toHaveValue('reload label')
   await expect(page.getByTestId('connector-panel-relationship-input')).toHaveValue('HTTP')
+})
+
+test('connector context menu can move source and target endpoints', async ({ page }) => {
+  const { diagram, elements } = await createAndLoadDiagramWithNodes(page, 3, 'Connector Rewire')
+  const connector = await createConnector(page, diagram.id, elements[0].id, elements[1].id, { label: 'rewire-me' })
+  await reloadView(page)
+
+  await page.locator('.react-flow__edge').first().click({ button: 'right', force: true })
+  await page.getByTestId('connector-context-move-target').click()
+  await expect(page.getByText(/Tap a node to set as new target/)).toBeVisible()
+  await nodeByName(page, elements[2].name).click()
+
+  await expectConnector(page, {
+    id: connector.id,
+    sourceElementId: elements[0].id,
+    targetElementId: elements[2].id,
+  }, true, diagram.id)
+
+  await reloadView(page)
+  await page.locator('.react-flow__edge').first().click({ button: 'right', force: true })
+  await page.getByTestId('connector-context-move-source').click()
+  await expect(page.getByText(/Tap a node to set as new source/)).toBeVisible()
+  await nodeByName(page, elements[1].name).click()
+
+  await expect.poll(async () => {
+    const connectors = await listConnectors(page, diagram.id)
+    const updated = connectors.find((candidate) => candidate.id === connector.id)
+    return updated ? [updated.sourceElementId, updated.targetElementId] : []
+  }).toEqual([elements[1].id, elements[2].id])
+
+  await reloadView(page)
+  await expectConnector(page, {
+    id: connector.id,
+    sourceElementId: elements[1].id,
+    targetElementId: elements[2].id,
+  }, true, diagram.id)
 })
