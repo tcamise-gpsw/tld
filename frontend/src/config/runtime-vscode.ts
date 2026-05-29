@@ -25,6 +25,11 @@ const serverUrl = trimTrailingSlash(window.__TLD_SERVER_URL__ ?? 'http://127.0.0
 export const appBase = '/app/'
 export const routerBasename = undefined
 export const isNativeApp = false
+export const isWailsApp = false
+export const wailsPlatform = undefined
+export const tldVersion = 'dev'
+export const isWailsMac = false
+export const isWailsWindows = false
 
 export const apiBase = `${serverUrl}/api`
 

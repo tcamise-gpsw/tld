@@ -70,6 +70,30 @@ func TestCheckFetchesLatestReleaseWhenCacheIsStale(t *testing.T) {
 	}
 }
 
+func TestCheckUsesExplicitAssetName(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/Mertcikla/tld/releases", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name":"v2.0.4","prerelease":false,"html_url":"https://github.com/Mertcikla/tld/releases/tag/v2.0.4","assets":[{"name":"tld-macos-arm64.zip","browser_download_url":"https://example.test/desktop"}]}]`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	status, err := Check(context.Background(), Options{
+		Current:       "2.0.2",
+		AssetName:     "tld-macos-arm64.zip",
+		CheckInterval: time.Hour,
+		StatePath:     filepath.Join(t.TempDir(), "desktop-update-check.json"),
+		HTTPClient:    server.Client(),
+		APIBaseURL:    server.URL,
+	})
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if !status.UpdateAvailable || status.AssetName != "tld-macos-arm64.zip" || status.AssetURL != "https://example.test/desktop" {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
 func TestInstallDownloadUsesContextDeadline(t *testing.T) {
 	name := assetName()
 	if name == "" {

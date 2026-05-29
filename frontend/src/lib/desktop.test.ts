@@ -81,4 +81,33 @@ describe('desktop helpers', () => {
 
     await expect(openTextFile()).resolves.toEqual({ path: '', content: '', canceled: true })
   })
+
+  it('checks desktop updates through the bridge in Wails mode', async () => {
+    const updateStatus = {
+      checked: true,
+      current: '2.2.4',
+      latest: 'v2.2.5',
+      updateAvailable: true,
+      releaseUrl: 'https://github.com/Mertcikla/tld/releases/tag/v2.2.5',
+      assetName: 'tld-macos-arm64.zip',
+      cached: false,
+      supported: true,
+      canInstall: true,
+      installStarted: false,
+      restartRequired: false,
+    }
+    const checkForUpdate = vi.fn().mockResolvedValue(updateStatus)
+    installWindow({ __TLD_APP__: true, go: { main: { DesktopBridge: { CheckForUpdate: checkForUpdate } } } })
+    const { checkForDesktopUpdate } = await import('./desktop')
+
+    await expect(checkForDesktopUpdate()).resolves.toEqual(updateStatus)
+    expect(checkForUpdate).toHaveBeenCalled()
+  })
+
+  it('rejects desktop update checks outside Wails mode', async () => {
+    installWindow()
+    const { checkForDesktopUpdate } = await import('./desktop')
+
+    await expect(checkForDesktopUpdate()).rejects.toThrow('desktop app')
+  })
 })

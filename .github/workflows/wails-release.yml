@@ -86,11 +86,13 @@ jobs:
           cd cmd/tld-app
           rm -rf build/release
           mkdir -p build/release/macos-arm64 build/release/macos-amd64
+          VERSION=${RELEASE_TAG#v}
+          LDFLAGS="-s -w -X github.com/mertcikla/tld/v2/cmd/version.Version=${VERSION}"
 
-          wails build -platform darwin/arm64 -s
+          wails build -platform darwin/arm64 -s -ldflags "$LDFLAGS"
           mv build/bin/tld.app build/release/macos-arm64/tld.app
 
-          wails build -platform darwin/amd64 -s
+          wails build -platform darwin/amd64 -s -ldflags "$LDFLAGS"
           mv build/bin/tld.app build/release/macos-amd64/tld.app
 
       - name: Sign macOS Apps
@@ -261,7 +263,9 @@ jobs:
             exit 1
           fi
           makensis -VERSION
-          wails build -platform windows/amd64 -nsis -s
+          VERSION=${RELEASE_TAG#v}
+          LDFLAGS="-s -w -X github.com/mertcikla/tld/v2/cmd/version.Version=${VERSION}"
+          wails build -platform windows/amd64 -nsis -s -ldflags "$LDFLAGS"
 
       - name: Prepare Windows Release Asset
         shell: bash
