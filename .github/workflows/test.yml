@@ -81,6 +81,37 @@ jobs:
           path: results.xml
           reporter: java-junit
 
+  postgres-integration-tests:
+    name: PostgreSQL Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend assets
+        working-directory: frontend
+        run: npm run build:app
+
+      - name: Run PostgreSQL integration tests
+        run: scripts/test-postgres-e2e.sh
+
   e2e-tests:
     name: Playwright E2E Tests
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
