@@ -6183,7 +6183,7 @@ func architectureBindingTestTarget(repoID int64, ownerType, ownerKey, name, kind
 	}
 }
 
-func TestPlanScanAutoChoosesLimitedAboveTrackedThreshold(t *testing.T) {
+func TestPlanScanAutoChoosesFullAboveTrackedThreshold(t *testing.T) {
 	repo := initGitRepoNoCommit(t)
 	writeFile(t, repo, "cmd/api/main.go", "package main\nfunc main() {}\n")
 	writeFile(t, repo, "deploy/k8s/service.yaml", "apiVersion: v1\nkind: Service\nmetadata:\n  name: api\n")
@@ -6198,13 +6198,14 @@ func TestPlanScanAutoChoosesLimitedAboveTrackedThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planScan: %v", err)
 	}
-	if !plan.Limited || plan.Mode != "limited" {
-		t.Fatalf("expected limited plan, got %+v", plan)
+	if plan.Limited || plan.Mode != "full" {
+		t.Fatalf("expected full plan, got %+v", plan)
 	}
-	got := relTestFiles(t, repo, plan.Files)
-	want := []string{"cmd/api/main.go", "deploy/k8s/service.yaml", "internal/noise/helper.go"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("limited files = %+v, want %+v", got, want)
+	if plan.Reason != "tracked files exceed 1; attempting full scan" {
+		t.Fatalf("Reason = %q", plan.Reason)
+	}
+	if len(plan.Warnings) == 0 || !strings.Contains(plan.Warnings[0], "full scan selected in auto mode") {
+		t.Fatalf("expected full-scan warning, got %+v", plan.Warnings)
 	}
 	if plan.TrackedFiles != 3 {
 		t.Fatalf("TrackedFiles = %d, want 3", plan.TrackedFiles)

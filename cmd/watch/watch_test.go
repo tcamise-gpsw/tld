@@ -80,6 +80,7 @@ func TestConfirmLSPProceedWarnsAndContinuesForNonInteractiveInput(t *testing.T) 
 		"Reference resolution quality will be lower",
 		"Go (gopls): not found in PATH",
 		"Error: no installed LSP server found",
+		`Override: tld config set watch.lsp.commands.go "/path/to/gopls"`,
 		"Remediation: install the missing language server(s) or ensure they are on your PATH",
 		"Non-interactive input detected; continuing without confirmation",
 	} {
@@ -95,7 +96,12 @@ func TestLogWatchEventUpdatesWorkspaceStatusInPlace(t *testing.T) {
 	var status bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stdout)
-	activity := &watchActivityProgress{out: &status}
+	activity := newWatchActivityProgressWithOptions(&status, func() int { return 1 }, watchActivityOptions{
+		ForceTerminal: true,
+		DisableTicker: true,
+		Width:         200,
+		Now:           func() time.Time { return time.Unix(0, 0) },
+	})
 	activity.Start("Workspace status: current")
 
 	event := watchpkg.Event{
@@ -123,8 +129,70 @@ func TestLogWatchEventUpdatesWorkspaceStatusInPlace(t *testing.T) {
 			t.Fatalf("status output missing %q:\n%q", want, got)
 		}
 	}
-	if strings.Contains(got, "\n") || strings.Contains(got, "source modified") || strings.Contains(got, "cmd/service/main.go") {
+	for _, unwanted := range []string{"\n", "source modified", "cmd/service/main.go", "Watch elapsed"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("status output should not contain %q:\n%q", unwanted, got)
+		}
+	}
+}
+
+func TestWatchActivityProgressPrintsStopDurationOnce(t *testing.T) {
+	started := time.Unix(100, 0)
+	now := started
+	var status bytes.Buffer
+	activity := newWatchActivityProgressWithOptions(&status, nil, watchActivityOptions{
+		ForceTerminal: true,
+		DisableTicker: true,
+		Width:         80,
+		Now:           func() time.Time { return now },
+	})
+	activity.Start("Workspace status: current")
+	now = now.Add(65 * time.Second)
+
+	elapsed, stopped := activity.Stop()
+	if !stopped {
+		t.Fatalf("expected first stop to report elapsed time")
+	}
+	if got, want := formatWatchActivityDuration(elapsed), "1m05s"; got != want {
+		t.Fatalf("elapsed = %q, want %q", got, want)
+	}
+	if _, stoppedAgain := activity.Stop(); stoppedAgain {
+		t.Fatalf("second stop should be ignored")
+	}
+	got := status.String()
+	if !strings.Contains(got, "\r\033[K- Workspace status: current") {
+		t.Fatalf("expected spinner status line, got %q", got)
+	}
+	if strings.Contains(got, "Watch elapsed") || strings.Count(got, "\n") > 0 {
 		t.Fatalf("status should update in place without source file chatter:\n%q", got)
+	}
+}
+
+func TestLogWatchStoppedPrintsTotalDuration(t *testing.T) {
+	cmd := NewWatchCmd()
+	var stdout bytes.Buffer
+	var status bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	started := time.Unix(100, 0)
+	now := started
+	activity := newWatchActivityProgressWithOptions(&status, nil, watchActivityOptions{
+		ForceTerminal: true,
+		DisableTicker: true,
+		Width:         80,
+		Now:           func() time.Time { return now },
+	})
+	activity.Start("Workspace status: current")
+	now = now.Add(2*time.Minute + 3*time.Second)
+
+	if !logWatchEvent(cmd, watchpkg.Event{Type: "watch.stopped"}, activity) {
+		t.Fatalf("expected watch.stopped to be handled")
+	}
+	if got, want := stdout.String(), "watch stopped after 2m03s\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := status.String(); !strings.HasSuffix(got, "\r\033[K") {
+		t.Fatalf("expected pinned status line to be cleared, got %q", got)
 	}
 }
 
@@ -365,8 +433,11 @@ func TestWatchCommandWritesRuntimeLogWithoutBanner(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("watch command: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "░███████") || !strings.Contains(out.String(), "Watching:") {
-		t.Fatalf("watch stdout should contain CLI banner and ready output:\n%s", out.String())
+	if strings.Contains(out.String(), "░███████") {
+		t.Fatalf("watch stdout should use compact ready output instead of ASCII logo:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "tld ") || !strings.Contains(out.String(), "Workspace\n") || !strings.Contains(out.String(), "Watching") {
+		t.Fatalf("watch stdout should contain compact ready output:\n%s", out.String())
 	}
 	logData, err := os.ReadFile(localserver.LogPath(dataDir))
 	if err != nil {

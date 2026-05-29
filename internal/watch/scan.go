@@ -383,11 +383,53 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 		files, err = s.collectSourceFiles(repoRoot, workers, settings.Languages, effectiveRules, progress)
 		progressFinish(progress)
 		if err != nil {
-			scanErr = err
-			logError(ctx, s.Logger, "watch.scan.source_discovery.failed", err, "elapsed", logElapsed(discoveryStarted), "repository_id", repo.ID)
-			return result, err
+			if settings.Scale.Strategy != ScanStrategyAuto {
+				scanErr = err
+				logError(ctx, s.Logger, "watch.scan.source_discovery.failed", err, "elapsed", logElapsed(discoveryStarted), "repository_id", repo.ID)
+				return result, err
+			}
+			fallbackReason := "full source discovery failed: " + err.Error()
+			result.Mode = ScanStrategyLimited
+			result.LimitedFallback = fallbackReason
+			result.Warnings = append(result.Warnings, "limited view: "+fallbackReason)
+			if warning := s.prepareLimitedBaselineWorktree(repoRoot, repo.ID, opts.DataDir, repo.HeadCommit.String, &result); warning != "" {
+				result.Warnings = append(result.Warnings, warning)
+			}
+			tracked, trackErr := tldgit.ListTrackedFiles(repoRoot, 0)
+			if trackErr != nil {
+				scanErr = err
+				result.Warnings = append(result.Warnings, "limited view: tracked-file listing failed during fallback: "+trackErr.Error())
+				logError(ctx, s.Logger, "watch.scan.source_discovery.failed", err, "elapsed", logElapsed(discoveryStarted), "repository_id", repo.ID)
+				return result, err
+			}
+			result.TrackedFiles = tracked.Total
+			seeds := selectRecentFiles(repoRoot, settings, effectiveRules)
+			if len(seeds) == 0 {
+				result.Warnings = append(result.Warnings, "limited view: local git history did not return recent files; falling back to tracked file order")
+				seeds = selectTrackedFallbackFiles(repoRoot, tracked.Files, settings, effectiveRules)
+			}
+			expanded, expandErr := s.expandLimitedFiles(ctx, repo.ID, repoRoot, seeds, selectAnchorFiles(repoRoot, tracked.Files, settings, effectiveRules), settings, effectiveRules)
+			if expandErr != nil {
+				scanErr = err
+				result.Warnings = append(result.Warnings, "limited view: graph expansion failed during fallback: "+expandErr.Error())
+				logError(ctx, s.Logger, "watch.scan.source_discovery.failed", err, "elapsed", logElapsed(discoveryStarted), "repository_id", repo.ID)
+				return result, err
+			}
+			files = expanded.Files
+			result.RecentFiles = expanded.RecentFiles
+			result.AnchorFiles = expanded.AnchorFiles
+			result.NeighborFiles = expanded.NeighborFiles
+			result.CallerFiles = expanded.CallerFiles
+			result.CallerDepthReached = expanded.CallerDepthReached
+			result.SharedAncestorFound = expanded.SharedAncestorFound
+			result.LimitedCapReached = expanded.CapReached
+			if expanded.Fallback != "" {
+				result.Warnings = append(result.Warnings, "limited view: "+expanded.Fallback)
+			}
+			logInfo(ctx, s.Logger, "watch.scan.source_discovery.fallback_limited", "elapsed", logElapsed(discoveryStarted), "repository_id", repo.ID, "files", len(files), "reason", fallbackReason)
+		} else {
+			logInfo(ctx, s.Logger, "watch.scan.source_discovery.completed", "elapsed", logElapsed(discoveryStarted), "repository_id", repo.ID, "files", len(files), "mode", result.Mode, "strategy", result.Strategy)
 		}
-		logInfo(ctx, s.Logger, "watch.scan.source_discovery.completed", "elapsed", logElapsed(discoveryStarted), "repository_id", repo.ID, "files", len(files), "mode", result.Mode, "strategy", result.Strategy)
 	}
 	if err := ctx.Err(); err != nil {
 		scanErr = err
@@ -395,7 +437,7 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	}
 	repoSignals := enrich.DiscoverRepositorySignalsFromFiles(repoRoot, files)
 	result.FilesSeen = len(files)
-	if plan.Limited {
+	if result.Mode == ScanStrategyLimited {
 		result.SelectedFiles = len(files)
 		result.SkippedTrackedFiles = max(result.TrackedFiles-len(files), 0)
 	}
@@ -441,7 +483,7 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 		scanErr = err
 		return result, err
 	}
-	if !plan.Limited {
+	if result.Mode != ScanStrategyLimited {
 		if err := s.Store.DeleteMissingFiles(ctx, repo.ID, seen); err != nil {
 			scanErr = err
 			return result, err
@@ -1773,6 +1815,7 @@ func (s *Scanner) getOrCreateResolver(repoRoot string, settings Settings) defini
 					Enabled:          settings.LSP.Enabled,
 					HealthInterval:   settings.LSP.HealthInterval,
 					MemoryLimitBytes: settings.LSP.MemoryLimitBytes,
+					Commands:         analyzerlsp.NormalizeOverrideCommands(settings.LSP.Commands),
 					Logger:           s.Logger,
 				})
 			}
@@ -1939,6 +1982,7 @@ func InitialLSPStatus(settings Settings) LSPStatus {
 		Enabled:          settings.LSP.Enabled,
 		HealthInterval:   settings.LSP.HealthInterval,
 		MemoryLimitBytes: settings.LSP.MemoryLimitBytes,
+		Commands:         analyzerlsp.NormalizeOverrideCommands(settings.LSP.Commands),
 	})
 	return convertLSPStatus(snapshot)
 }
@@ -1980,6 +2024,7 @@ func convertLSPStatus(snapshot analyzerlsp.StatusSnapshot) LSPStatus {
 		converted := LSPServerStatus{
 			Language:        server.Language,
 			Command:         server.Command,
+			CommandSource:   server.CommandSource,
 			Path:            server.Path,
 			State:           server.State,
 			PID:             server.PID,

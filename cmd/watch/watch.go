@@ -2,6 +2,7 @@ package watch
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,8 +27,8 @@ import (
 	"github.com/mertcikla/tld/v2/internal/term"
 	"github.com/mertcikla/tld/v2/internal/watch"
 	"github.com/mertcikla/tld/v2/internal/workspace"
-	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
+	xterm "golang.org/x/term"
 )
 
 func NewWatchCmd() *cobra.Command {
@@ -118,15 +120,9 @@ func NewWatchCmd() *cobra.Command {
 				"lsp_health_interval", watchSettings.LSP.HealthInterval.String(),
 				"lsp_memory_limit_bytes", watchSettings.LSP.MemoryLimitBytes,
 			)
-			term.PrintLogo(cmd.OutOrStdout(), version.Version)
-			term.Label(cmd.OutOrStdout(), 20, "Mode", "watch")
-			term.Label(cmd.OutOrStdout(), 20, "Data directory", term.Path(cmd.OutOrStdout(), dataDir))
 			hasEmbedding := embeddingCfg.Provider != "" && embeddingCfg.Provider != "none" && embeddingCfg.Provider != "local-lexical"
-			if hasEmbedding {
-				term.Label(cmd.OutOrStdout(), 20, "Embedding provider", embeddingCfg.Provider)
-				term.Label(cmd.OutOrStdout(), 20, "Embedding model", embeddingCfg.Model)
-			}
-			progress := newCLIProgress(cmd.ErrOrStderr())
+			progress, progressHistory := newBufferedCLIProgress(cmd.ErrOrStderr())
+			embeddingHealth := ""
 			if hasEmbedding {
 				if progress != nil {
 					progress.Start("Checking embedding provider", 1)
@@ -148,7 +144,7 @@ func NewWatchCmd() *cobra.Command {
 					progress.Advance("")
 					progress.Finish()
 				}
-				term.Label(cmd.OutOrStdout(), 20, "Embedding health", fmt.Sprintf("dimension=%d similarity=%.3f", health.Dimension, health.Similarity))
+				embeddingHealth = fmt.Sprintf("dimension=%d similarity=%.3f", health.Dimension, health.Similarity)
 			}
 			serveCfg := workspace.ResolveServeOptions(cfg, host, port)
 			serveOpts := localserver.ServeOptions{Host: serveCfg.Host, Port: serveCfg.Port, Config: cfg}
@@ -281,16 +277,21 @@ func NewWatchCmd() *cobra.Command {
 				RepoRoot:     repo.RepoRoot,
 				RepositoryID: repo.ID,
 			})
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\r\033[K\n")
-			term.Separator(cmd.OutOrStdout())
-			term.Label(cmd.OutOrStdout(), 20, "Watching", repo.RepoRoot)
-			term.Label(cmd.OutOrStdout(), 20, "Repository", repoIdentity(repo))
-			term.Label(cmd.OutOrStdout(), 20, "Branch", result.GitStatus.Branch)
-			term.Label(cmd.OutOrStdout(), 20, "HEAD", result.GitStatus.HeadCommit)
-			term.Label(cmd.OutOrStdout(), 20, "Active LSPs", formatWatchLSPServers(result.InitialScan.LSP))
-			term.Label(cmd.OutOrStdout(), 20, "tlDiagram available at", term.URL(cmd.OutOrStdout(), url))
-			term.Separator(cmd.OutOrStdout())
-			term.Hint(cmd.OutOrStdout(), "Press Ctrl-C to stop watching.")
+			renderWatchReady(cmd.OutOrStdout(), cmd.ErrOrStderr(), watchReadyView{
+				Version:           version.Version,
+				DataDir:           dataDir,
+				RepoRoot:          repo.RepoRoot,
+				Repository:        repoIdentity(repo),
+				Branch:            result.GitStatus.Branch,
+				Head:              result.GitStatus.HeadCommit,
+				ActiveLSPs:        formatWatchLSPServers(result.InitialScan.LSP),
+				URL:               url,
+				EmbeddingProvider: embeddingCfg.Provider,
+				EmbeddingModel:    embeddingCfg.Model,
+				EmbeddingHealth:   embeddingHealth,
+				StartupHistory:    progressHistory,
+				Verbose:           verbose,
+			})
 			if watchProgress != nil {
 				watchProgress.Start("Workspace status: current")
 			}
@@ -323,7 +324,7 @@ func NewWatchCmd() *cobra.Command {
 	c.Flags().IntVar(&maxExpandedGroup, "max-expanded-connectors-per-group", 0, "maximum file-pair connectors to expand before collapsing to a folder connector")
 	c.Flags().BoolVar(&rescan, "rescan", false, "force a rescan before watching")
 	c.Flags().BoolVar(&failOnDrift, "fail-on-drift", false, "with --dry-run, exit nonzero when representation drift is detected")
-	c.Flags().BoolVar(&verbose, "verbose", false, "print watch events")
+	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "print watch events and startup phase history")
 	c.AddCommand(newScanCmd())
 	c.AddCommand(newRepresentCmd())
 	c.AddCommand(newDiffCmd())
@@ -337,7 +338,10 @@ func logWatchEvent(cmd *cobra.Command, event watch.Event, activity *watchActivit
 		return true
 	case "watch.stopped":
 		if activity != nil {
-			activity.Stop()
+			if elapsed, ok := activity.Stop(); ok {
+				_, _ = fmt.Fprintf(out, "watch stopped after %s\n", formatWatchActivityDuration(elapsed))
+				return true
+			}
 		}
 		_, _ = fmt.Fprintf(out, "watch stopped\n")
 		return true
@@ -454,6 +458,9 @@ func confirmLSPProceed(cmd *cobra.Command, status watch.LSPStatus) error {
 		if server.LastError != "" {
 			term.Hint(cmd.OutOrStdout(), "    Error: "+server.LastError)
 		}
+		if server.Language != "" {
+			term.Hint(cmd.OutOrStdout(), fmt.Sprintf("    Override: tld config set watch.lsp.commands.%s %q", server.Language, suggestedLSPOverrideCommand(server.Command, server.Language)))
+		}
 	}
 
 	if hasUnavailable {
@@ -477,6 +484,18 @@ func confirmLSPProceed(cmd *cobra.Command, status watch.LSPStatus) error {
 		return errors.New("aborted: LSP confirmation declined")
 	}
 	return nil
+}
+
+func suggestedLSPOverrideCommand(command, language string) string {
+	name := language + "-language-server"
+	fields := strings.Fields(command)
+	if len(fields) > 0 {
+		name = fields[0]
+		if idx := strings.LastIndexAny(name, `/\`); idx >= 0 && idx+1 < len(name) {
+			name = name[idx+1:]
+		}
+	}
+	return "/path/to/" + strings.Trim(name, `"'`)
 }
 
 func isInteractiveInput(r io.Reader) bool {
@@ -629,7 +648,9 @@ func newScanCmd() *cobra.Command {
 			defer func() { _ = sqliteStore.Close() }()
 			scanner := watch.NewScanner(watch.NewStoreWithBun(sqliteStore.DB(), sqliteStore.BunDB(), sqliteStore.Dialect()))
 			scanner.Settings = watchSettings
-			scanner.Progress = newCLIProgress(cmd.ErrOrStderr())
+			if !jsonOut {
+				scanner.Progress = newCLIProgress(cmd.ErrOrStderr())
+			}
 			result, err := scanner.ScanWithOptions(cmd.Context(), path, watch.ScanOptions{Force: rescan, DataDir: dataDir})
 			if err != nil {
 				return err
@@ -685,7 +706,10 @@ func newRepresentCmd() *cobra.Command {
 			}
 			embeddingCfg := resolveEmbeddingConfig(cfg, embeddingProvider, embeddingEndpoint, embeddingModel, embeddingDimension, embeddingMaxTokens, embeddingRuntimePath)
 			watchSettings := resolveWatchSettings(cfg, languageFlags, "", "", "", maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup)
-			progress := newCLIProgress(cmd.ErrOrStderr())
+			var progress watch.ProgressSink
+			if !jsonOut {
+				progress = newCLIProgress(cmd.ErrOrStderr())
+			}
 			if embeddingCfg.Provider != "none" {
 				checked, health, err := watch.CheckEmbeddingHealth(cmd.Context(), embeddingCfg)
 				if err != nil {
@@ -939,47 +963,213 @@ func resolveWatchSettings(cfg *workspace.Config, languages []string, watcherMode
 	return watch.ResolveSettings(cfg, languages, watcherMode, pollInterval, debounce, maxElements, maxConnectors, maxIncoming, maxOutgoing, maxExpandedGroup)
 }
 
-type cliProgress struct {
-	out io.Writer
-	bar *progressbar.ProgressBar
-	mu  sync.Mutex
+type watchReadyView struct {
+	Version           string
+	DataDir           string
+	RepoRoot          string
+	Repository        string
+	Branch            string
+	Head              string
+	ActiveLSPs        string
+	URL               string
+	EmbeddingProvider string
+	EmbeddingModel    string
+	EmbeddingHealth   string
+	StartupHistory    *bytes.Buffer
+	Verbose           bool
+}
+
+type watchReadyRow struct {
+	Label string
+	Value string
+}
+
+func renderWatchReady(out, progressOut io.Writer, view watchReadyView) {
+	if term.IsTerminal(progressOut) {
+		_, _ = fmt.Fprint(progressOut, "\r\033[K")
+	}
+	_, _ = fmt.Fprintf(out, "%s %s\n", term.Colorize(out, term.ColorCyan+term.ColorBold, "tld"), view.Version)
+	renderWatchSection(out, "Workspace", []watchReadyRow{
+		{Label: "Data directory", Value: term.Path(out, view.DataDir)},
+		{Label: "Watching", Value: view.RepoRoot},
+		{Label: "Repository", Value: view.Repository},
+	})
+	renderWatchSection(out, "Runtime", watchRuntimeRows(out, view))
+	if view.Verbose {
+		renderWatchStartup(out, view.StartupHistory)
+	}
+	term.Hint(out, "Press Ctrl-C to stop watching.")
+}
+
+func watchRuntimeRows(out io.Writer, view watchReadyView) []watchReadyRow {
+	rows := []watchReadyRow{
+		{Label: "Branch", Value: view.Branch},
+		{Label: "HEAD", Value: view.Head},
+		{Label: "Active LSPs", Value: view.ActiveLSPs},
+		{Label: "tlDiagram", Value: term.URL(out, view.URL)},
+	}
+	if view.EmbeddingProvider != "" && view.EmbeddingProvider != "none" && view.EmbeddingProvider != "local-lexical" {
+		rows = append(rows,
+			watchReadyRow{Label: "Embedding", Value: strings.TrimSpace(view.EmbeddingProvider + " " + view.EmbeddingModel)},
+			watchReadyRow{Label: "Embedding health", Value: view.EmbeddingHealth},
+		)
+	}
+	return rows
+}
+
+func renderWatchSection(out io.Writer, title string, rows []watchReadyRow) {
+	if len(rows) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "\n%s\n", term.Colorize(out, term.ColorBold, title))
+	renderWatchRows(out, rows)
+}
+
+func renderWatchRows(out io.Writer, rows []watchReadyRow) {
+	width := 0
+	for _, row := range rows {
+		if row.Value == "" {
+			continue
+		}
+		if len(row.Label) > width {
+			width = len(row.Label)
+		}
+	}
+	for _, row := range rows {
+		if row.Value == "" {
+			continue
+		}
+		_, _ = fmt.Fprintf(out, "  %-*s  %s\n", width, row.Label, row.Value)
+	}
+}
+
+func renderWatchStartup(out io.Writer, history *bytes.Buffer) {
+	if history == nil || history.Len() == 0 {
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(history.String()), "\n")
+	if len(lines) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "\n%s\n", term.Colorize(out, term.ColorBold, "Pipeline"))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimPrefix(line, "Finished ")
+		_, _ = fmt.Fprintf(out, "  %s\n", line)
+	}
+	_, _ = fmt.Fprintln(out)
 }
 
 type watchActivityProgress struct {
-	out         io.Writer
-	mu          sync.Mutex
-	label       string
-	clientCount func() int
+	mu            sync.Mutex
+	out           io.Writer
+	label         string
+	clientCount   func() int
+	now           func() time.Time
+	width         int
+	interval      time.Duration
+	disableTicker bool
+	started       time.Time
+	rendered      bool
+	stopped       bool
+	frame         int
+	ticker        *time.Ticker
+	done          chan struct{}
+}
+
+type watchActivityOptions struct {
+	ForceTerminal bool
+	DisableTicker bool
+	Interval      time.Duration
+	Width         int
+	Now           func() time.Time
 }
 
 func newCLIProgress(out io.Writer) watch.ProgressSink {
+	return term.NewProgressLine(out, term.ProgressLineOptions{})
+}
+
+func newBufferedCLIProgress(out io.Writer) (watch.ProgressSink, *bytes.Buffer) {
 	if !term.IsTerminal(out) {
-		return nil
+		return nil, nil
 	}
-	return &cliProgress{out: out}
+	var history bytes.Buffer
+	return term.NewProgressLine(out, term.ProgressLineOptions{FinishedWriter: &history}), &history
 }
 
 func newWatchActivityProgress(out io.Writer, clientCount func() int) *watchActivityProgress {
-	if !term.IsTerminal(out) {
+	return newWatchActivityProgressWithOptions(out, clientCount, watchActivityOptions{})
+}
+
+func newWatchActivityProgressWithOptions(out io.Writer, clientCount func() int, opts watchActivityOptions) *watchActivityProgress {
+	if out == nil || (!opts.ForceTerminal && !term.IsTerminal(out)) {
 		return nil
 	}
-	return &watchActivityProgress{out: out, clientCount: clientCount}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	interval := opts.Interval
+	if interval <= 0 {
+		interval = 900 * time.Millisecond
+	}
+	return &watchActivityProgress{
+		out:           out,
+		clientCount:   clientCount,
+		now:           now,
+		width:         watchActivityWidth(out, opts.Width),
+		interval:      interval,
+		disableTicker: opts.DisableTicker,
+	}
 }
 
 func (p *watchActivityProgress) Start(label string) {
 	if p == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if label == "" {
 		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.started.IsZero() {
+		p.started = p.now()
+		p.stopped = false
+		if !p.disableTicker {
+			p.done = make(chan struct{})
+			p.ticker = time.NewTicker(p.interval)
+			go p.run(p.ticker, p.done)
+		}
 	}
 	p.label = label
 	p.renderLocked()
 }
 
-func (p *watchActivityProgress) renderLocked() {
+func (p *watchActivityProgress) run(ticker *time.Ticker, done <-chan struct{}) {
+	for {
+		select {
+		case <-ticker.C:
+			p.tick()
+		case <-done:
+			return
+		}
+	}
+}
+
+func (p *watchActivityProgress) tick() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped || p.started.IsZero() {
+		return
+	}
+	p.frame++
+	p.renderLocked()
+}
+
+func (p *watchActivityProgress) statusLabel() string {
 	clientLabel := ""
 	if p.clientCount != nil {
 		clients := p.clientCount()
@@ -987,9 +1177,9 @@ func (p *watchActivityProgress) renderLocked() {
 		if clients == 1 {
 			plural = ""
 		}
-		clientLabel = fmt.Sprintf(" · %d client%s connected", clients, plural)
+		clientLabel = fmt.Sprintf(" | %d client%s connected", clients, plural)
 	}
-	_, _ = fmt.Fprintf(p.out, "\r\033[K%s%s", term.Colorize(p.out, term.ColorCyan, p.label), clientLabel)
+	return p.label + clientLabel
 }
 
 func (p *watchActivityProgress) Advance(label string) {
@@ -1004,61 +1194,104 @@ func (p *watchActivityProgress) Advance(label string) {
 	p.renderLocked()
 }
 
-func (p *watchActivityProgress) Stop() {
+func (p *watchActivityProgress) Stop() (time.Duration, bool) {
 	if p == nil {
-		return
+		return 0, false
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	_, _ = fmt.Fprintf(p.out, "\r\033[K")
+	if p.stopped || p.started.IsZero() {
+		p.mu.Unlock()
+		return 0, false
+	}
+	now := p.now()
+	elapsed := now.Sub(p.started).Round(time.Second)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	p.stopped = true
+	rendered := p.rendered
+	ticker := p.ticker
+	done := p.done
+	p.ticker = nil
+	p.done = nil
+	p.mu.Unlock()
+
+	if ticker != nil {
+		ticker.Stop()
+	}
+	if done != nil {
+		close(done)
+	}
+	if rendered {
+		_, _ = fmt.Fprint(p.out, "\r\033[K")
+	}
+	return elapsed, true
 }
 
-func (p *cliProgress) Start(label string, total int) {
-	if p == nil || total <= 0 {
+func (p *watchActivityProgress) renderLocked() {
+	if p.out == nil || p.stopped || p.started.IsZero() {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.bar != nil {
-		_ = p.bar.Finish()
-	}
-	p.bar = progressbar.NewOptions(total,
-		progressbar.OptionSetWriter(p.out),
-		progressbar.OptionSetVisibility(true),
-		progressbar.OptionSetDescription(label),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetWidth(12),
-		progressbar.OptionFullWidth(),
-		progressbar.OptionClearOnFinish(),
-		progressbar.OptionUseANSICodes(true),
-		progressbar.OptionThrottle(60*time.Millisecond),
-	)
+	line := fmt.Sprintf("%s %s", watchSpinnerFrames[p.frame%len(watchSpinnerFrames)], stripANSI(p.statusLabel()))
+	_, _ = fmt.Fprintf(p.out, "\r\033[K%s", truncateWatchActivityLine(line, p.width))
+	p.rendered = true
 }
 
-func (p *cliProgress) Advance(label string) {
-	if p == nil {
-		return
+var watchSpinnerFrames = []string{"-", "\\", "|", "/"}
+
+func watchActivityWidth(out io.Writer, configured int) int {
+	if configured > 0 {
+		return configured
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.bar == nil {
-		return
+	if f, ok := out.(*os.File); ok {
+		width, _, err := xterm.GetSize(int(f.Fd()))
+		if err == nil && width > 0 {
+			return width
+		}
 	}
-	if label != "" {
-		p.bar.Describe(label)
+	if value := strings.TrimSpace(os.Getenv("COLUMNS")); value != "" {
+		if width, err := strconv.Atoi(value); err == nil && width > 0 {
+			return width
+		}
 	}
-	_ = p.bar.Add(1)
+	return 80
 }
 
-func (p *cliProgress) Finish() {
-	if p == nil {
-		return
+func truncateWatchActivityLine(line string, width int) string {
+	if width <= 0 {
+		return ""
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.bar == nil {
-		return
+	runes := []rune(line)
+	if len(runes) <= width {
+		return line
 	}
-	_ = p.bar.Finish()
-	p.bar = nil
+	if width <= 3 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-3]) + "..."
+}
+
+func stripANSI(value string) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] == 0x1b && i+1 < len(value) && value[i+1] == '[' {
+			i += 2
+			for i < len(value) && (value[i] < '@' || value[i] > '~') {
+				i++
+			}
+			continue
+		}
+		out.WriteByte(value[i])
+	}
+	return out.String()
+}
+
+func formatWatchActivityDuration(d time.Duration) string {
+	if d < time.Minute {
+		return d.String()
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%02dm%02ds", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
 }

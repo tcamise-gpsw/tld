@@ -88,7 +88,27 @@ func defaultLSPConfig(cfg LSPConfig) LSPConfig {
 	if cfg.MemoryLimitBytes <= 0 {
 		cfg.MemoryLimitBytes = defaultLSPMemoryLimit
 	}
+	cfg.Commands = normalizeLSPCommands(cfg.Commands)
 	return cfg
+}
+
+func normalizeLSPCommands(commands map[string]string) map[string]string {
+	if len(commands) == 0 {
+		return nil
+	}
+	normalized := map[string]string{}
+	for language, command := range commands {
+		language = strings.ToLower(strings.TrimSpace(language))
+		command = strings.TrimSpace(command)
+		if language == "" || command == "" {
+			continue
+		}
+		normalized[language] = command
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func defaultScaleConfig(cfg ScaleConfig) ScaleConfig {

@@ -83,6 +83,7 @@ func ResolveSettings(cfg *workspace.Config, languages []string, watcherMode, pol
 			Enabled:          cfg.Watch.LSP.Enabled,
 			HealthInterval:   parseDurationOrZero(cfg.Watch.LSP.HealthInterval),
 			MemoryLimitBytes: cfg.Watch.LSP.MemoryLimitBytes,
+			Commands:         cfg.Watch.LSP.Commands,
 		}
 	}
 	if len(languages) > 0 {

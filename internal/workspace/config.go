@@ -191,9 +191,10 @@ type WatchScaleConfig struct {
 }
 
 type WatchLSPConfig struct {
-	Enabled          bool   `yaml:"enabled"`
-	HealthInterval   string `yaml:"health_interval"`
-	MemoryLimitBytes int64  `yaml:"memory_limit_bytes"`
+	Enabled          bool              `yaml:"enabled"`
+	HealthInterval   string            `yaml:"health_interval"`
+	MemoryLimitBytes int64             `yaml:"memory_limit_bytes"`
+	Commands         map[string]string `yaml:"commands"`
 }
 
 type WatchConfig struct {
@@ -289,6 +290,16 @@ func DefaultConfig() *Config {
 				Enabled:          true,
 				HealthInterval:   "1m",
 				MemoryLimitBytes: 4294967296,
+				Commands: map[string]string{
+					"c":          "",
+					"cpp":        "",
+					"go":         "",
+					"java":       "",
+					"javascript": "",
+					"python":     "",
+					"rust":       "",
+					"typescript": "",
+				},
 			},
 		},
 		Updates: UpdatesConfig{

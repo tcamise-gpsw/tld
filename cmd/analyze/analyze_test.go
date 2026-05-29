@@ -460,6 +460,7 @@ func TestAnalyzeCmd_DryRunDoesNotWriteYAML(t *testing.T) {
 func TestAnalyzeCmd_WarnsWhenLimitedScanModeIsActive(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := t.TempDir()
+	t.Setenv("TLD_WATCH_SCALE_STRATEGY", "limited")
 	t.Setenv("TLD_WATCH_SCALE_MAX_TRACKED_FILES", "1")
 	t.Setenv("TLD_WATCH_SCALE_MAX_LIMITED_FILES", "10")
 	cmd.MustInitWorkspace(t, dir)
@@ -473,7 +474,7 @@ func TestAnalyzeCmd_WarnsWhenLimitedScanModeIsActive(t *testing.T) {
 		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 	for _, want := range []string{
-		"Limited scan mode active: tracked files exceed 1.",
+		"Limited scan mode active: limited scan requested.",
 		"Scanned recent files plus bounded reference/caller context; source symbols and connectors may still be omitted.",
 		"Limited expansion: recent=",
 		"Use `tld config set watch.scale.strategy full` or raise `watch.scale.max_tracked_files` for a full scan.",
@@ -495,8 +496,16 @@ func TestAnalyzeCmd_WritesPipelineLogWithoutBanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyze: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "░███████") || !strings.Contains(stdout, "Version:") {
-		t.Fatalf("text stdout should include startup banner/logo, got:\n%s", stdout)
+	for _, want := range []string{"tld analyze", "Workspace\n", "Data directory", "Runtime\n", "Results\n", "Duration"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("text stdout should include compact analyze output %q, got:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "Pipeline\n") {
+		t.Fatalf("text stdout should hide pipeline history without verbose, got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "░███████") || strings.Contains(stdout, "Version:") || strings.Contains(stdout, "✓") {
+		t.Fatalf("text stdout should use compact analyze output without logo/check glyphs, got:\n%s", stdout)
 	}
 	logData, err := os.ReadFile(localserver.LogPath(dataDir))
 	if err != nil {

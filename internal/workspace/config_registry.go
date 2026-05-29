@@ -231,6 +231,11 @@ func ValidateGlobalConfig(cfg *Config) ConfigValidationErrors {
 	if cfg.Watch.LSP.MemoryLimitBytes <= 0 {
 		add("watch.lsp.memory_limit_bytes", "must be positive")
 	}
+	for language := range cfg.Watch.LSP.Commands {
+		if !validLSPCommandLanguage(language) {
+			add("watch.lsp.commands."+language, "unsupported language")
+		}
+	}
 	for _, item := range []struct {
 		key   string
 		value float64
@@ -365,6 +370,14 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "watch.lsp.enabled", Env: []string{"TLD_WATCH_LSP_ENABLED"}, Description: "Enable language-server definition resolution during watch/analyze scans."},
 	{Key: "watch.lsp.health_interval", Env: []string{"TLD_WATCH_LSP_HEALTH_INTERVAL"}, Description: "Minimum interval between language-server health checks."},
 	{Key: "watch.lsp.memory_limit_bytes", Env: []string{"TLD_WATCH_LSP_MEMORY_LIMIT_BYTES"}, Description: "Per-language-server RSS limit before the server is restarted."},
+	{Key: "watch.lsp.commands.c", Env: []string{"TLD_WATCH_LSP_C_COMMAND"}, Description: "Override command for the C language server."},
+	{Key: "watch.lsp.commands.cpp", Env: []string{"TLD_WATCH_LSP_CPP_COMMAND"}, Description: "Override command for the C++ language server."},
+	{Key: "watch.lsp.commands.go", Env: []string{"TLD_WATCH_LSP_GO_COMMAND"}, Description: "Override command for the Go language server."},
+	{Key: "watch.lsp.commands.java", Env: []string{"TLD_WATCH_LSP_JAVA_COMMAND"}, Description: "Override command for the Java language server."},
+	{Key: "watch.lsp.commands.javascript", Env: []string{"TLD_WATCH_LSP_JAVASCRIPT_COMMAND"}, Description: "Override command for the JavaScript language server."},
+	{Key: "watch.lsp.commands.python", Env: []string{"TLD_WATCH_LSP_PYTHON_COMMAND"}, Description: "Override command for the Python language server."},
+	{Key: "watch.lsp.commands.rust", Env: []string{"TLD_WATCH_LSP_RUST_COMMAND"}, Description: "Override command for the Rust language server."},
+	{Key: "watch.lsp.commands.typescript", Env: []string{"TLD_WATCH_LSP_TYPESCRIPT_COMMAND"}, Description: "Override command for the TypeScript language server."},
 	{Key: "watch.visibility.core_threshold_enabled", Description: "Enable score thresholding for watch visibility decisions."},
 	{Key: "watch.visibility.core_threshold", Description: "Minimum score for core watch visibility."},
 	{Key: "watch.visibility.tier_multiplier", Description: "Density multiplier added by each Show Context tier."},
@@ -496,6 +509,14 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"watch.lsp.enabled", "TLD_WATCH_LSP_ENABLED"},
 		{"watch.lsp.health_interval", "TLD_WATCH_LSP_HEALTH_INTERVAL"},
 		{"watch.lsp.memory_limit_bytes", "TLD_WATCH_LSP_MEMORY_LIMIT_BYTES"},
+		{"watch.lsp.commands.c", "TLD_WATCH_LSP_C_COMMAND"},
+		{"watch.lsp.commands.cpp", "TLD_WATCH_LSP_CPP_COMMAND"},
+		{"watch.lsp.commands.go", "TLD_WATCH_LSP_GO_COMMAND"},
+		{"watch.lsp.commands.java", "TLD_WATCH_LSP_JAVA_COMMAND"},
+		{"watch.lsp.commands.javascript", "TLD_WATCH_LSP_JAVASCRIPT_COMMAND"},
+		{"watch.lsp.commands.python", "TLD_WATCH_LSP_PYTHON_COMMAND"},
+		{"watch.lsp.commands.rust", "TLD_WATCH_LSP_RUST_COMMAND"},
+		{"watch.lsp.commands.typescript", "TLD_WATCH_LSP_TYPESCRIPT_COMMAND"},
 		{"watch.embedding.provider", "TLD_EMBEDDING_PROVIDER"},
 		{"watch.embedding.endpoint", "TLD_EMBEDDING_ENDPOINT"},
 		{"watch.embedding.model", "TLD_EMBEDDING_MODEL"},
@@ -580,6 +601,16 @@ func configValueEnv(def ConfigDefinition, active string) string {
 
 func setConfigValue(cfg *Config, key, value string) error {
 	key = normalizeConfigKey(key)
+	if language, ok := lspCommandLanguageFromKey(key); ok {
+		if cfg.Watch.LSP.Commands == nil {
+			cfg.Watch.LSP.Commands = map[string]string{}
+		}
+		cfg.Watch.LSP.Commands[language] = strings.TrimSpace(value)
+		return nil
+	}
+	if strings.HasPrefix(key, "watch.lsp.commands.") {
+		return fmt.Errorf("unsupported LSP command language %q", strings.TrimPrefix(key, "watch.lsp.commands."))
+	}
 	switch key {
 	case "server_url":
 		cfg.ServerURL = strings.TrimSpace(value)
@@ -903,6 +934,22 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.Watch.LSP.HealthInterval
 	case "watch.lsp.memory_limit_bytes":
 		return cfg.Watch.LSP.MemoryLimitBytes
+	case "watch.lsp.commands.c":
+		return cfg.Watch.LSP.Commands["c"]
+	case "watch.lsp.commands.cpp":
+		return cfg.Watch.LSP.Commands["cpp"]
+	case "watch.lsp.commands.go":
+		return cfg.Watch.LSP.Commands["go"]
+	case "watch.lsp.commands.java":
+		return cfg.Watch.LSP.Commands["java"]
+	case "watch.lsp.commands.javascript":
+		return cfg.Watch.LSP.Commands["javascript"]
+	case "watch.lsp.commands.python":
+		return cfg.Watch.LSP.Commands["python"]
+	case "watch.lsp.commands.rust":
+		return cfg.Watch.LSP.Commands["rust"]
+	case "watch.lsp.commands.typescript":
+		return cfg.Watch.LSP.Commands["typescript"]
 	case "watch.visibility.core_threshold_enabled":
 		return cfg.Watch.Visibility.CoreThresholdEnabled
 	case "watch.visibility.core_threshold":
@@ -1029,7 +1076,13 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	addScalar(lsp, "enabled", cfg.Watch.LSP.Enabled, desc("watch.lsp.enabled"))
 	addScalar(lsp, "health_interval", cfg.Watch.LSP.HealthInterval, desc("watch.lsp.health_interval"))
 	addScalar(lsp, "memory_limit_bytes", cfg.Watch.LSP.MemoryLimitBytes, desc("watch.lsp.memory_limit_bytes"))
-	appendUnknownEntries(lsp, mappingValueNode(mappingValueNode(existing, "watch"), "lsp"), setOf("enabled", "health_interval", "memory_limit_bytes"))
+	commands := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for _, language := range []string{"c", "cpp", "go", "java", "javascript", "python", "rust", "typescript"} {
+		addScalar(commands, language, cfg.Watch.LSP.Commands[language], desc("watch.lsp.commands."+language))
+	}
+	appendUnknownEntries(commands, mappingValueNode(mappingValueNode(mappingValueNode(existing, "watch"), "lsp"), "commands"), setOf("c", "cpp", "go", "java", "javascript", "python", "rust", "typescript"))
+	addMap(lsp, "commands", commands, "Per-language language-server command overrides.")
+	appendUnknownEntries(lsp, mappingValueNode(mappingValueNode(existing, "watch"), "lsp"), setOf("enabled", "health_interval", "memory_limit_bytes", "commands"))
 	addMap(watchNode, "lsp", lsp, "Language-server integration settings.")
 
 	visibility := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -1171,6 +1224,24 @@ func desc(key string) string {
 
 func normalizeConfigKey(key string) string {
 	return strings.ToLower(strings.TrimSpace(key))
+}
+
+func lspCommandLanguageFromKey(key string) (string, bool) {
+	language, ok := strings.CutPrefix(key, "watch.lsp.commands.")
+	if !ok || !validLSPCommandLanguage(language) {
+		return "", false
+	}
+	return language, true
+}
+
+func validLSPCommandLanguage(language string) bool {
+	language = strings.ToLower(strings.TrimSpace(language))
+	for _, spec := range analyzer.SupportedLanguages() {
+		if string(spec.Language) == language {
+			return true
+		}
+	}
+	return false
 }
 
 func parseStringList(value string) []string {
