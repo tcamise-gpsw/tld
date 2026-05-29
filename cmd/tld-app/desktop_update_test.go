@@ -67,6 +67,23 @@ func TestDesktopReleaseWorkflowPublishesUpdaterAssets(t *testing.T) {
 	}
 }
 
+func TestWindowsDesktopUpdateWorkflowChecksProcessExitCode(t *testing.T) {
+	workflowPath := filepath.Join("..", "..", ".github", "workflows", "wails-release.yml")
+	data, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("read workflow: %v", err)
+	}
+	workflow := string(data)
+
+	expected := "Start-Process -FilePath $installed.FullName -ArgumentList @('--desktop-update-e2e', '--desktop-update-asset', $asset) -Wait -PassThru"
+	if !strings.Contains(workflow, expected) {
+		t.Fatalf("Windows desktop update e2e must use Start-Process so GUI app exit codes are available")
+	}
+	if strings.Contains(workflow, "$LASTEXITCODE") {
+		t.Fatalf("Windows desktop update e2e must not rely on LASTEXITCODE for the Wails GUI app")
+	}
+}
+
 func TestCurrentAppBundleFromExecutable(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tld.app")
 	exe := filepath.Join(root, "Contents", "MacOS", "tld")

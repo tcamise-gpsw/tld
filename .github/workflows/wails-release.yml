@@ -342,9 +342,9 @@ jobs:
             throw "Silent desktop install did not produce tld.exe under $installDir"
           }
 
-          & $installed.FullName --desktop-update-e2e --desktop-update-asset $asset
-          if ($LASTEXITCODE -ne 0) {
-            throw "Installed desktop app update e2e failed with code $LASTEXITCODE"
+          $e2e = Start-Process -FilePath $installed.FullName -ArgumentList @('--desktop-update-e2e', '--desktop-update-asset', $asset) -Wait -PassThru
+          if ($e2e.ExitCode -ne 0) {
+            throw "Installed desktop app update e2e failed with code $($e2e.ExitCode)"
           }
 
       - name: Create or Update GitHub Release
