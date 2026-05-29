@@ -22,6 +22,13 @@ import (
 )
 
 func main() {
+	if handled, err := runDesktopUpdateCommand(os.Args, os.Stdout); handled {
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	_ = workspace.EnsureGlobalConfig()
 
 	cfg, err := workspace.LoadGlobalConfig()

@@ -122,7 +122,7 @@ jobs:
         run: |
           for arch in arm64 amd64; do
             app="cmd/tld-app/build/release/macos-${arch}/tld.app"
-            notarization_zip="cmd/tld-app/build/release/tld-macos-${arch}-notarization.zip"
+            notarization_zip="cmd/tld-app/build/release/tld-desktop-macos-${arch}-notarization.zip"
 
             # Package the app into a zip for submission to Apple.
             ditto -c -k --keepParent "$app" "$notarization_zip"
@@ -182,16 +182,55 @@ jobs:
 
       - name: Package macOS Apps for Release
         run: |
-          ditto -c -k --keepParent cmd/tld-app/build/release/macos-arm64/tld.app tld-macos-arm64.zip
-          ditto -c -k --keepParent cmd/tld-app/build/release/macos-amd64/tld.app tld-macos-amd64.zip
+          ditto -c -k --keepParent cmd/tld-app/build/release/macos-arm64/tld.app tld-desktop-macos-arm64.zip
+          ditto -c -k --keepParent cmd/tld-app/build/release/macos-amd64/tld.app tld-desktop-macos-x64.zip
+
+      - name: Test macOS desktop update assets
+        run: |
+          set -euo pipefail
+
+          for asset in tld-desktop-macos-arm64.zip tld-desktop-macos-x64.zip; do
+            test -s "$asset"
+            extract_dir="${RUNNER_TEMP}/${asset%.zip}"
+            rm -rf "$extract_dir"
+            mkdir -p "$extract_dir"
+            ditto -x -k "$asset" "$extract_dir"
+            app_path="$(find "$extract_dir" -maxdepth 2 -type d -name 'tld.app' -print -quit)"
+            if [ -z "$app_path" ]; then
+              echo "$asset did not contain tld.app"
+              exit 1
+            fi
+            codesign --verify --deep --strict "$app_path"
+          done
+
+          host_asset=""
+          case "$(uname -m)" in
+            arm64) host_asset="tld-desktop-macos-arm64.zip" ;;
+            x86_64) host_asset="tld-desktop-macos-x64.zip" ;;
+            *)
+              echo "Unsupported macOS runner architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
+
+          e2e_dir="${RUNNER_TEMP}/tld-desktop-update-e2e"
+          rm -rf "$e2e_dir"
+          mkdir -p "$e2e_dir"
+          ditto -x -k "$host_asset" "$e2e_dir"
+          e2e_app="$(find "$e2e_dir" -maxdepth 2 -type d -name 'tld.app' -print -quit)"
+          if [ -z "$e2e_app" ]; then
+            echo "$host_asset did not contain tld.app"
+            exit 1
+          fi
+          "$e2e_app/Contents/MacOS/tld" --desktop-update-e2e --desktop-update-asset "$(pwd)/$host_asset"
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           files: |
-            tld-macos-arm64.zip
-            tld-macos-amd64.zip
+            tld-desktop-macos-arm64.zip
+            tld-desktop-macos-x64.zip
           fail_on_unmatched_files: true
           overwrite_files: true
         env:
@@ -279,13 +318,40 @@ jobs:
             exit 1
           fi
 
-          cp "${installers[0]}" tld-windows-amd64-installer.exe
+          cp "${installers[0]}" tld-desktop-windows-x64-installer.exe
+
+      - name: Test Windows desktop update asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $asset = (Resolve-Path 'tld-desktop-windows-x64-installer.exe').Path
+          if ((Get-Item $asset).Length -le 0) {
+            throw "Desktop update asset is empty: $asset"
+          }
+
+          $installDir = Join-Path $env:RUNNER_TEMP 'tld-desktop-test'
+          Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+          $installer = Start-Process -FilePath $asset -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($installer.ExitCode -ne 0) {
+            throw "Desktop installer exited with code $($installer.ExitCode)"
+          }
+
+          $installed = Get-ChildItem -Path $installDir -Recurse -Filter 'tld.exe' | Select-Object -First 1
+          if (-not $installed) {
+            throw "Silent desktop install did not produce tld.exe under $installDir"
+          }
+
+          & $installed.FullName --desktop-update-e2e --desktop-update-asset $asset
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed desktop app update e2e failed with code $LASTEXITCODE"
+          }
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          files: tld-windows-amd64-installer.exe
+          files: tld-desktop-windows-x64-installer.exe
           fail_on_unmatched_files: true
           overwrite_files: true
         env:

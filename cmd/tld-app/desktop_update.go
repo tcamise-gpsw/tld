@@ -150,13 +150,13 @@ func desktopAssetName(goos, goarch string) (string, bool) {
 	case "darwin":
 		switch goarch {
 		case "arm64":
-			return "tld-macos-arm64.zip", true
+			return "tld-desktop-macos-arm64.zip", true
 		case "amd64":
-			return "tld-macos-amd64.zip", true
+			return "tld-desktop-macos-x64.zip", true
 		}
 	case "windows":
 		if goarch == "amd64" {
-			return "tld-windows-amd64-installer.exe", true
+			return "tld-desktop-windows-x64-installer.exe", true
 		}
 	}
 	return "", false

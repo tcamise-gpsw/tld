@@ -89,7 +89,7 @@ describe('desktop helpers', () => {
       latest: 'v2.2.5',
       updateAvailable: true,
       releaseUrl: 'https://github.com/Mertcikla/tld/releases/tag/v2.2.5',
-      assetName: 'tld-macos-arm64.zip',
+      assetName: 'tld-desktop-macos-arm64.zip',
       cached: false,
       supported: true,
       canInstall: true,
