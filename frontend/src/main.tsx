@@ -7,6 +7,7 @@ import App from "./App"
 import theme from "./theme"
 import { routerBasename } from "./config/runtime"
 import { ToastContainer } from "./utils/toast"
+import { installAppViewportHeight } from "./utils/viewportHeight"
 import { PlatformProvider } from "./platform/PlatformContext"
 import { platform as localPlatform } from "./platform/local"
 import "./index.css"
@@ -21,6 +22,8 @@ const queryClient = new QueryClient({
 })
 
 if (typeof window !== "undefined") {
+  installAppViewportHeight()
+
   document.addEventListener(
     "wheel",
     (e) => {

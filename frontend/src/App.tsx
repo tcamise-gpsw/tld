@@ -31,7 +31,7 @@ function AppLayout() {
 
   return (
     <Box
-      h="100dvh"
+      h="var(--app-viewport-height)"
       display="flex"
       flexDirection="column"
       bg="var(--bg-canvas)"
@@ -85,7 +85,7 @@ export default function App() {
 
   if (!ready) {
     return (
-      <Center h="100dvh">
+      <Center h="var(--app-viewport-height)">
         <Spinner size="xl" />
       </Center>
     )
@@ -94,11 +94,11 @@ export default function App() {
   return (
     <ExperimentalProvider>
       <ThemeProvider>
-        <Box h="100dvh" bg="var(--bg-canvas)" overflow="hidden">
+        <Box h="var(--app-viewport-height)" bg="var(--bg-canvas)" overflow="hidden">
           <Routes>
             {platform.getRoutes({ user: null })}
 
-            <Route path="/explore/shared/:token" element={<Box h="100dvh" overflow="hidden"><HeaderProvider><WorkspaceVersionProvider><SharedInfiniteZoom /></WorkspaceVersionProvider></HeaderProvider></Box>} />
+            <Route path="/explore/shared/:token" element={<Box h="var(--app-viewport-height)" overflow="hidden"><HeaderProvider><WorkspaceVersionProvider><SharedInfiniteZoom /></WorkspaceVersionProvider></HeaderProvider></Box>} />
             <Route
               element={
                 <HeaderProvider>
