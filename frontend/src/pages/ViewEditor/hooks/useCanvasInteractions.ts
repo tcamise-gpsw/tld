@@ -49,6 +49,11 @@ type HandleTarget = {
   y: number
 }
 
+export type ConnectorDropTarget = {
+  droppedNode: RFNode | null
+  droppedHandleId: string | null
+}
+
 export type ConnectorDragTarget = {
   nodeId?: string
   isHandle: boolean
@@ -63,17 +68,50 @@ function resolveElementIdFromNode(node: RFNode | null | undefined) {
   return typeof nodeData?.element_id === 'number' ? nodeData.element_id : null
 }
 
+function isDomElement(target: unknown): target is Element {
+  return typeof globalThis.Element !== 'undefined' && target instanceof globalThis.Element
+}
+
 function findNodeFromEventTarget(target: EventTarget | null, nodes: RFNode[]) {
-  if (!(target instanceof globalThis.Element)) return null
+  if (!isDomElement(target)) return null
   const nodeId = target.closest('.react-flow__node')?.getAttribute('data-id')
   if (!nodeId) return null
   return nodes.find((node) => node.id === nodeId) ?? null
 }
 
 function findHandleIdFromEventTarget(target: EventTarget | null) {
-  if (!(target instanceof globalThis.Element)) return null
+  if (!isDomElement(target)) return null
   const handle = target.closest('.react-flow__handle')
   return handle?.getAttribute('data-handleid') || handle?.id || null
+}
+
+function elementsFromClientPoint(clientX: number, clientY: number) {
+  if (typeof document === 'undefined') return null
+  if (document.elementsFromPoint) return document.elementsFromPoint(clientX, clientY)
+  const element = document.elementFromPoint?.(clientX, clientY)
+  return element ? [element] : []
+}
+
+export function getConnectorDropTargetAtPoint(clientX: number, clientY: number, nodes: RFNode[]): ConnectorDropTarget | null {
+  const targets = elementsFromClientPoint(clientX, clientY)
+  if (!targets) return null
+
+  for (const target of targets) {
+    const droppedNode = findNodeFromEventTarget(target, nodes)
+    const droppedHandleId = findHandleIdFromEventTarget(target)
+    if (droppedNode || droppedHandleId) {
+      return { droppedNode, droppedHandleId }
+    }
+  }
+
+  return { droppedNode: null, droppedHandleId: null }
+}
+
+export function resolveConnectorDropTarget(eventTarget: EventTarget | null, clientX: number, clientY: number, nodes: RFNode[]): ConnectorDropTarget {
+  return getConnectorDropTargetAtPoint(clientX, clientY, nodes) ?? {
+    droppedNode: findNodeFromEventTarget(eventTarget, nodes),
+    droppedHandleId: findHandleIdFromEventTarget(eventTarget),
+  }
 }
 
 export function shouldDisplayConnectorDragPlaceholder(target: ConnectorDragTarget | null) {
@@ -87,7 +125,7 @@ function getConnectorDragTargetAtPoint(clientX: number, clientY: number): Connec
   let sawPendingNode = false
 
   for (const target of targets) {
-    if (!(target instanceof globalThis.Element)) continue
+    if (!isDomElement(target)) continue
     const nodeId = target.closest('.react-flow__node')?.getAttribute('data-id') || undefined
     const isHandle = !!target.closest('.react-flow__handle')
     if (isHandle && nodeId !== PENDING_ELEMENT_NODE_ID) return { nodeId, isHandle: true }
@@ -106,6 +144,7 @@ function collectHandleTargets(excludeNodeId?: string): HandleTarget[] {
   const targets: HandleTarget[] = []
 
   for (const handle of handles) {
+    if (!isDomElement(handle)) continue
     const nodeId = handle.closest('.react-flow__node')?.getAttribute('data-id') || undefined
     if (excludeNodeId && nodeId === excludeNodeId) continue
 
@@ -1064,7 +1103,7 @@ export function useCanvasInteractions({
     document.addEventListener('touchmove', touchMove, { passive: true })
   }, [canEdit, clearConnectorDragPreviewListeners, getInteractionNodes, updateConnectorDragPreview])
 
-  const onConnectEnd = useCallback((event: MouseEvent | TouchEvent) => {
+  const onConnectEnd = useCallback((event: MouseEvent | TouchEvent | PointerEvent) => {
     if (!canEdit || isReconnectingRef.current) return
     const sourceId = connectingSourceRef.current
     connectingSourceRef.current = null
@@ -1076,11 +1115,15 @@ export function useCanvasInteractions({
     }
     connectWasValidRef.current = false
     const interactionNodes = getInteractionNodes()
-    const droppedNode = findNodeFromEventTarget(event.target, interactionNodes)
-    const droppedHandleId = findHandleIdFromEventTarget(event.target)
-    const { clientX, clientY } = 'changedTouches' in event
-      ? (event as TouchEvent).changedTouches[0]
-      : (event as MouseEvent)
+    const point = 'changedTouches' in event
+      ? event.changedTouches[0] ?? event.touches[0]
+      : event
+    if (!point) {
+      clearPendingConnectionRefs()
+      return
+    }
+    const { clientX, clientY } = point
+    const { droppedNode, droppedHandleId } = resolveConnectorDropTarget(event.target, clientX, clientY, interactionNodes)
     const flowPos = screenToFlowPositionRef.current({ x: clientX, y: clientY })
     if (droppedNode?.id === sourceId) {
       clearPendingConnectionRefs()

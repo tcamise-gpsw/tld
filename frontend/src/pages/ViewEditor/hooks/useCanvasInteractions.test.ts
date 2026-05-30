@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import type { NodeChange } from 'reactflow'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { Node as RFNode, NodeChange } from 'reactflow'
 import type { Connector } from '../../../types'
 import {
   PENDING_ELEMENT_NODE_ID,
   applyPendingElementNodeChanges,
   getConnectorDeletionTarget,
   pendingElementPositionFromFlowPoint,
+  resolveConnectorDropTarget,
   shouldDisplayConnectorDragPlaceholder,
   type PendingElementState,
 } from './useCanvasInteractions'
@@ -26,6 +27,66 @@ const connector = (id: number): Connector => ({
   tags: [],
   created_at: '2024-01-01',
   updated_at: '2024-01-01',
+})
+
+const originalElement = globalThis.Element
+const originalDocument = globalThis.document
+const hadOriginalElement = 'Element' in globalThis
+const hadOriginalDocument = 'document' in globalThis
+
+class FakeElement {
+  id = ''
+
+  constructor(
+    private readonly closestResults: Record<string, FakeElement | null>,
+    private readonly attrs: Record<string, string> = {},
+  ) { }
+
+  closest(selector: string) {
+    return this.closestResults[selector] ?? null
+  }
+
+  getAttribute(name: string) {
+    return this.attrs[name] ?? null
+  }
+}
+
+function node(id: string): RFNode {
+  return { id, position: { x: 0, y: 0 }, data: {} } as RFNode
+}
+
+function installPointHitTest(elements: FakeElement[]) {
+  Object.defineProperty(globalThis, 'Element', {
+    configurable: true,
+    value: FakeElement,
+  })
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      elementsFromPoint: () => elements,
+      elementFromPoint: () => elements[0] ?? null,
+    },
+  })
+}
+
+afterEach(() => {
+  if (hadOriginalElement) {
+    Object.defineProperty(globalThis, 'Element', {
+      configurable: true,
+      value: originalElement,
+    })
+  } else {
+    Reflect.deleteProperty(globalThis, 'Element')
+  }
+
+  if (hadOriginalDocument) {
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: originalDocument,
+    })
+  } else {
+    Reflect.deleteProperty(globalThis, 'document')
+  }
 })
 
 describe('getConnectorDeletionTarget', () => {
@@ -100,5 +161,34 @@ describe('connector drag placeholder visibility', () => {
     expect(shouldDisplayConnectorDragPlaceholder({ nodeId: '12', isHandle: false })).toBe(false)
     expect(shouldDisplayConnectorDragPlaceholder({ nodeId: '12', isHandle: true })).toBe(false)
     expect(shouldDisplayConnectorDragPlaceholder({ isHandle: true })).toBe(false)
+  })
+})
+
+describe('connector drop target resolution', () => {
+  it('uses coordinate hit-testing before event target fallback', () => {
+    const sourceNodeElement = new FakeElement({}, { 'data-id': '1' })
+    const sourceEventTarget = new FakeElement({ '.react-flow__node': sourceNodeElement })
+    const canvasElement = new FakeElement({})
+    installPointHitTest([canvasElement])
+
+    expect(resolveConnectorDropTarget(sourceEventTarget as unknown as EventTarget, 120, 160, [node('1')])).toEqual({
+      droppedNode: null,
+      droppedHandleId: null,
+    })
+  })
+
+  it('resolves the handle under the release point', () => {
+    const targetNodeElement = new FakeElement({}, { 'data-id': '2' })
+    const targetHandleElement = new FakeElement({ '.react-flow__node': targetNodeElement }, { 'data-handleid': 'left-2' })
+    const releaseTarget = new FakeElement({
+      '.react-flow__node': targetNodeElement,
+      '.react-flow__handle': targetHandleElement,
+    })
+    installPointHitTest([releaseTarget])
+
+    expect(resolveConnectorDropTarget(null, 120, 160, [node('1'), node('2')])).toEqual({
+      droppedNode: node('2'),
+      droppedHandleId: 'left-2',
+    })
   })
 })
