@@ -136,6 +136,30 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 	return ProjectedViewContent{Placements: outPlacements, Connectors: outConnectors}
 }
 
+func InferElementGateLevels(placements []PlacedElement, connectors []Connector, overrides []VisibilityOverride, signals DensitySignals) map[int64]int {
+	normalizedPlacements := make([]PlacedElement, len(placements))
+	copy(normalizedPlacements, placements)
+	for index := range normalizedPlacements {
+		normalizedPlacements[index].BypassNoiseGate = false
+	}
+
+	levels := make(map[int64]int, len(normalizedPlacements))
+	for level := MinDensityLevel; level <= MaxDensityLevel; level++ {
+		content := ProjectViewContent(normalizedPlacements, connectors, overrides, level, signals)
+		for _, placement := range content.Placements {
+			if _, ok := levels[placement.ElementID]; !ok {
+				levels[placement.ElementID] = level
+			}
+		}
+	}
+	for _, placement := range normalizedPlacements {
+		if _, ok := levels[placement.ElementID]; !ok {
+			levels[placement.ElementID] = MaxDensityLevel
+		}
+	}
+	return levels
+}
+
 func projectViewContentAtLevel(placements []PlacedElement, connectors []Connector, overrides []VisibilityOverride, level int, signals DensitySignals) ProjectedViewContent {
 	caps := CapsForDensity(level)
 	elementGateLevels := make(map[int64]int)

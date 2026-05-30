@@ -123,6 +123,7 @@ import {
   type SelectionDistribute,
   type SelectionNodeUpdate,
 } from './selection'
+import { deriveViewNoiseGateEnabled } from './noiseGate'
 
 const nodeTypes = {
   elementNode: ElementNode,
@@ -506,6 +507,9 @@ function ViewEditorInner({
   const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
   const [densityLevel, setDensityLevel] = useState(0)
   const [visibilityOverrides, setVisibilityOverrides] = useState<VisibilityOverride[]>([])
+  const [noiseGateBusy, setNoiseGateBusy] = useState(false)
+  const [pendingNoiseGateEnabled, setPendingNoiseGateEnabled] = useState<boolean | null>(null)
+  const lastNonFullDensityLevelRef = useRef(0)
 
   const elementPanel = useDisclosure()
   const connectorPanel = useDisclosure()
@@ -522,6 +526,9 @@ function ViewEditorInner({
     if (viewId == null) {
       setDensityLevel(0)
       setVisibilityOverrides([])
+      setNoiseGateBusy(false)
+      setPendingNoiseGateEnabled(null)
+      lastNonFullDensityLevelRef.current = 0
       return
     }
     let cancelled = false
@@ -535,6 +542,12 @@ function ViewEditorInner({
     })
     return () => { cancelled = true }
   }, [viewId])
+
+  useEffect(() => {
+    if (densityLevel !== 2) {
+      lastNonFullDensityLevelRef.current = densityLevel
+    }
+  }, [densityLevel])
 
   // ── Stable disclosure refs ──────────────────────────────────────────────
   const openElementPanelRef = useRef(elementPanel.onOpen)
@@ -1518,6 +1531,44 @@ function ViewEditorInner({
       toast({ status: 'error', title: 'Noise gate was not saved' })
     }
   }, [clearEditHistory, refreshElements, toast, viewId])
+
+  const noiseGateEnabled = useMemo(
+    () => deriveViewNoiseGateEnabled(densityLevel, visibilityOverrides, pendingNoiseGateEnabled),
+    [densityLevel, pendingNoiseGateEnabled, visibilityOverrides],
+  )
+
+  const handleNoiseGateEnabledChange = useCallback(async (enabled: boolean) => {
+    if (viewId == null || noiseGateBusy) return
+
+    setNoiseGateBusy(true)
+    setPendingNoiseGateEnabled(enabled)
+    if (!enabled) {
+      try {
+        await handleDensityLevelChange(2)
+      } finally {
+        setNoiseGateBusy(false)
+        setPendingNoiseGateEnabled(null)
+      }
+      return
+    }
+
+    const previousLevel = densityLevel
+    const nextLevel = densityLevel === 2 ? lastNonFullDensityLevelRef.current : densityLevel
+    setDensityLevel(nextLevel)
+    try {
+      const result = await api.workspace.views.noiseGate.initialize(viewId, nextLevel)
+      setDensityLevel(result.density_level)
+      clearEditHistory()
+      await reloadVisibilityOverrides()
+      await refreshElements()
+    } catch {
+      setDensityLevel(previousLevel)
+      toast({ status: 'error', title: 'Noise gate was not initialized' })
+    } finally {
+      setNoiseGateBusy(false)
+      setPendingNoiseGateEnabled(null)
+    }
+  }, [clearEditHistory, densityLevel, handleDensityLevelChange, noiseGateBusy, refreshElements, reloadVisibilityOverrides, toast, viewId])
 
   const handleVisibilityOverrideDeltaChange = useCallback(async (resourceType: VisibilityOverride['resource_type'], resourceId: number, levelDelta: number) => {
     if (viewId == null) return
@@ -3559,6 +3610,9 @@ function ViewEditorInner({
               onFocusModeChange={handleFocusModeChange}
               densityLevel={densityLevel}
               onDensityLevelChange={handleDensityLevelChange}
+              noiseGateEnabled={noiseGateEnabled}
+              noiseGateBusy={noiseGateBusy}
+              onNoiseGateEnabledChange={handleNoiseGateEnabledChange}
               canUndo={canUndoViewEdit}
               canRedo={canRedoViewEdit}
               undoRedoDisabled={isApplyingHistory}

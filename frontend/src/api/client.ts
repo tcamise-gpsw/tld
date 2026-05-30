@@ -7,6 +7,7 @@ import type {
   ElementPlacement,
   ExploreData,
   LibraryElement,
+  NoiseGateInitialization,
   PlacedElement,
   Tag,
   View,
@@ -940,6 +941,24 @@ export const api = {
           if (!res.ok) throw new Error('Failed to save density')
           const json = await res.json() as { density_level?: number }
           return Number(json.density_level ?? densityLevel)
+        },
+      },
+
+      noiseGate: {
+        initialize: async (id: number, densityLevel?: number): Promise<NoiseGateInitialization> => {
+          const res = await fetch(apiUrl(`/views/${id}/noise-gate/initialize`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(densityLevel == null ? {} : { density_level: densityLevel }),
+          })
+          if (!res.ok) throw new Error('Failed to initialize noise gate')
+          const json = await res.json() as Partial<NoiseGateInitialization>
+          return {
+            view_id: Number(json.view_id ?? id),
+            density_level: Number(json.density_level ?? densityLevel ?? 0),
+            elements_enabled: Number(json.elements_enabled ?? 0),
+            overrides_created: Number(json.overrides_created ?? 0),
+          }
         },
       },
 

@@ -12,6 +12,13 @@ type VisibilityOverride = app.VisibilityOverride
 
 type ProjectedViewContent = app.ProjectedViewContent
 
+type NoiseGateInitialization struct {
+	ViewID           int64 `json:"view_id"`
+	DensityLevel     int   `json:"density_level"`
+	ElementsEnabled  int   `json:"elements_enabled"`
+	OverridesCreated int   `json:"overrides_created"`
+}
+
 const (
 	MinDensityLevel  = app.MinDensityLevel
 	MaxDensityLevel  = app.MaxDensityLevel
@@ -49,6 +56,118 @@ func (s *SQLiteStore) DeleteVisibilityOverride(ctx context.Context, viewID int64
 
 func (s *SQLiteStore) DeleteResourceVisibilityOverrides(ctx context.Context, resourceType string, resourceID int64) error {
 	return s.legacy.DeleteResourceVisibilityOverrides(ctx, resourceType, resourceID)
+}
+
+func (s *SQLiteStore) InitializeViewNoiseGate(ctx context.Context, viewID int64, densityLevel *int) (NoiseGateInitialization, error) {
+	currentLevel, err := s.legacy.ViewDensityLevel(ctx, viewID)
+	if err != nil {
+		return NoiseGateInitialization{}, err
+	}
+	targetLevel := currentLevel
+	if densityLevel != nil {
+		if err := app.ValidateDensityLevel(*densityLevel); err != nil {
+			return NoiseGateInitialization{}, err
+		}
+		targetLevel = *densityLevel
+	}
+
+	placements, err := s.legacy.Placements(ctx, viewID)
+	if err != nil {
+		return NoiseGateInitialization{}, err
+	}
+	connectors, err := s.legacy.Connectors(ctx, viewID)
+	if err != nil {
+		return NoiseGateInitialization{}, err
+	}
+	overrides, err := s.legacy.VisibilityOverrides(ctx, viewID)
+	if err != nil {
+		return NoiseGateInitialization{}, err
+	}
+
+	signals := app.EmptyDensitySignals()
+	if len(placements) > 0 {
+		signals, err = s.densitySignals(ctx, placements, connectors)
+		if err != nil {
+			return NoiseGateInitialization{}, err
+		}
+	}
+	levels := app.InferElementGateLevels(placements, connectors, overrides, signals)
+
+	elementIDs := make([]int64, 0, len(placements))
+	seenElementIDs := make(map[int64]struct{}, len(placements))
+	for _, placement := range placements {
+		if _, ok := seenElementIDs[placement.ElementID]; ok {
+			continue
+		}
+		seenElementIDs[placement.ElementID] = struct{}{}
+		elementIDs = append(elementIDs, placement.ElementID)
+	}
+
+	existingElementOverrides := make(map[int64]struct{})
+	for _, override := range overrides {
+		if override.ResourceType == "element" {
+			existingElementOverrides[override.ResourceID] = struct{}{}
+		}
+	}
+
+	now := nowString()
+	newOverrides := make([]visibilityOverrideModel, 0, len(elementIDs))
+	for _, elementID := range elementIDs {
+		if _, exists := existingElementOverrides[elementID]; exists {
+			continue
+		}
+		level, ok := levels[elementID]
+		if !ok {
+			level = app.MaxDensityLevel
+		}
+		newOverrides = append(newOverrides, visibilityOverrideModel{
+			ViewID:       viewID,
+			ResourceType: "element",
+			ResourceID:   elementID,
+			LevelDelta:   -level,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+	}
+
+	if err := s.legacy.BunDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewUpdate().
+			Table("views").
+			Set("density_level = ?", targetLevel).
+			Set("updated_at = ?", now).
+			Where("id = ?", viewID).
+			Exec(ctx); err != nil {
+			return err
+		}
+		if len(elementIDs) > 0 {
+			if _, err := tx.NewUpdate().
+				Table("elements").
+				Set("bypass_noise_gate = ?", false).
+				Set("updated_at = ?", now).
+				Where("id IN (?)", bun.List(elementIDs)).
+				Exec(ctx); err != nil {
+				return err
+			}
+		}
+		if len(newOverrides) > 0 {
+			if _, err := tx.NewInsert().
+				Model(&newOverrides).
+				On("CONFLICT(view_id, resource_type, resource_id) DO NOTHING").
+				Exec(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return NoiseGateInitialization{}, err
+	}
+
+	return NoiseGateInitialization{
+		ViewID:           viewID,
+		DensityLevel:     targetLevel,
+		ElementsEnabled:  len(elementIDs),
+		OverridesCreated: len(newOverrides),
+	}, nil
 }
 
 func (s *SQLiteStore) ExportDensityState(ctx context.Context) (map[int64]int, []VisibilityOverride, error) {

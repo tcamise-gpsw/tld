@@ -95,6 +95,13 @@ export interface VisibilityOverride {
   updated_at?: string
 }
 
+export interface NoiseGateInitialization {
+  view_id: number
+  density_level: number
+  elements_enabled: number
+  overrides_created: number
+}
+
 export interface NavigationConnector {
   id: number
   element_id: number | null

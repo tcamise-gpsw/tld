@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -18,6 +19,10 @@ type visibilityOverrideRequest struct {
 	ResourceType string `json:"resource_type"`
 	ResourceID   int64  `json:"resource_id"`
 	LevelDelta   int    `json:"level_delta"`
+}
+
+type noiseGateInitializeRequest struct {
+	DensityLevel *int `json:"density_level"`
 }
 
 func registerDensityHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore) {
@@ -49,6 +54,24 @@ func registerDensityHandlers(mux *http.ServeMux, sqliteStore *store.SQLiteStore)
 			return
 		}
 		writeJSON(w, map[string]any{"view_id": viewID, "density_level": req.DensityLevel})
+	})
+
+	mux.HandleFunc("POST /api/views/{id}/noise-gate/initialize", func(w http.ResponseWriter, r *http.Request) {
+		viewID, ok := parseViewID(w, r)
+		if !ok {
+			return
+		}
+		var req noiseGateInitializeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSONError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		result, err := sqliteStore.InitializeViewNoiseGate(r.Context(), viewID, req.DensityLevel)
+		if err != nil {
+			writeDensityError(w, err)
+			return
+		}
+		writeJSON(w, result)
 	})
 
 	mux.HandleFunc("GET /api/views/{id}/visibility-overrides", func(w http.ResponseWriter, r *http.Request) {

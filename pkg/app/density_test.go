@@ -67,6 +67,57 @@ func TestProjectViewContentBypassNoiseGateIgnoresElementOverrideUntilDisabled(t 
 	}
 }
 
+func TestInferElementGateLevelsIgnoresBypassNoiseGate(t *testing.T) {
+	placements := make([]PlacedElement, 0, 6)
+	for id := int64(1); id <= 6; id++ {
+		placement := densityTestPlacement(id)
+		if id == 6 {
+			placement.BypassNoiseGate = true
+		}
+		placements = append(placements, placement)
+	}
+
+	levels := InferElementGateLevels(placements, nil, nil, EmptyDensitySignals())
+	if levels[6] != -1 {
+		t.Fatalf("bypassed element inferred level = %d, want -1", levels[6])
+	}
+}
+
+func TestInferElementGateLevelsAssignsDependencyGroupToFull(t *testing.T) {
+	kind := "dependency-group"
+	placement := densityTestPlacement(1)
+	placement.Kind = &kind
+
+	levels := InferElementGateLevels([]PlacedElement{placement}, nil, nil, EmptyDensitySignals())
+	if levels[1] != MaxDensityLevel {
+		t.Fatalf("dependency-group inferred level = %d, want %d", levels[1], MaxDensityLevel)
+	}
+}
+
+func TestInferElementGateLevelsRecreatesDensityProjection(t *testing.T) {
+	placements := make([]PlacedElement, 0, 20)
+	for id := int64(1); id <= 20; id++ {
+		placements = append(placements, densityTestPlacement(id))
+	}
+	connectors := []Connector{
+		densityTestConnector(1, 1, 2),
+		densityTestConnector(2, 3, 4),
+		densityTestConnector(3, 18, 19),
+	}
+
+	levels := InferElementGateLevels(placements, connectors, nil, EmptyDensitySignals())
+	overrides := make([]VisibilityOverride, 0, len(levels))
+	for elementID, level := range levels {
+		overrides = append(overrides, densityTestGate(elementID, level))
+	}
+
+	for level := MinDensityLevel; level <= MaxDensityLevel; level++ {
+		before := ProjectViewContent(placements, connectors, nil, level, EmptyDensitySignals())
+		after := ProjectViewContent(placements, connectors, overrides, level, EmptyDensitySignals())
+		assertPlacementSetEqual(t, placementIDSet(before.Placements), placementIDSet(after.Placements), level)
+	}
+}
+
 func FuzzProjectViewContentPlacementsAreMonotonicAcrossDensityLevels(f *testing.F) {
 	f.Add([]byte{14, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2})
 	f.Add([]byte{40, 1, 5, 9, 13, 17, 21, 25, 29, 33})
@@ -188,6 +239,18 @@ func assertConnectorSubset(t *testing.T, lower, higher map[int64]struct{}, lower
 	for id := range lower {
 		if _, ok := higher[id]; !ok {
 			t.Fatalf("density %d connector set is not a subset of density %d: missing connector %d; lower=%v higher=%v", lowerLevel, higherLevel, id, sortedIDs(lower), sortedIDs(higher))
+		}
+	}
+}
+
+func assertPlacementSetEqual(t *testing.T, left, right map[int64]struct{}, level int) {
+	t.Helper()
+	if len(left) != len(right) {
+		t.Fatalf("density %d placement sets differ: left=%v right=%v", level, sortedIDs(left), sortedIDs(right))
+	}
+	for id := range left {
+		if _, ok := right[id]; !ok {
+			t.Fatalf("density %d placement sets differ: missing element %d; left=%v right=%v", level, id, sortedIDs(left), sortedIDs(right))
 		}
 	}
 }

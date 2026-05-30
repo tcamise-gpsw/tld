@@ -785,7 +785,6 @@ function ElementPanel({
     } catch { /* intentionally empty */ }
   }
 
-  const activeNoiseGateLabel = bypassNoiseGate ? 'Bypassed' : (NOISE_GATE_STOPS.find((stop) => stop.value === draftNoiseGateLevel)?.label ?? 'Normal')
   const showNoiseGateControls = !!element && !!(onVisibilityOverrideDeltaChange || onPromoteVisibility || onDemoteVisibility || onResetVisibility)
 
   return (
