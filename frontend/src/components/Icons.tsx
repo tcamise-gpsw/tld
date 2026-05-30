@@ -33,9 +33,11 @@ export function FitViewIcon({ size = 14, strokeWidth = 2.5 }: { size?: number, s
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M7 12h10" />
-      <path d="M12 7v10" />
+      <path d="M3 8V5a2 2 0 0 1 2-2h3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M21 16v3a2 2 0 0 1-2 2h-3" />
+      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+      <rect x="8" y="8" width="8" height="8" rx="1.5" />
     </svg>
   )
 }
@@ -80,6 +82,19 @@ export function GitIcon({ size = 14, strokeWidth = 2 }: { size?: number, strokeW
       <circle cx="18" cy="6" r="3" />
       <path d="M18 9v2c0 1.1-.9 2-2 2H8a2 2 0 0 1-2-2V9" />
       <path d="M12 13V15" />
+    </svg>
+  )
+}
+
+export function MergeIcon({ size = 14, strokeWidth = 2.4 }: { size?: number, strokeWidth?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7" cy="5" r="2.5" />
+      <circle cx="7" cy="19" r="2.5" />
+      <circle cx="17" cy="19" r="2.5" />
+      <path d="M7 7.5v9" />
+      <path d="M7 7.5c0 4 3 6 10 9" />
     </svg>
   )
 }
