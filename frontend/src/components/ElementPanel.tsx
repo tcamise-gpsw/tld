@@ -1112,118 +1112,89 @@ function ElementPanel({
               </Wrap>
             </FormControl>
             {showNoiseGateControls || (isEdit && canEdit && onMerge) ? (
-              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1}>
+              <Box >
                 {showNoiseGateControls && (
                   <>
                     <HStack justify="space-between" align="center" mb={3}>
                       <Box>
                         <FormLabel fontSize="sm" fontFamily="var(--chakra-fonts-heading)" mb={0.5}>
-                          Bypass noise gate
+                          Noise Gate
                         </FormLabel>
-                        <Text fontSize="xs" color="gray.500">Keep this element visible at every density</Text>
                       </Box>
                       <Switch
                         data-testid="element-panel-bypass-noise-gate"
-                        aria-label="Bypass noise gate"
-                        isChecked={bypassNoiseGate}
+                        aria-label="Noise gate"
+                        isChecked={!bypassNoiseGate}
                         isDisabled={isReadOnly}
                         colorScheme="blue"
                         onChange={(event) => {
-                          setBypassNoiseGate(event.target.checked)
+                          setBypassNoiseGate(!event.target.checked)
                           scheduleAutoSave()
                         }}
                       />
                     </HStack>
-                    <HStack justify="space-between" align="flex-start" mb={2.5}>
-                      <Box>
-                        <FormLabel fontSize="sm" fontFamily="var(--chakra-fonts-heading)">
-                          Noise gate
-                        </FormLabel>
-                        <Text fontSize="xs" color="gray.500">Choose when this element starts appearing</Text>
-                      </Box>
-                      <Text
-                        fontSize="xs"
-                        fontWeight="bold"
-                        color="var(--accent)"
-                        bg="rgba(var(--accent-rgb), 0.10)"
-                        border="1px solid"
-                        borderColor="rgba(var(--accent-rgb), 0.18)"
-                        rounded="full"
-                        px={2}
-                        py={0.5}
-                      >
-                        {activeNoiseGateLabel}
-                      </Text>
-                    </HStack>
-                    <Box px={1} pt={1} pb={0.5} mb={isEdit && canEdit && onMerge ? 3 : 0}>
-                      <Slider
-                        aria-label="Element noise gate"
-                        min={-2}
-                        max={2}
-                        step={1}
-                        value={draftNoiseGateLevel}
-                        onChange={setDraftNoiseGateLevel}
-                        onChangeEnd={(value) => {
-                          setDraftNoiseGateLevel(value)
-                          void handleNoiseGateChange(value)
-                        }}
-                        focusThumbOnChange={false}
-                        isDisabled={isReadOnly || bypassNoiseGate}
-                      >
-                        <SliderTrack h="4px" bg="whiteAlpha.200">
-                          <SliderFilledTrack bg="var(--accent)" />
-                        </SliderTrack>
-                        {NOISE_GATE_STOPS.map((stop) => (
-                          <Box
-                            key={stop.value}
-                            position="absolute"
-                            left={`${((stop.value + 2) / 4) * 100}%`}
-                            top="50%"
-                            transform="translate(-50%, -50%)"
-                            w={stop.value === draftNoiseGateLevel ? '6px' : '2px'}
-                            h={stop.value === draftNoiseGateLevel ? '6px' : '10px'}
-                            rounded="full"
-                            bg={draftNoiseGateLevel >= stop.value ? 'var(--accent)' : 'whiteAlpha.500'}
-                            pointerEvents="none"
-                          />
-                        ))}
-                        <SliderThumb boxSize="14px" bg="white" border="2px solid" borderColor="var(--accent)" />
-                      </Slider>
-                      <HStack justify="space-between" mt={2} px={0.5}>
-                        {NOISE_GATE_STOPS.map((stop) => (
-                          <Text
-                            key={stop.value}
-                            fontSize="9px"
-                            fontWeight={stop.value === draftNoiseGateLevel ? 'bold' : 'medium'}
-                            color={stop.value === draftNoiseGateLevel ? 'whiteAlpha.900' : 'whiteAlpha.500'}
+                    {!bypassNoiseGate && (
+                      <>
+                        <HStack justify="space-between" align="flex-start" mb={2.5}>
+                          <Box>
+                            <Text fontSize="xs" color="gray.500">Choose when this element starts appearing</Text>
+                          </Box>
+                        </HStack>
+                        <Box px={1} pt={1} pb={0.5} mb={isEdit && canEdit && onMerge ? 3 : 0}>
+                          <Slider
+                            aria-label="Element noise gate"
+                            min={-2}
+                            max={2}
+                            step={1}
+                            value={draftNoiseGateLevel}
+                            onChange={setDraftNoiseGateLevel}
+                            onChangeEnd={(value) => {
+                              setDraftNoiseGateLevel(value)
+                              void handleNoiseGateChange(value)
+                            }}
+                            focusThumbOnChange={false}
+                            isDisabled={isReadOnly}
                           >
-                            {stop.label}
-                          </Text>
-                        ))}
-                      </HStack>
-                    </Box>
+                            <SliderTrack h="4px" bg="whiteAlpha.200">
+                              <SliderFilledTrack bg="var(--accent)" />
+                            </SliderTrack>
+                            {NOISE_GATE_STOPS.map((stop) => (
+                              <Box
+                                key={stop.value}
+                                position="absolute"
+                                left={`${((stop.value + 2) / 4) * 100}%`}
+                                top="50%"
+                                transform="translate(-50%, -50%)"
+                                w={stop.value === draftNoiseGateLevel ? '6px' : '2px'}
+                                h={stop.value === draftNoiseGateLevel ? '6px' : '10px'}
+                                rounded="full"
+                                bg={draftNoiseGateLevel >= stop.value ? 'var(--accent)' : 'whiteAlpha.500'}
+                                pointerEvents="none"
+                              />
+                            ))}
+                            <SliderThumb boxSize="14px" bg="white" border="2px solid" borderColor="var(--accent)" />
+                          </Slider>
+                          <HStack justify="space-between" mt={2} px={0.5}>
+                            {NOISE_GATE_STOPS.map((stop) => (
+                              <Text
+                                key={stop.value}
+                                fontSize="9px"
+                                fontWeight={stop.value === draftNoiseGateLevel ? 'bold' : 'medium'}
+                                color={stop.value === draftNoiseGateLevel ? 'whiteAlpha.900' : 'whiteAlpha.500'}
+                              >
+                                {stop.label}
+                              </Text>
+                            ))}
+                          </HStack>
+                        </Box>
+                      </>
+                    )}
                   </>
                 )}
 
               </Box>
             ) : null}
-            <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1}>
-              {isEdit && canEdit && onMerge && (
-                <Button
-                  data-testid="element-panel-merge"
-                  variant="outline"
-                  size="sm"
-                  borderColor="teal.700"
-                  color="teal.300"
-                  _hover={{ bg: 'teal.900', borderColor: 'teal.500', color: 'teal.100' }}
-                  onClick={() => onMerge(element.id)}
-                  w="full"
-                >
-                  Merge
-                </Button>
-              )}
 
-            </Box>
             {isEdit && element && (
               <GitSourceLinker
                 element={element}
@@ -1239,8 +1210,8 @@ function ElementPanel({
             )}
 
             {isEdit && (links.length > 0 || parentLinks.length > 0) && (
-              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={3}>
-                <FormLabel fontSize="xs" fontWeight="bold" color="gray.400" mb={2}>DRILL DOWN</FormLabel>
+              <Box>
+                <FormLabel fontSize="sm" fontWeight="bold" color="gray.400" mb={2}>Drill Down</FormLabel>
                 <VStack align="stretch" spacing={2}>
                   {parentLinks.map((link: ViewConnector) => (
                     <HStack
@@ -1300,7 +1271,23 @@ function ElementPanel({
             {elementPanelAfterContentSlot}
 
 
+            <Box>
+              {isEdit && canEdit && onMerge && (
+                <Button
+                  data-testid="element-panel-merge"
+                  variant="outline"
+                  size="sm"
+                  borderColor="teal.700"
+                  color="teal.300"
+                  _hover={{ bg: 'teal.900', borderColor: 'teal.500', color: 'teal.100' }}
+                  onClick={() => onMerge(element.id)}
+                  w="full"
+                >
+                  Merge
+                </Button>
+              )}
 
+            </Box>
             {isEdit && canEdit && (
               <HStack borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1} spacing={2}>
                 {viewId != null && (

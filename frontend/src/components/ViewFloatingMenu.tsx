@@ -285,7 +285,7 @@ function ViewFloatingMenu({
                         >
                           <HStack justify="space-between" mb={2.5}>
                             <Box>
-                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Noise gate</Text>
+                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Noise Gate</Text>
                               <Text fontSize="10px" color="whiteAlpha.600">Control how much detail is shown</Text>
                             </Box>
                             <Text

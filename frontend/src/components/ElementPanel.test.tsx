@@ -151,7 +151,7 @@ describe('ElementPanel bypass noise gate', () => {
     vi.useRealTimers()
   })
 
-  it('autosaves the bypass flag and disables the noise gate slider while bypassed', async () => {
+  it('autosaves the bypass flag and hides the noise gate slider while bypassed', async () => {
     const onSave = vi.fn()
     let renderer: ReturnType<typeof create>
     await act(async () => {
@@ -168,9 +168,13 @@ describe('ElementPanel bypass noise gate', () => {
       await Promise.resolve()
     })
 
+    expect(renderer!.root.findByProps({ 'aria-label': 'Element noise gate' }).props.isDisabled).toBe(false)
+
     const bypassToggle = renderer!.root.findByProps({ 'data-testid': 'element-panel-bypass-noise-gate' })
+    expect(bypassToggle.props.isChecked).toBe(true)
+
     await act(async () => {
-      bypassToggle.props.onChange({ target: { checked: true } })
+      bypassToggle.props.onChange({ target: { checked: false } })
     })
     await act(async () => {
       vi.runAllTimers()
@@ -179,6 +183,6 @@ describe('ElementPanel bypass noise gate', () => {
 
     expect(apiMocks.updateElement).toHaveBeenCalledWith(10, expect.objectContaining({ bypass_noise_gate: true }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ bypass_noise_gate: true }))
-    expect(renderer!.root.findByProps({ 'aria-label': 'Element noise gate' }).props.isDisabled).toBe(true)
+    expect(renderer!.root.findAllByProps({ 'aria-label': 'Element noise gate' })).toHaveLength(0)
   })
 })
