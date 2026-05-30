@@ -20,7 +20,7 @@ import type { SelectionAlign, SelectionDistribute } from '../selection'
 
 function AlignIcon({ kind }: { kind: SelectionAlign | SelectionDistribute }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
       {(() => {
         switch (kind) {
           case 'left': return (
@@ -112,6 +112,9 @@ function ToolbarIconButton({
         h="28px"
         minW="28px"
         px={0}
+        display="inline-flex"
+        alignItems="center"
+        justifyContent="center"
         color={color ?? 'gray.300'}
         _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: color ?? 'var(--accent)' }}
         onClick={onClick}
@@ -211,7 +214,7 @@ export default function SelectionBulkBar({
             aria-label="Bulk tags"
           >
             <HStack spacing={1.5}>
-              <TagsIcon />
+              <TagsIcon size={15} />
               <Text fontSize="11px">Tags</Text>
             </HStack>
           </Button>
@@ -265,7 +268,7 @@ export default function SelectionBulkBar({
               isDisabled={mergeLoadingId !== null}
             >
               <HStack spacing={1.5}>
-                <MergeIcon size={13} />
+                <MergeIcon size={15} />
                 <Text fontSize="11px">Merge</Text>
               </HStack>
             </Button>
@@ -315,10 +318,10 @@ export default function SelectionBulkBar({
       )}
 
       <ToolbarIconButton testId="selection-bulk-fit" label="Fit selection" onClick={onFitSelection}>
-        <FitViewIcon size={14} />
+        <FitViewIcon size={16} />
       </ToolbarIconButton>
       <ToolbarIconButton testId="selection-bulk-remove" label="Remove from view" onClick={onRemoveFromView} color="red.300">
-        <TrashIcon size={13} />
+        <TrashIcon size={15} />
       </ToolbarIconButton>
     </HStack>
   )
