@@ -4,8 +4,6 @@ import type { ZUITransitionRebase } from './layoutEngine'
 import {
   getCameraRebase,
   isVisible,
-  screenToWorldX,
-  screenToWorldY,
 } from './layoutEngine'
 import {
   DEFAULT_SOURCE_HANDLE_SIDE,
@@ -465,40 +463,41 @@ function drawGrid(
   canvasW: number,
   canvasH: number,
 ): void {
-  const rebase = getCameraRebase(view, canvasW, canvasH)
+  const gridSize = 24
+  const dotSize = 1.0
 
-  const topLeftWorldX = screenToWorldX(0, rebase.view)
-  const topLeftWorldY = screenToWorldY(0, rebase.view)
-  const bottomRightWorldX = screenToWorldX(canvasW, rebase.view)
-  const bottomRightWorldY = screenToWorldY(canvasH, rebase.view)
-
-  const dotSize = clamp(1.2 / rebase.view.zoom, 1, 2.5)
-  const gridSize = Math.max(
-    20,
-    clamp(canvasW / 10, 20, 80),
-  )
-  const step = gridSize / rebase.view.zoom
-
-  const startX = Math.floor(topLeftWorldX / step) * step
-  const startY = Math.floor(topLeftWorldY / step) * step
-  const right = Math.ceil(bottomRightWorldX / step) * step
-  const bottom = Math.ceil(bottomRightWorldY / step) * step
+  // Calculate screen-space offsets using camera translation.
+  // Since we want the grid to shift when panning but ignore zoom,
+  // we shift by view.x and view.y modulo the gridSize.
+  const offsetX = ((view.x % gridSize) + gridSize) % gridSize
+  const offsetY = ((view.y % gridSize) + gridSize) % gridSize
 
   ctx.save()
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)'
 
-  if (view.zoom > 0.2) {
-    for (let wx = startX; wx < right; wx += step) {
-      for (let wy = startY; wy < bottom; wy += step) {
-        const sx = (wx - rebase.originX) * rebase.view.zoom + rebase.view.x
-        const sy = (wy - rebase.originY) * rebase.view.zoom + rebase.view.y
+  // Use a passive/subtle dot color based on the canvas background brightness
+  const { canvasBg } = getThemeVars()
+  const isLight = (() => {
+    if (canvasBg && canvasBg.startsWith('#') && canvasBg.length === 7) {
+      const r = parseInt(canvasBg.slice(1, 3), 16)
+      const g = parseInt(canvasBg.slice(3, 5), 16)
+      const b = parseInt(canvasBg.slice(5, 7), 16)
+      const brightness = (r * 299 + g * 587 + b * 114) / 1000
+      return brightness > 128
+    }
+    return false
+  })()
 
-        ctx.beginPath()
-        ctx.arc(sx, sy, dotSize, 0, Math.PI * 2)
-        ctx.fill()
-      }
+  ctx.fillStyle = isLight ? 'rgba(0, 0, 0, 0.06)' : 'rgba(255, 255, 255, 0.06)'
+
+  // Batch draw the dot grid in a single compound path to optimize canvas drawing performance.
+  ctx.beginPath()
+  for (let sx = offsetX - gridSize; sx < canvasW + gridSize; sx += gridSize) {
+    for (let sy = offsetY - gridSize; sy < canvasH + gridSize; sy += gridSize) {
+      ctx.moveTo(sx + dotSize, sy)
+      ctx.arc(sx, sy, dotSize, 0, Math.PI * 2)
     }
   }
+  ctx.fill()
   ctx.restore()
 }
 
