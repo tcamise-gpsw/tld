@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState } from 'react'
 import { useReactFlow } from 'reactflow'
 import { ACCENT_DEFAULT } from '../constants/colors'
+import { getDrawingPathData, pointFromPointerEvent } from './DrawingCanvas.freehand'
 
-export type DrawingPoint = { x: number; y: number }
+export type DrawingPoint = { x: number; y: number; pressure?: number }
 
 export type DrawingPath = {
   id: string
@@ -62,43 +63,17 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
   const modeRef = useRef(mode)
   const currentPathRef = useRef<DrawingPoint[]>([])
   const isPointerDownRef = useRef(false)
+  const activePointerIdRef = useRef<number | null>(null)
   const dragStartRef = useRef<{ x: number, y: number } | null>(null)
   const pathCloneRef = useRef<DrawingPath | null>(null)
+  const devicePixelRatioRef = useRef(1)
+  const redrawFrameRef = useRef<number | null>(null)
 
   useEffect(() => { pathsRef.current = paths }, [paths])
   useEffect(() => { isVisibleRef.current = isVisible }, [isVisible])
   useEffect(() => { strokeColorRef.current = strokeColor }, [strokeColor])
   useEffect(() => { strokeWidthRef.current = strokeWidth }, [strokeWidth])
   useEffect(() => { modeRef.current = mode }, [mode])
-
-  // Helper: Draw a smooth Catmull-Rom spline on a canvas context
-  const drawSpline = useCallback((ctx: CanvasRenderingContext2D, points: DrawingPoint[], tension = 0.5) => {
-    if (points.length < 2) return
-
-    ctx.beginPath()
-    ctx.moveTo(points[0].x, points[0].y)
-
-    if (points.length === 2) {
-      ctx.lineTo(points[1].x, points[1].y)
-      ctx.stroke()
-      return
-    }
-
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = i > 0 ? points[i - 1] : points[i]
-      const p1 = points[i]
-      const p2 = points[i + 1]
-      const p3 = i < points.length - 2 ? points[i + 2] : p2
-
-      const cp1x = p1.x + (p2.x - p0.x) / 6 * tension
-      const cp1y = p1.y + (p2.y - p0.y) / 6 * tension
-      const cp2x = p2.x - (p3.x - p1.x) / 6 * tension
-      const cp2y = p2.y - (p3.y - p1.y) / 6 * tension
-
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
-    }
-    ctx.stroke()
-  }, [])
 
   const getPathBounds = (path: DrawingPath) => {
     if (path.points.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 }
@@ -113,8 +88,23 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
     return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad }
   }
 
+  const drawInkPath = useCallback((ctx: CanvasRenderingContext2D, points: DrawingPoint[], color: string, width: number, last: boolean) => {
+    const pathData = getDrawingPathData(points, width, last)
+    ctx.fillStyle = color
+    if (pathData) {
+      ctx.fill(new Path2D(pathData))
+      return
+    }
+
+    if (points.length === 1) {
+      ctx.beginPath()
+      ctx.arc(points[0].x, points[0].y, width / 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }, [])
+
   // ── Redraw all committed paths ────────────────────────────────────────────
-  const redraw = useCallback(() => {
+  const redrawNow = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
@@ -123,12 +113,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
     const vp = viewportRef.current
     const committed = pathsRef.current
     const visible = isVisibleRef.current
+    const dpr = devicePixelRatioRef.current
 
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     if (!visible) return
 
     ctx.save()
-    ctx.setTransform(vp.zoom, 0, 0, vp.zoom, vp.x, vp.y)
+    ctx.setTransform(dpr * vp.zoom, 0, 0, dpr * vp.zoom, dpr * vp.x, dpr * vp.y)
 
     for (const path of committed) {
       if (path.points.length === 0) continue
@@ -139,19 +131,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
         ctx.textBaseline = 'middle'
         ctx.fillText(path.text, path.points[0].x, path.points[0].y)
       } else {
-        ctx.strokeStyle = path.color
-        ctx.lineWidth = path.width
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-
-        if (path.points.length === 1) {
-          ctx.beginPath()
-          ctx.arc(path.points[0].x, path.points[0].y, path.width / 2, 0, Math.PI * 2)
-          ctx.fillStyle = path.color
-          ctx.fill()
-        } else {
-          drawSpline(ctx, path.points)
-        }
+        drawInkPath(ctx, path.points, path.color, path.width, true)
       }
 
       // Selection halo
@@ -168,58 +148,76 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
     // Active drawing path
     const activePts = currentPathRef.current
     if (activePts.length > 0) {
-      ctx.strokeStyle = strokeColorRef.current
-      ctx.lineWidth = strokeWidthRef.current
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-      if (activePts.length === 1) {
-        ctx.beginPath()
-        ctx.arc(activePts[0].x, activePts[0].y, strokeWidthRef.current / 2, 0, Math.PI * 2)
-        ctx.fillStyle = strokeColorRef.current
-        ctx.fill()
-      } else {
-        drawSpline(ctx, activePts)
-      }
+      drawInkPath(ctx, activePts, strokeColorRef.current, strokeWidthRef.current, false)
     }
 
     ctx.restore()
-  }, [selectedPathId, drawSpline])
+  }, [selectedPathId, drawInkPath])
+
+  const scheduleRedraw = useCallback(() => {
+    if (redrawFrameRef.current !== null) return
+    redrawFrameRef.current = window.requestAnimationFrame(() => {
+      redrawFrameRef.current = null
+      redrawNow()
+    })
+  }, [redrawNow])
 
   useImperativeHandle(ref, () => ({
     notifyViewportChange(vp) {
       viewportRef.current = vp
-      redraw()
+      scheduleRedraw()
     },
-  }), [redraw])
+  }), [scheduleRedraw])
 
   useEffect(() => {
-    redraw()
-  }, [paths, isVisible, redraw])
+    scheduleRedraw()
+  }, [paths, isVisible, scheduleRedraw])
 
   useEffect(() => {
     const canvas = canvasRef.current
     const parent = canvas?.parentElement
     if (!canvas || !parent) return
 
-    const ro = new ResizeObserver(() => {
+    const resizeCanvas = () => {
       const rect = parent.getBoundingClientRect()
-      canvas.width = Math.round(rect.width)
-      canvas.height = Math.round(rect.height)
-      redraw()
-    })
+      const dpr = Math.max(1, window.devicePixelRatio || 1)
+      devicePixelRatioRef.current = dpr
+      canvas.width = Math.max(1, Math.round(rect.width * dpr))
+      canvas.height = Math.max(1, Math.round(rect.height * dpr))
+      scheduleRedraw()
+    }
+
+    const ro = new ResizeObserver(resizeCanvas)
     ro.observe(parent)
+    resizeCanvas()
 
-    const rect = parent.getBoundingClientRect()
-    canvas.width = Math.round(rect.width)
-    canvas.height = Math.round(rect.height)
-
-    return () => ro.disconnect()
-  }, [redraw])
+    return () => {
+      ro.disconnect()
+      if (redrawFrameRef.current !== null) {
+        window.cancelAnimationFrame(redrawFrameRef.current)
+        redrawFrameRef.current = null
+      }
+    }
+  }, [scheduleRedraw])
 
   const screenToFlow = useCallback((sx: number, sy: number): DrawingPoint => {
     const { x, y, zoom } = viewportRef.current
     return { x: (sx - x) / zoom, y: (sy - y) / zoom }
   }, [])
+
+  const clientToFlowPoint = useCallback((canvas: HTMLCanvasElement, clientX: number, clientY: number): DrawingPoint => {
+    const rect = canvas.getBoundingClientRect()
+    return screenToFlow(clientX - rect.left, clientY - rect.top)
+  }, [screenToFlow])
+
+  const getPointerFlowPoints = useCallback((e: React.PointerEvent<HTMLCanvasElement>, canvas: HTMLCanvasElement): DrawingPoint[] => {
+    const nativeEvent = e.nativeEvent
+    const coalesced = typeof nativeEvent.getCoalescedEvents === 'function'
+      ? nativeEvent.getCoalescedEvents()
+      : []
+    const events = coalesced.length > 0 ? coalesced : [nativeEvent]
+    return events.map((event) => pointFromPointerEvent(event, (clientX, clientY) => clientToFlowPoint(canvas, clientX, clientY)))
+  }, [clientToFlowPoint])
 
   function distToSegment(p: DrawingPoint, v: DrawingPoint, w: DrawingPoint) {
     const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2)
@@ -250,12 +248,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
 
     const canvas = canvasRef.current
     if (!canvas) return
-    canvas.setPointerCapture(e.pointerId)
 
     const rect = canvas.getBoundingClientRect()
     const flowPt = screenToFlow(e.clientX - rect.left, e.clientY - rect.top)
 
     if (modeRef.current === 'eraser') {
+      canvas.setPointerCapture(e.pointerId)
+      activePointerIdRef.current = e.pointerId
       isPointerDownRef.current = true
       const hit = findPathAt(flowPt)
       if (hit && onPathDelete) onPathDelete(hit.id)
@@ -265,6 +264,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
     if (modeRef.current === 'select') {
       const hit = findPathAt(flowPt)
       if (hit) {
+        canvas.setPointerCapture(e.pointerId)
+        activePointerIdRef.current = e.pointerId
         setSelectedPathId(hit.id)
         isPointerDownRef.current = true
         dragStartRef.current = flowPt
@@ -280,9 +281,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
       return
     }
 
+    canvas.setPointerCapture(e.pointerId)
+    activePointerIdRef.current = e.pointerId
     isPointerDownRef.current = true
-    currentPathRef.current = [flowPt]
-  }, [isDrawing, screenToFlow, findPathAt, onPathDelete, onTextPositionSelected])
+    currentPathRef.current = getPointerFlowPoints(e, canvas)
+    scheduleRedraw()
+  }, [isDrawing, screenToFlow, findPathAt, onPathDelete, onTextPositionSelected, getPointerFlowPoints, scheduleRedraw])
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing || !isPointerDownRef.current) return
@@ -290,8 +294,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
 
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
 
     const rect = canvas.getBoundingClientRect()
     const flowPt = screenToFlow(e.clientX - rect.left, e.clientY - rect.top)
@@ -305,27 +307,32 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
     if (modeRef.current === 'select' && selectedPathId && dragStartRef.current && pathCloneRef.current) {
       const dx = flowPt.x - dragStartRef.current.x
       const dy = flowPt.y - dragStartRef.current.y
-      
+
       const updatedPath = {
         ...pathCloneRef.current,
-        points: pathCloneRef.current.points.map(p => ({ x: p.x + dx, y: p.y + dy }))
+        points: pathCloneRef.current.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy }))
       }
-      
+
       // Local update for smoothness
       pathsRef.current = pathsRef.current.map(p => p.id === selectedPathId ? updatedPath : p)
-      redraw()
+      scheduleRedraw()
       return
     }
 
     if (modeRef.current === 'pencil') {
-      currentPathRef.current.push(flowPt)
-      redraw()
+      currentPathRef.current.push(...getPointerFlowPoints(e, canvas))
+      scheduleRedraw()
     }
-  }, [isDrawing, screenToFlow, redraw, selectedPathId, findPathAt, onPathDelete])
+  }, [isDrawing, screenToFlow, scheduleRedraw, selectedPathId, findPathAt, onPathDelete, getPointerFlowPoints])
 
-  const onPointerUp = useCallback(() => {
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isPointerDownRef.current) return
     isPointerDownRef.current = false
+    const canvas = canvasRef.current
+    if (canvas && activePointerIdRef.current !== null && canvas.hasPointerCapture(activePointerIdRef.current)) {
+      canvas.releasePointerCapture(activePointerIdRef.current)
+    }
+    activePointerIdRef.current = null
 
     if (modeRef.current === 'select' && selectedPathId) {
       const finalPath = pathsRef.current.find(p => p.id === selectedPathId)
@@ -333,6 +340,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
       dragStartRef.current = null
       pathCloneRef.current = null
       return
+    }
+
+    if (modeRef.current === 'pencil' && canvas) {
+      currentPathRef.current.push(...getPointerFlowPoints(e, canvas))
     }
 
     const pts = [...currentPathRef.current]
@@ -346,7 +357,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
         width: strokeWidthRef.current,
       })
     }
-  }, [onPathComplete, onPathUpdate, selectedPathId])
+    scheduleRedraw()
+  }, [onPathComplete, onPathUpdate, selectedPathId, getPointerFlowPoints, scheduleRedraw])
 
   // Delete key handler
   useEffect(() => {
@@ -365,6 +377,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
     <canvas
       data-testid="drawing-canvas"
       data-path-count={paths.length}
+      data-pressure-point-count={paths.reduce((count, path) => count + path.points.filter((point) => typeof point.pressure === 'number').length, 0)}
       data-drawing-tool={mode}
       data-drawing-visible={isVisible ? 'true' : 'false'}
       ref={canvasRef}
@@ -376,13 +389,17 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(functi
         height: '100%',
         pointerEvents: isDrawing ? 'auto' : 'none',
         cursor: isDrawing ? (
-          mode === 'text' ? 'text' : 
+          mode === 'text' ? 'text' :
           mode === 'eraser' ? 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E%3Cpath d=\'M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 13L17 10L10 17L13 20\'/%3E%3C/svg%3E") 6 18, auto' :
           mode === 'select' ? 'move' : 'crosshair'
         ) : 'default',
         opacity: isVisible ? 1 : 0,
         transition: 'opacity 0.15s ease',
         zIndex: 10,
+        touchAction: 'none',
+        userSelect: 'none',
+        overscrollBehavior: 'none',
+        WebkitUserSelect: 'none',
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

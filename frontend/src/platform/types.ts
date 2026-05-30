@@ -40,7 +40,7 @@ export interface RealtimeViewport {
 
 export interface RealtimeDrawing {
   path_id?: string
-  points?: { x: number; y: number }[]
+  points?: { x: number; y: number; pressure?: number }[]
   color?: string
   width?: number
   text?: string
@@ -142,7 +142,7 @@ export interface ViewRealtimeConnection {
   sendSelection: (elementId: number | null, connectorId: number | null) => void
   sendViewport: (x: number, y: number, zoom: number) => void
   sendCanvasVisibility: (activeTags: string[], hiddenLayerTags: string[]) => void
-  sendDrawing: (pathId: string, points: { x: number; y: number }[], color: string, width: number, text?: string, fontSize?: number) => void
+  sendDrawing: (pathId: string, points: { x: number; y: number; pressure?: number }[], color: string, width: number, text?: string, fontSize?: number) => void
   sendDrawingDelete: (pathId: string) => void
   sendCRDTElementPosition: (elementId: number, x: number, y: number, clock: number) => void
   sendCRDTConnectorUpsert: (connector: unknown, clock: number) => void
