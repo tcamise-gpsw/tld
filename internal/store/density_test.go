@@ -94,7 +94,7 @@ func TestDensityValidationAndOverrideClamping(t *testing.T) {
 	}
 }
 
-func TestInitializeViewNoiseGateEnablesElementsAndCreatesMissingOverrides(t *testing.T) {
+func TestInitializeViewNoiseGatePreservesConfiguredBypassesAndCreatesMissingOverrides(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	seedDensityView(t, sqliteStore)
 	ctx := context.Background()
@@ -110,16 +110,16 @@ func TestInitializeViewNoiseGateEnablesElementsAndCreatesMissingOverrides(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.DensityLevel != 0 || result.ElementsEnabled != 6 || result.OverridesCreated != 5 {
-		t.Fatalf("initialization result = %+v, want density 0, 6 enabled, 5 new overrides", result)
+	if result.DensityLevel != 0 || result.ElementsEnabled != 0 || result.OverridesCreated != 5 {
+		t.Fatalf("initialization result = %+v, want density 0, 0 enabled, 5 new overrides", result)
 	}
 
 	var bypassed int
 	if err := sqliteStore.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM elements WHERE id BETWEEN 101 AND 106 AND bypass_noise_gate = 1`).Scan(&bypassed); err != nil {
 		t.Fatal(err)
 	}
-	if bypassed != 0 {
-		t.Fatalf("bypassed placed elements = %d, want 0", bypassed)
+	if bypassed != 2 {
+		t.Fatalf("bypassed placed elements = %d, want 2", bypassed)
 	}
 	storedLevel, err := sqliteStore.ViewDensityLevel(ctx, 1)
 	if err != nil {
@@ -150,6 +150,42 @@ func TestInitializeViewNoiseGateEnablesElementsAndCreatesMissingOverrides(t *tes
 	}
 	if second.OverridesCreated != 0 || second.DensityLevel != -1 {
 		t.Fatalf("second initialization result = %+v, want idempotent overrides and density -1", second)
+	}
+}
+
+func TestInitializeViewNoiseGatePreservesExplicitBypassOnReenable(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	level := 0
+	first, err := sqliteStore.InitializeViewNoiseGate(ctx, 1, &level)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ElementsEnabled != 6 || first.OverridesCreated != 6 {
+		t.Fatalf("first initialization result = %+v, want 6 enabled and 6 new overrides", first)
+	}
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 1 WHERE id = 106`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	second, err := sqliteStore.InitializeViewNoiseGate(ctx, 1, &level)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ElementsEnabled != 0 || second.OverridesCreated != 0 {
+		t.Fatalf("second initialization result = %+v, want no element enablement or new overrides", second)
+	}
+
+	var bypassed bool
+	if err := sqliteStore.DB().QueryRowContext(ctx, `SELECT bypass_noise_gate FROM elements WHERE id = 106`).Scan(&bypassed); err != nil {
+		t.Fatal(err)
+	}
+	if !bypassed {
+		t.Fatal("element 106 bypass_noise_gate was reset after re-enabling the view noise gate")
 	}
 }
 

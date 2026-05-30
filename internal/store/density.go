@@ -109,6 +109,11 @@ func (s *SQLiteStore) InitializeViewNoiseGate(ctx context.Context, viewID int64,
 			existingElementOverrides[override.ResourceID] = struct{}{}
 		}
 	}
+	enableElements := len(overrides) == 0
+	elementsEnabled := 0
+	if enableElements {
+		elementsEnabled = len(elementIDs)
+	}
 
 	now := nowString()
 	newOverrides := make([]visibilityOverrideModel, 0, len(elementIDs))
@@ -139,7 +144,7 @@ func (s *SQLiteStore) InitializeViewNoiseGate(ctx context.Context, viewID int64,
 			Exec(ctx); err != nil {
 			return err
 		}
-		if len(elementIDs) > 0 {
+		if enableElements && len(elementIDs) > 0 {
 			if _, err := tx.NewUpdate().
 				Table("elements").
 				Set("bypass_noise_gate = ?", false).
@@ -165,7 +170,7 @@ func (s *SQLiteStore) InitializeViewNoiseGate(ctx context.Context, viewID int64,
 	return NoiseGateInitialization{
 		ViewID:           viewID,
 		DensityLevel:     targetLevel,
-		ElementsEnabled:  len(elementIDs),
+		ElementsEnabled:  elementsEnabled,
 		OverridesCreated: len(newOverrides),
 	}, nil
 }
