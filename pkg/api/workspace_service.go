@@ -469,7 +469,9 @@ func (s *WorkspaceService) GetWorkspace(
 				Id: p.Id, ViewId: p.ViewId, ElementId: p.ElementId,
 				PositionX: p.PositionX, PositionY: p.PositionY,
 				Name: p.Name, Kind: p.Kind, Tags: p.Tags,
-				Description: p.Description, Technology: p.Technology,
+				HasView: p.HasView, ViewLabel: p.ViewLabel,
+				BypassNoiseGate: p.BypassNoiseGate,
+				Description:     p.Description, Technology: p.Technology,
 				Url: p.Url, LogoUrl: p.LogoUrl, TechnologyLinks: p.TechnologyLinks,
 				Repo: p.Repo, Branch: p.Branch, Language: p.Language, FilePath: p.FilePath,
 			})

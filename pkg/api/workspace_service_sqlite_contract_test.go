@@ -259,6 +259,66 @@ func TestWorkspaceServiceSQLiteElementBypassNoiseGateCreateAndUpdate(t *testing.
 	}
 }
 
+func TestWorkspaceServiceSQLiteGetWorkspaceContentPreservesPlacementBypassNoiseGate(t *testing.T) {
+	ctx := context.Background()
+	orgID := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	client := newSQLiteWorkspaceClient(t)
+
+	view, err := client.CreateView(ctx, connect.NewRequest(&diagv1.CreateViewRequest{
+		OrgId: orgID.String(),
+		Name:  "Workspace Content",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	element, err := client.CreateElement(ctx, connect.NewRequest(&diagv1.CreateElementRequest{
+		Name: "Bypassed Element",
+		Kind: ptr("service"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	if _, err := client.UpdateElement(ctx, connect.NewRequest(&diagv1.UpdateElementRequest{
+		ElementId:       element.Msg.GetElement().GetId(),
+		Name:            element.Msg.GetElement().GetName(),
+		Kind:            element.Msg.GetElement().Kind,
+		BypassNoiseGate: &enabled,
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CreatePlacement(ctx, connect.NewRequest(&diagv1.CreatePlacementRequest{
+		ViewId:    view.Msg.GetView().GetId(),
+		ElementId: element.Msg.GetElement().GetId(),
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	reloadedView, err := client.GetView(ctx, connect.NewRequest(&diagv1.GetViewRequest{
+		ViewId:         view.Msg.GetView().GetId(),
+		IncludeContent: true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewPlacements := reloadedView.Msg.GetContent().GetPlacements()
+	if len(viewPlacements) != 1 || !viewPlacements[0].GetBypassNoiseGate() {
+		t.Fatalf("GetView placement bypass_noise_gate = %+v, want true", viewPlacements)
+	}
+
+	workspace, err := client.GetWorkspace(ctx, connect.NewRequest(&diagv1.GetWorkspaceRequest{
+		OrgId:          orgID.String(),
+		IncludeContent: true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspacePlacements := workspace.Msg.GetContent()[view.Msg.GetView().GetId()].GetPlacements()
+	if len(workspacePlacements) != 1 || !workspacePlacements[0].GetBypassNoiseGate() {
+		t.Fatalf("GetWorkspace placement bypass_noise_gate = %+v, want true", workspacePlacements)
+	}
+}
+
 func TestWorkspaceServiceSQLiteGetViewHonorsElementOverrideThreshold(t *testing.T) {
 	for _, tt := range []struct {
 		name           string
