@@ -951,6 +951,54 @@ func helper() {}
 	}
 }
 
+func TestRepresentNewElementsBypassNoiseGateAndRerunPreservesUserToggle(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", `package main
+
+func Main() {}
+`)
+
+	store := NewStore(db)
+	scan, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+		t.Fatal(err)
+	}
+	mainID := elementIDByName(t, db, "Main")
+	if !elementBypassesNoiseGate(t, db, mainID) {
+		t.Fatal("new watch materialized element should bypass noise gate")
+	}
+
+	if _, err := db.Exec(`UPDATE elements SET bypass_noise_gate = 0 WHERE id = ?`, mainID); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, repo, "main.go", `package main
+
+func Main() {
+	helper()
+}
+
+func helper() {}
+`)
+	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+		t.Fatal(err)
+	}
+	if elementBypassesNoiseGate(t, db, mainID) {
+		t.Fatal("watch rerun should preserve a user-disabled bypass flag on existing elements")
+	}
+	helperID := elementIDByName(t, db, "helper")
+	if !elementBypassesNoiseGate(t, db, helperID) {
+		t.Fatal("new watch materialized elements should continue to bypass noise gate")
+	}
+}
+
 func TestRepresentPreservesDirtyElementButAddsNewConnector(t *testing.T) {
 	db := openTestDB(t)
 	defer func() { _ = db.Close() }()
@@ -5339,6 +5387,15 @@ func elementIDByName(t *testing.T, db *sql.DB, name string) int64 {
 		t.Fatalf("find element %s: %v", name, err)
 	}
 	return id
+}
+
+func elementBypassesNoiseGate(t *testing.T, db *sql.DB, id int64) bool {
+	t.Helper()
+	var bypass bool
+	if err := db.QueryRow(`SELECT bypass_noise_gate FROM elements WHERE id = ?`, id).Scan(&bypass); err != nil {
+		t.Fatal(err)
+	}
+	return bypass
 }
 
 func elementNameExists(t *testing.T, db *sql.DB, name string) bool {

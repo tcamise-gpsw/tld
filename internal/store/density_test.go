@@ -73,14 +73,112 @@ func TestDensityValidationAndOverrideClamping(t *testing.T) {
 		t.Fatal(err)
 	}
 	if override.LevelDelta != 0 {
-		t.Fatalf("reset delta = %d, want 0", override.LevelDelta)
+		t.Fatalf("normal gate delta = %d, want 0", override.LevelDelta)
 	}
 	overrides, err := sqliteStore.VisibilityOverrides(ctx, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(overrides) != 1 {
+		t.Fatalf("overrides after normal gate = %v, want one explicit override", overrides)
+	}
+	if err := sqliteStore.DeleteVisibilityOverride(ctx, 1, "element", 1); err != nil {
+		t.Fatal(err)
+	}
+	overrides, err = sqliteStore.VisibilityOverrides(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(overrides) != 0 {
 		t.Fatalf("overrides after reset = %v, want none", overrides)
+	}
+}
+
+func TestInitializeViewNoiseGateEnablesElementsAndCreatesMissingOverrides(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 1 WHERE id IN (105, 106)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqliteStore.SetVisibilityOverride(ctx, 1, "element", 102, -2); err != nil {
+		t.Fatal(err)
+	}
+	level := 0
+	result, err := sqliteStore.InitializeViewNoiseGate(ctx, 1, &level)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DensityLevel != 0 || result.ElementsEnabled != 6 || result.OverridesCreated != 5 {
+		t.Fatalf("initialization result = %+v, want density 0, 6 enabled, 5 new overrides", result)
+	}
+
+	var bypassed int
+	if err := sqliteStore.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM elements WHERE id BETWEEN 101 AND 106 AND bypass_noise_gate = 1`).Scan(&bypassed); err != nil {
+		t.Fatal(err)
+	}
+	if bypassed != 0 {
+		t.Fatalf("bypassed placed elements = %d, want 0", bypassed)
+	}
+	storedLevel, err := sqliteStore.ViewDensityLevel(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedLevel != 0 {
+		t.Fatalf("stored density = %d, want 0", storedLevel)
+	}
+
+	overrides, err := sqliteStore.VisibilityOverrides(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overrides) != 6 {
+		t.Fatalf("overrides = %v, want one per placed element", overrides)
+	}
+	if delta := densityOverrideDelta(overrides, 102); delta != -2 {
+		t.Fatalf("existing override delta for 102 = %d, want preserved -2", delta)
+	}
+	if delta := densityOverrideDelta(overrides, 106); delta != 1 {
+		t.Fatalf("inferred override delta for 106 = %d, want 1", delta)
+	}
+
+	level = -1
+	second, err := sqliteStore.InitializeViewNoiseGate(ctx, 1, &level)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.OverridesCreated != 0 || second.DensityLevel != -1 {
+		t.Fatalf("second initialization result = %+v, want idempotent overrides and density -1", second)
+	}
+}
+
+func TestInitializeViewNoiseGateProjectionUsesInferredLevels(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	level := -2
+	if _, err := sqliteStore.InitializeViewNoiseGate(ctx, 1, &level); err != nil {
+		t.Fatal(err)
+	}
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPlacement(content.Placements, 106) {
+		t.Fatal("element 106 should be hidden at quiet density after initialization")
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -1); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 106) {
+		t.Fatal("element 106 should be visible at its inferred lean density")
 	}
 }
 
@@ -115,7 +213,65 @@ func TestDensityProjectionPromotedConnectorPullsEndpoints(t *testing.T) {
 	}
 }
 
-func TestFullDensityKeepsSingleDemotionsVisible(t *testing.T) {
+func TestDensityProjectionBypassNoiseGateDoesNotConsumeElementCap(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 1 WHERE id = 106`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -2); err != nil {
+		t.Fatal(err)
+	}
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content.Placements) != 5 {
+		t.Fatalf("compact placements = %d, want cap 4 plus bypass element; ids=%v", len(content.Placements), placementIDs(content.Placements))
+	}
+	if !containsPlacement(content.Placements, 106) {
+		t.Fatalf("bypass element missing from compact projection: ids=%v", placementIDs(content.Placements))
+	}
+}
+
+func TestDensityProjectionBypassNoiseGateIgnoresOverrideUntilDisabled(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 1 WHERE id = 106`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqliteStore.SetVisibilityOverride(ctx, 1, "element", 106, -2); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -2); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 106) {
+		t.Fatal("bypass element should ignore its element visibility override")
+	}
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 0 WHERE id = 106`); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPlacement(content.Placements, 106) {
+		t.Fatal("element visibility override should apply again when bypass is disabled")
+	}
+}
+
+func TestRichNoiseGateRemainsVisibleAtRichAndFullDensity(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	seedDensityView(t, sqliteStore)
 	ctx := context.Background()
@@ -123,7 +279,7 @@ func TestFullDensityKeepsSingleDemotionsVisible(t *testing.T) {
 	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 2); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sqliteStore.AdjustVisibilityOverride(ctx, 1, "element", 102, -1); err != nil {
+	if _, err := sqliteStore.SetVisibilityOverride(ctx, 1, "element", 102, -1); err != nil {
 		t.Fatal(err)
 	}
 	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
@@ -131,10 +287,10 @@ func TestFullDensityKeepsSingleDemotionsVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !containsPlacement(content.Placements, 102) {
-		t.Fatal("single demotion should not hide an element at full density")
+		t.Fatal("rich-gated element should be visible at full density")
 	}
 	if !containsConnector(content.Connectors, 201) {
-		t.Fatal("connector incident to a visible demoted element should remain visible at full density")
+		t.Fatal("connector incident to a visible rich-gated element should remain visible at full density")
 	}
 
 	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 1); err != nil {
@@ -145,14 +301,14 @@ func TestFullDensityKeepsSingleDemotionsVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !containsPlacement(content.Placements, 102) {
-		t.Fatal("single demotion should not hard-hide an element at rich density")
+		t.Fatal("rich-gated element should be visible at rich density")
 	}
 	if !containsConnector(content.Connectors, 201) {
-		t.Fatal("connector incident to a visible demoted element should remain visible at rich density")
+		t.Fatal("connector incident to a visible rich-gated element should remain visible at rich density")
 	}
 }
 
-func TestMaxDemotionRemainsRecoverableAtFullDensity(t *testing.T) {
+func TestFullNoiseGateHidesUntilFullDensity(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	seedDensityView(t, sqliteStore)
 	ctx := context.Background()
@@ -173,10 +329,10 @@ func TestMaxDemotionRemainsRecoverableAtFullDensity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !containsPlacement(content.Placements, 102) {
-		t.Fatal("max-demoted element should remain visible at full density")
+		t.Fatal("full-gated element should be visible at full density")
 	}
 	if !containsConnector(content.Connectors, 201) {
-		t.Fatal("connector incident to max-demoted element should remain visible at full density")
+		t.Fatal("connector incident to full-gated element should be visible at full density")
 	}
 
 	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 1); err != nil {
@@ -186,12 +342,103 @@ func TestMaxDemotionRemainsRecoverableAtFullDensity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsPlacement(content.Placements, 102) {
-		t.Fatal("max-demoted element should not be hard-hidden at rich density")
+	if containsPlacement(content.Placements, 102) {
+		t.Fatal("full-gated element should be hidden before full density")
 	}
-	if !containsConnector(content.Connectors, 201) {
-		t.Fatal("connector incident to max-demoted element should remain visible at rich density")
+	if containsConnector(content.Connectors, 201) {
+		t.Fatal("connector incident to full-gated element should be hidden before full density")
 	}
+}
+
+func TestElementNoiseGateThresholdForcesVisibilityAtSelectedDensity(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.SetVisibilityOverride(ctx, 1, "element", 106, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -2); err != nil {
+		t.Fatal(err)
+	}
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPlacement(content.Placements, 106) {
+		t.Fatal("lean-gated element should be hidden at quiet density")
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -1); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 106) {
+		t.Fatal("lean-gated element should be visible at lean density")
+	}
+}
+
+func TestElementNormalNoiseGateIsExplicitOverride(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.SetVisibilityOverride(ctx, 1, "element", 106, 0); err != nil {
+		t.Fatal(err)
+	}
+	overrides, err := sqliteStore.VisibilityOverrides(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overrides) != 1 || overrides[0].LevelDelta != 0 {
+		t.Fatalf("normal gate override = %v, want one level_delta=0 row", overrides)
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -1); err != nil {
+		t.Fatal(err)
+	}
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPlacement(content.Placements, 106) {
+		t.Fatal("normal-gated element should be hidden before normal density")
+	}
+
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 106) {
+		t.Fatal("normal-gated element should be visible at normal density")
+	}
+
+	if err := sqliteStore.DeleteVisibilityOverride(ctx, 1, "element", 106); err != nil {
+		t.Fatal(err)
+	}
+	overrides, err = sqliteStore.VisibilityOverrides(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overrides) != 0 {
+		t.Fatalf("overrides after reset = %v, want none", overrides)
+	}
+}
+
+func densityOverrideDelta(overrides []VisibilityOverride, elementID int64) int {
+	for _, override := range overrides {
+		if override.ResourceType == "element" && override.ResourceID == elementID {
+			return override.LevelDelta
+		}
+	}
+	return 999
 }
 
 func containsPlacement(items []app.PlacedElement, elementID int64) bool {
@@ -288,7 +535,7 @@ func TestDensityProjectionDependencyGroup(t *testing.T) {
 		t.Fatal("expected connector 401 to be pruned at density 1")
 	}
 
-	// 3. Check that positive visibility override (+1) does NOT force dependency-group element to be shown at density level 1
+	// 3. Check that a positive visibility override does NOT force dependency-group element to be shown at density level 1
 	if _, err := sqliteStore.SetVisibilityOverride(ctx, 5, "element", 302, 1); err != nil {
 		t.Fatal(err)
 	}

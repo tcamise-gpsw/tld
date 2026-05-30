@@ -178,6 +178,8 @@ func (a *APIStore) CreateElement(ctx context.Context, workspaceID uuid.UUID, inp
 		Branch:               input.Branch,
 		Language:             input.Language,
 		FilePath:             input.FilePath,
+		BypassNoiseGate:      boolValue(input.BypassNoiseGate),
+		BypassNoiseGateSet:   input.BypassNoiseGate != nil,
 		HasView:              input.HasView,
 		ViewLabel:            input.ViewLabel,
 	})
@@ -201,6 +203,8 @@ func (a *APIStore) UpdateElement(ctx context.Context, id int32, workspaceID uuid
 		Branch:               input.Branch,
 		Language:             input.Language,
 		FilePath:             input.FilePath,
+		BypassNoiseGate:      boolValue(input.BypassNoiseGate),
+		BypassNoiseGateSet:   input.BypassNoiseGate != nil,
 		HasView:              input.HasView,
 		ViewLabel:            input.ViewLabel,
 	})
@@ -816,15 +820,16 @@ func viewNodeToProto(node app.ViewTreeNode, workspaceID uuid.UUID) *diagv1.View 
 
 func elementToProto(element app.LibraryElement, workspaceID uuid.UUID) *diagv1.Element {
 	p := &diagv1.Element{
-		Id:        int32(element.ID),
-		OrgId:     workspaceID.String(),
-		Name:      element.Name,
-		Kind:      element.Kind,
-		Tags:      element.Tags,
-		CreatedAt: ts(element.CreatedAt),
-		UpdatedAt: ts(element.UpdatedAt),
-		HasView:   element.HasView,
-		ViewLabel: element.ViewLabel,
+		Id:              int32(element.ID),
+		OrgId:           workspaceID.String(),
+		Name:            element.Name,
+		Kind:            element.Kind,
+		Tags:            element.Tags,
+		CreatedAt:       ts(element.CreatedAt),
+		UpdatedAt:       ts(element.UpdatedAt),
+		HasView:         element.HasView,
+		ViewLabel:       element.ViewLabel,
+		BypassNoiseGate: element.BypassNoiseGate,
 	}
 	if element.Description != nil {
 		p.Description = element.Description
@@ -867,16 +872,17 @@ func elementToProto(element app.LibraryElement, workspaceID uuid.UUID) *diagv1.E
 
 func placedElementToProto(item app.PlacedElement) *diagv1.PlacedElement {
 	p := &diagv1.PlacedElement{
-		Id:        int32(item.ID),
-		ViewId:    int32(item.ViewID),
-		ElementId: int32(item.ElementID),
-		PositionX: item.PositionX,
-		PositionY: item.PositionY,
-		Name:      item.Name,
-		Kind:      item.Kind,
-		Tags:      item.Tags,
-		HasView:   item.HasView,
-		ViewLabel: item.ViewLabel,
+		Id:              int32(item.ID),
+		ViewId:          int32(item.ViewID),
+		ElementId:       int32(item.ElementID),
+		PositionX:       item.PositionX,
+		PositionY:       item.PositionY,
+		Name:            item.Name,
+		Kind:            item.Kind,
+		Tags:            item.Tags,
+		HasView:         item.HasView,
+		ViewLabel:       item.ViewLabel,
+		BypassNoiseGate: item.BypassNoiseGate,
 	}
 	if item.Description != nil {
 		p.Description = item.Description
@@ -1029,6 +1035,10 @@ func ts(value string) *timestamppb.Timestamp {
 		return nil
 	}
 	return timestamppb.New(t)
+}
+
+func boolValue(value *bool) bool {
+	return value != nil && *value
 }
 
 func containsFold(s, substr string) bool {

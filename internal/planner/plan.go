@@ -129,6 +129,11 @@ func buildFromElements(ws *workspace.Workspace, recreateIDs bool) (*Plan, error)
 			level := int32(element.DensityLevel)
 			planElement.ViewDensityLevel = &level
 		}
+		bypassNoiseGate := true
+		if element.BypassNoiseGate != nil {
+			bypassNoiseGate = *element.BypassNoiseGate
+		}
+		planElement.BypassNoiseGate = &bypassNoiseGate
 		for _, placement := range element.Placements {
 			parentRef := placement.ParentRef
 			if parentRef == "" {

@@ -4,6 +4,7 @@ import {
   planSelectionAlignment,
   planSelectionDistribution,
   selectedElementIds,
+  visibleElementSelectionRects,
 } from './selection'
 
 function node(id: string, x: number, y: number, width = 100, height = 50, selected = true, type = 'elementNode'): RFNode {
@@ -81,5 +82,18 @@ describe('ViewEditor selection helpers', () => {
   it('returns no updates for fewer than two selected elements', () => {
     expect(planSelectionAlignment([node('1', 0, 0)], 'left')).toEqual([])
     expect(planSelectionDistribution([node('1', 0, 0), node('2', 100, 0)], 'horizontal')).toEqual([])
+  })
+
+  it('finds visible element rects in viewport order', () => {
+    const nodes = [
+      node('3', 60, 80),
+      node('2', 20, 20),
+      node('1', 320, 20),
+      { ...node('4', 40, 40), style: { pointerEvents: 'none' } },
+      node('context-left', 0, 0, 100, 50, false, 'contextNeighborNode'),
+    ]
+
+    expect(visibleElementSelectionRects(nodes, { x: 0, y: 0, zoom: 1, width: 250, height: 200 }).map((rect) => rect.elementId))
+      .toEqual([2, 3])
   })
 })

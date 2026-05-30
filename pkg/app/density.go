@@ -12,8 +12,8 @@ import (
 const (
 	MinDensityLevel  = -2
 	MaxDensityLevel  = 2
-	MinOverrideDelta = -2
-	MaxOverrideDelta = 2
+	MinOverrideDelta = MinDensityLevel
+	MaxOverrideDelta = MaxDensityLevel
 )
 
 type DensitySignalKey struct {
@@ -65,6 +65,10 @@ func ClampOverrideDelta(delta int) int {
 	return min(MaxOverrideDelta, max(MinOverrideDelta, delta))
 }
 
+func noiseGateLevelForDelta(delta int) int {
+	return -ClampOverrideDelta(delta)
+}
+
 func EmptyDensitySignals() DensitySignals {
 	return DensitySignals{
 		FilterScore:            map[DensitySignalKey]float64{},
@@ -89,27 +93,84 @@ func CapsForDensity(level int) DensityCaps {
 }
 
 type rankedElement struct {
-	item  PlacedElement
-	score float64
-	delta int
+	item         PlacedElement
+	score        float64
+	forceVisible bool
 }
 
 type rankedConnector struct {
 	item  Connector
 	score float64
-	delta int
+	boost int
 }
 
 func ProjectViewContent(placements []PlacedElement, connectors []Connector, overrides []VisibilityOverride, level int, signals DensitySignals) ProjectedViewContent {
+	minLevel := MinDensityLevel
+	if level < minLevel {
+		minLevel = level
+	}
+	visibleElements := make(map[int64]struct{})
+	visibleConnectors := make(map[int64]struct{})
+	for currentLevel := minLevel; currentLevel <= level; currentLevel++ {
+		content := projectViewContentAtLevel(placements, connectors, overrides, currentLevel, signals)
+		for _, placement := range content.Placements {
+			visibleElements[placement.ElementID] = struct{}{}
+		}
+		for _, connector := range content.Connectors {
+			visibleConnectors[connector.ID] = struct{}{}
+		}
+	}
+
+	outPlacements := make([]PlacedElement, 0, len(visibleElements))
+	for _, placement := range placements {
+		if _, ok := visibleElements[placement.ElementID]; ok {
+			outPlacements = append(outPlacements, placement)
+		}
+	}
+	outConnectors := make([]Connector, 0, len(visibleConnectors))
+	for _, connector := range connectors {
+		if _, ok := visibleConnectors[connector.ID]; ok {
+			outConnectors = append(outConnectors, connector)
+		}
+	}
+	return ProjectedViewContent{Placements: outPlacements, Connectors: outConnectors}
+}
+
+func InferElementGateLevels(placements []PlacedElement, connectors []Connector, overrides []VisibilityOverride, signals DensitySignals) map[int64]int {
+	normalizedPlacements := make([]PlacedElement, len(placements))
+	copy(normalizedPlacements, placements)
+	for index := range normalizedPlacements {
+		normalizedPlacements[index].BypassNoiseGate = false
+	}
+
+	levels := make(map[int64]int, len(normalizedPlacements))
+	for level := MinDensityLevel; level <= MaxDensityLevel; level++ {
+		content := ProjectViewContent(normalizedPlacements, connectors, overrides, level, signals)
+		for _, placement := range content.Placements {
+			if _, ok := levels[placement.ElementID]; !ok {
+				levels[placement.ElementID] = level
+			}
+		}
+	}
+	for _, placement := range normalizedPlacements {
+		if _, ok := levels[placement.ElementID]; !ok {
+			levels[placement.ElementID] = MaxDensityLevel
+		}
+	}
+	return levels
+}
+
+func projectViewContentAtLevel(placements []PlacedElement, connectors []Connector, overrides []VisibilityOverride, level int, signals DensitySignals) ProjectedViewContent {
 	caps := CapsForDensity(level)
-	elementDeltas := make(map[int64]int)
-	connectorDeltas := make(map[int64]int)
+	elementGateLevels := make(map[int64]int)
+	connectorGateLevels := make(map[int64]int)
 	for _, override := range overrides {
+		gateLevel := noiseGateLevelForDelta(override.LevelDelta)
 		switch override.ResourceType {
 		case "element":
-			elementDeltas[override.ResourceID] = ClampOverrideDelta(override.LevelDelta)
+			elementGateLevels[override.ResourceID] = gateLevel
 		case "connector":
-			connectorDeltas[override.ResourceID] = ClampOverrideDelta(override.LevelDelta)
+			connectorGateLevels[override.ResourceID] = gateLevel
 		}
 	}
 
@@ -127,15 +188,29 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 	}
 
 	rankedElements := make([]rankedElement, 0, len(placements))
+	gatedElements := make(map[int64]struct{})
 	for _, placement := range placements {
+		if placement.BypassNoiseGate {
+			rankedElements = append(rankedElements, rankedElement{
+				item:         placement,
+				score:        baseElementScore(placement, degree[placement.ElementID], signals),
+				forceVisible: true,
+			})
+			continue
+		}
 		if level < 2 && placement.Kind != nil && *placement.Kind == "dependency-group" {
 			continue
 		}
-		delta := elementDeltas[placement.ElementID]
+		gateLevel, hasGate := elementGateLevels[placement.ElementID]
+		if hasGate && level < gateLevel {
+			gatedElements[placement.ElementID] = struct{}{}
+			continue
+		}
+		boost := -gateLevel
 		rankedElements = append(rankedElements, rankedElement{
-			item:  placement,
-			score: baseElementScore(placement, degree[placement.ElementID], signals) + float64(delta)*100,
-			delta: delta,
+			item:         placement,
+			score:        baseElementScore(placement, degree[placement.ElementID], signals) + float64(boost)*100,
+			forceVisible: hasGate,
 		})
 	}
 	sort.SliceStable(rankedElements, func(i, j int) bool {
@@ -150,9 +225,13 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 	if caps.Full {
 		elementLimit = len(rankedElements)
 	}
+	cappedElementCount := 0
 	for _, ranked := range rankedElements {
-		if !caps.Full && len(visibleElements) >= elementLimit && ranked.delta <= 0 {
-			continue
+		if !caps.Full && !ranked.forceVisible {
+			if cappedElementCount >= elementLimit {
+				continue
+			}
+			cappedElementCount++
 		}
 		visibleElements[ranked.item.ElementID] = struct{}{}
 	}
@@ -162,11 +241,17 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 		if level < 2 && (elementKinds[connector.SourceElementID] == "dependency-group" || elementKinds[connector.TargetElementID] == "dependency-group") {
 			continue
 		}
-		delta := connectorDeltas[connector.ID]
+		if _, ok := gatedElements[connector.SourceElementID]; ok {
+			continue
+		}
+		if _, ok := gatedElements[connector.TargetElementID]; ok {
+			continue
+		}
+		boost := -connectorGateLevels[connector.ID]
 		rankedConnectors = append(rankedConnectors, rankedConnector{
 			item:  connector,
-			score: baseConnectorScore(connector, signals) + float64(delta)*100,
-			delta: delta,
+			score: baseConnectorScore(connector, signals) + float64(boost)*100,
+			boost: boost,
 		})
 	}
 	sort.SliceStable(rankedConnectors, func(i, j int) bool {
@@ -181,9 +266,10 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 	if caps.Full {
 		connectorLimit = len(rankedConnectors)
 	}
+	cappedConnectorCount := 0
 	for _, ranked := range rankedConnectors {
 		connector := ranked.item
-		if ranked.delta > 0 {
+		if ranked.boost > 0 {
 			visibleElements[connector.SourceElementID] = struct{}{}
 			visibleElements[connector.TargetElementID] = struct{}{}
 		}
@@ -192,8 +278,11 @@ func ProjectViewContent(placements []PlacedElement, connectors []Connector, over
 		if !sourceVisible || !targetVisible {
 			continue
 		}
-		if !caps.Full && len(visibleConnectors) >= connectorLimit && ranked.delta <= 0 {
-			continue
+		if !caps.Full && ranked.boost <= 0 {
+			if cappedConnectorCount >= connectorLimit {
+				continue
+			}
+			cappedConnectorCount++
 		}
 		visibleConnectors[connector.ID] = struct{}{}
 	}
@@ -326,12 +415,6 @@ func (s *Store) SetVisibilityOverride(ctx context.Context, viewID int64, resourc
 		return VisibilityOverride{}, err
 	}
 	delta = ClampOverrideDelta(delta)
-	if delta == 0 {
-		if err := s.DeleteVisibilityOverride(ctx, viewID, resourceType, resourceID); err != nil {
-			return VisibilityOverride{}, err
-		}
-		return VisibilityOverride{ViewID: viewID, ResourceType: resourceType, ResourceID: resourceID, LevelDelta: 0}, nil
-	}
 	now := nowString()
 	row := &visibilityOverrideModel{ViewID: viewID, ResourceType: resourceType, ResourceID: resourceID, LevelDelta: delta, CreatedAt: now, UpdatedAt: now}
 	_, err := s.bun.NewInsert().

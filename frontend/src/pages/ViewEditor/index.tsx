@@ -118,10 +118,12 @@ import {
   planSelectionDistribution,
   selectedElementIds,
   selectionBounds,
+  visibleElementSelectionRects,
   type SelectionAlign,
   type SelectionDistribute,
   type SelectionNodeUpdate,
 } from './selection'
+import { deriveViewNoiseGateEnabled } from './noiseGate'
 
 const nodeTypes = {
   elementNode: ElementNode,
@@ -340,6 +342,17 @@ function alphaColor(color: string, opacity: number): string {
   return `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return !!target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]')
+}
+
+function isCanvasKeyboardTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return true
+  if (target === document.body || target === document.documentElement) return true
+  return !!target.closest('[data-testid="vieweditor-canvas"]')
+}
+
 function fadeMarker(marker: string | RFEdgeMarker | undefined, opacity: number) {
   if (!marker || typeof marker === 'string') return marker
   return {
@@ -494,6 +507,9 @@ function ViewEditorInner({
   const isMobileLayout = useBreakpointValue({ base: true, md: false }) ?? false
   const [densityLevel, setDensityLevel] = useState(0)
   const [visibilityOverrides, setVisibilityOverrides] = useState<VisibilityOverride[]>([])
+  const [noiseGateBusy, setNoiseGateBusy] = useState(false)
+  const [pendingNoiseGateEnabled, setPendingNoiseGateEnabled] = useState<boolean | null>(null)
+  const lastNonFullDensityLevelRef = useRef(0)
 
   const elementPanel = useDisclosure()
   const connectorPanel = useDisclosure()
@@ -510,6 +526,9 @@ function ViewEditorInner({
     if (viewId == null) {
       setDensityLevel(0)
       setVisibilityOverrides([])
+      setNoiseGateBusy(false)
+      setPendingNoiseGateEnabled(null)
+      lastNonFullDensityLevelRef.current = 0
       return
     }
     let cancelled = false
@@ -523,6 +542,12 @@ function ViewEditorInner({
     })
     return () => { cancelled = true }
   }, [viewId])
+
+  useEffect(() => {
+    if (densityLevel !== 2) {
+      lastNonFullDensityLevelRef.current = densityLevel
+    }
+  }, [densityLevel])
 
   // ── Stable disclosure refs ──────────────────────────────────────────────
   const openElementPanelRef = useRef(elementPanel.onOpen)
@@ -781,6 +806,7 @@ function ViewEditorInner({
           technology: obj.technology, url: obj.url, logo_url: obj.logo_url,
           technology_connectors: obj.technology_connectors, tags: obj.tags, repo: obj.repo,
           branch: obj.branch, file_path: obj.file_path, language: obj.language,
+          bypass_noise_gate: obj.bypass_noise_gate ?? false,
           created_at: '', updated_at: '', has_view: false, view_label: null,
         })
         openElementPanelRef.current()
@@ -1345,6 +1371,105 @@ function ViewEditorInner({
     return counts
   }, [selectedCanvasElements])
 
+  const focusCanvasElement = useCallback((elementId: number) => {
+    window.requestAnimationFrame(() => {
+      const target = containerRef.current?.querySelector<HTMLElement>(`[data-testid="vieweditor-node"][data-element-id="${elementId}"]`)
+      target?.focus({ preventScroll: true })
+    })
+  }, [])
+
+  const replaceCanvasElementSelection = useCallback((elementId: number) => {
+    const placedElement = viewElementsRef.current.find((element) => element.element_id === elementId)
+
+    setSelectedElement(placedElement ? placedElementToLibraryElement(placedElement) : null)
+    setSelectedEdge(null)
+    setSelectedProxyConnectorDetails(null)
+    closeConnectorPanelRef.current()
+    closeProxyConnectorPanelRef.current()
+
+    setRfEdges((edges) => edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+    setRfNodes((nodes) => nodes.map((node) => {
+      const nodeElementId = node.type === 'elementNode' ? parseNumericId(node.id) : null
+      const selected = nodeElementId === elementId
+      return node.selected === selected ? node : { ...node, selected }
+    }))
+    focusCanvasElement(elementId)
+  }, [focusCanvasElement, setRfEdges, setRfNodes, viewElementsRef])
+
+  const selectAllVisibleCanvasElements = useCallback((elementIds: number[]) => {
+    const selectedIds = new Set(elementIds)
+    const singleSelectedId = selectedIds.size === 1 ? elementIds[0] : null
+    const placedElement = singleSelectedId === null
+      ? null
+      : viewElementsRef.current.find((element) => element.element_id === singleSelectedId) ?? null
+
+    setSelectedElement(placedElement ? placedElementToLibraryElement(placedElement) : null)
+    setSelectedEdge(null)
+    setSelectedProxyConnectorDetails(null)
+    closeConnectorPanelRef.current()
+    closeProxyConnectorPanelRef.current()
+    if (selectedIds.size !== 1) closeElementPanelRef.current()
+
+    setRfEdges((edges) => edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+    setRfNodes((nodes) => nodes.map((node) => {
+      const nodeElementId = node.type === 'elementNode' ? parseNumericId(node.id) : null
+      const selected = nodeElementId !== null && selectedIds.has(nodeElementId)
+      return node.selected === selected ? node : { ...node, selected }
+    }))
+
+    if (singleSelectedId !== null) focusCanvasElement(singleSelectedId)
+  }, [focusCanvasElement, setRfEdges, setRfNodes, viewElementsRef])
+
+  const getVisibleCanvasElementRects = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    const viewport = getViewport()
+    return visibleElementSelectionRects(
+      rfNodesRef.current,
+      rect
+        ? { ...viewport, width: rect.width, height: rect.height }
+        : null,
+    )
+  }, [getViewport, rfNodesRef])
+
+  useEffect(() => {
+    if (drawingMode) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isEditableKeyboardTarget(e.target) || !isCanvasKeyboardTarget(e.target)) return
+
+      const key = e.key.toLowerCase()
+      if (key === 'tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const visibleRects = getVisibleCanvasElementRects()
+        if (visibleRects.length === 0) return
+
+        e.preventDefault()
+        const selectedIndex = visibleRects.findIndex((rect) => selectedCanvasElementIds.includes(rect.elementId))
+        const nextIndex = selectedIndex === -1
+          ? e.shiftKey ? visibleRects.length - 1 : 0
+          : (selectedIndex + (e.shiftKey ? -1 : 1) + visibleRects.length) % visibleRects.length
+        replaceCanvasElementSelection(visibleRects[nextIndex].elementId)
+        return
+      }
+
+      if (key === 'a' && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        const visibleRects = getVisibleCanvasElementRects()
+        if (visibleRects.length === 0) return
+
+        e.preventDefault()
+        selectAllVisibleCanvasElements(visibleRects.map((rect) => rect.elementId))
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    drawingMode,
+    getVisibleCanvasElementRects,
+    replaceCanvasElementSelection,
+    selectAllVisibleCanvasElements,
+    selectedCanvasElementIds,
+  ])
+
   useEffect(() => {
     const pendingSelection = pendingPasteSelectionRef.current
     if (!pendingSelection || pendingSelection.viewId !== viewId || pendingSelection.elementIds.size === 0) return
@@ -1403,9 +1528,60 @@ function ViewEditorInner({
       clearEditHistory()
       await refreshElements()
     } catch {
-      toast({ status: 'error', title: 'Density was not saved' })
+      toast({ status: 'error', title: 'Noise gate was not saved' })
     }
   }, [clearEditHistory, refreshElements, toast, viewId])
+
+  const noiseGateEnabled = useMemo(
+    () => deriveViewNoiseGateEnabled(densityLevel, visibilityOverrides, pendingNoiseGateEnabled),
+    [densityLevel, pendingNoiseGateEnabled, visibilityOverrides],
+  )
+
+  const handleNoiseGateEnabledChange = useCallback(async (enabled: boolean) => {
+    if (viewId == null || noiseGateBusy) return
+
+    setNoiseGateBusy(true)
+    setPendingNoiseGateEnabled(enabled)
+    if (!enabled) {
+      try {
+        await handleDensityLevelChange(2)
+      } finally {
+        setNoiseGateBusy(false)
+        setPendingNoiseGateEnabled(null)
+      }
+      return
+    }
+
+    const previousLevel = densityLevel
+    const nextLevel = densityLevel === 2 ? lastNonFullDensityLevelRef.current : densityLevel
+    setDensityLevel(nextLevel)
+    try {
+      const result = await api.workspace.views.noiseGate.initialize(viewId, nextLevel)
+      setDensityLevel(result.density_level)
+      clearEditHistory()
+      await reloadVisibilityOverrides()
+      await refreshElements()
+    } catch {
+      setDensityLevel(previousLevel)
+      toast({ status: 'error', title: 'Noise gate was not initialized' })
+    } finally {
+      setNoiseGateBusy(false)
+      setPendingNoiseGateEnabled(null)
+    }
+  }, [clearEditHistory, densityLevel, handleDensityLevelChange, noiseGateBusy, refreshElements, reloadVisibilityOverrides, toast, viewId])
+
+  const handleVisibilityOverrideDeltaChange = useCallback(async (resourceType: VisibilityOverride['resource_type'], resourceId: number, levelDelta: number) => {
+    if (viewId == null) return
+    try {
+      await api.workspace.views.visibilityOverrides.set(viewId, resourceType, resourceId, levelDelta)
+      clearEditHistory()
+      await reloadVisibilityOverrides()
+      await refreshElements()
+    } catch (error) {
+      toast({ status: 'error', title: 'Noise gate override was not saved' })
+      throw error
+    }
+  }, [clearEditHistory, refreshElements, reloadVisibilityOverrides, toast, viewId])
 
   const handleVisibilityOverride = useCallback(async (resourceType: VisibilityOverride['resource_type'], resourceId: number, action: 'promote' | 'demote' | 'reset') => {
     if (viewId == null) return
@@ -1560,6 +1736,7 @@ function ViewEditorInner({
       branch: match.branch,
       file_path: match.file_path,
       language: match.language,
+      bypass_noise_gate: match.bypass_noise_gate ?? false,
       created_at: '',
       updated_at: '',
       has_view: match.has_view,
@@ -2223,6 +2400,7 @@ function ViewEditorInner({
         logo_url: null,
         technology_connectors: [],
         tags: [],
+        bypass_noise_gate: false,
         has_view: false,
         view_label: null,
         links: EMPTY_LINKS,
@@ -3432,6 +3610,9 @@ function ViewEditorInner({
               onFocusModeChange={handleFocusModeChange}
               densityLevel={densityLevel}
               onDensityLevelChange={handleDensityLevelChange}
+              noiseGateEnabled={noiseGateEnabled}
+              noiseGateBusy={noiseGateBusy}
+              onNoiseGateEnabledChange={handleNoiseGateEnabledChange}
               canUndo={canUndoViewEdit}
               canRedo={canRedoViewEdit}
               undoRedoDisabled={isApplyingHistory}
@@ -3536,8 +3717,7 @@ function ViewEditorInner({
             handleElementDeleted(elementId)
           }} onPermanentDelete={handleElementPermanentlyDeletedEverywhere}
           visibilityOverrideDelta={overrideDeltaFor('element', selectedElement?.id)}
-          onPromoteVisibility={(id) => handleVisibilityOverride('element', id, 'promote')}
-          onDemoteVisibility={(id) => handleVisibilityOverride('element', id, 'demote')}
+          onVisibilityOverrideDeltaChange={(id, delta) => handleVisibilityOverrideDeltaChange('element', id, delta)}
           onResetVisibility={(id) => handleVisibilityOverride('element', id, 'reset')}
           orgId={''}
           links={selectedElement ? (linksMap[selectedElement.id] || EMPTY_LINKS) : EMPTY_LINKS}

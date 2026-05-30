@@ -594,6 +594,7 @@ type contractStore struct {
 	getConnector            func(context.Context, int32, uuid.UUID) (*diagv1.Connector, error)
 	updateConnector         func(context.Context, int32, uuid.UUID, ConnectorInput) (*diagv1.Connector, error)
 	listAllConnectors       func(context.Context, uuid.UUID) ([]*diagv1.Connector, error)
+	applyPlan               func(context.Context, uuid.UUID, *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error)
 }
 
 var _ Store = (*contractStore)(nil)
@@ -765,7 +766,10 @@ func (s *contractStore) UpdateTag(context.Context, uuid.UUID, string, string, *s
 	return nil
 }
 func (s *contractStore) DeleteTag(context.Context, uuid.UUID, string) error { return nil }
-func (s *contractStore) ApplyPlan(context.Context, uuid.UUID, *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
+func (s *contractStore) ApplyPlan(ctx context.Context, workspaceID uuid.UUID, req *diagv1.ApplyPlanRequest) (*diagv1.ApplyPlanResponse, error) {
+	if s.applyPlan != nil {
+		return s.applyPlan(ctx, workspaceID, req)
+	}
 	return nil, nil
 }
 func (s *contractStore) ListVersions(context.Context, uuid.UUID, int) ([]*diagv1.WorkspaceVersionInfo, error) {

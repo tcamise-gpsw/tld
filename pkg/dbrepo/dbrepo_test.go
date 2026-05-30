@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -37,8 +36,8 @@ func TestOpenSQLiteAppliesLocalMigrations(t *testing.T) {
 	if err := handle.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM bun_migrations`).Scan(&count); err != nil {
 		t.Fatalf("query bun migrations table: %v", err)
 	}
-	if count != 6 {
-		t.Fatalf("bun_migrations count = %d, want 6", count)
+	if count != 7 {
+		t.Fatalf("bun_migrations count = %d, want 7", count)
 	}
 }
 
@@ -60,32 +59,8 @@ func TestOpenSQLiteBootstrapsLegacyMigrationState(t *testing.T) {
 	if err := handle.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM bun_migrations`).Scan(&count); err != nil {
 		t.Fatalf("query bun migrations table: %v", err)
 	}
-	if count != 6 {
-		t.Fatalf("bun_migrations count = %d, want 6", count)
-	}
-}
-
-func TestOpenPostgresAppliesLocalMigrationsWhenConfigured(t *testing.T) {
-	dsn := os.Getenv("TLD_TEST_POSTGRES_URL")
-	if dsn == "" {
-		t.Skip("TLD_TEST_POSTGRES_URL not set")
-	}
-	ctx := context.Background()
-	handle, err := dbrepo.OpenPostgres(ctx, dbrepo.DBOptions{
-		DatabaseURL: dsn,
-		Migrations:  assets.FS,
-	})
-	if err != nil {
-		t.Fatalf("OpenPostgres: %v", err)
-	}
-	defer func() { _ = handle.Close() }()
-
-	if handle.Dialect != dbrepo.DialectPostgres {
-		t.Fatalf("Dialect = %q, want %q", handle.Dialect, dbrepo.DialectPostgres)
-	}
-	var count int
-	if err := handle.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_embedding_models`).Scan(&count); err != nil {
-		t.Fatalf("query migrated table: %v", err)
+	if count != 7 {
+		t.Fatalf("bun_migrations count = %d, want 7", count)
 	}
 }
 

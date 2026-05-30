@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef } from "react"
 import type { TopMenuBarSlots } from '../slots'
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom"
 import {
@@ -26,7 +26,6 @@ import ExperimentalSettings from "../pages/ExperimentalSettings"
 import UpdateSettings from "../pages/UpdateSettings"
 import { isWailsApp, isWailsMac, isWailsWindows } from "../config/runtime"
 import WindowsWindowControls from "./WindowsWindowControls"
-import { KbdHint } from "./PanelUI"
 
 const FolderTreeIcon = ({ size = 32 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -92,12 +91,9 @@ export default function TopMenuBar({
   const { accent } = useAccentColor()
   const [isSmallerThan1150] = useMediaQuery("(max-width: 1150px)")
   const [isMobileLayout] = useMediaQuery("(max-width: 479px)")
-  const [isCommandPressed, setIsCommandPressed] = useState(false)
   const appearancePopover = useDisclosure()
   const appearanceTriggerRef = useRef<HTMLButtonElement | null>(null)
   const appearanceContentRef = useRef<HTMLElement | null>(null)
-  const isMacShortcutPlatform = isWailsMac || (typeof navigator !== "undefined" && /mac|iphone|ipad|ipod/i.test(navigator.platform))
-  const shortcutModifier = isMacShortcutPlatform ? "⌘" : "Ctrl"
 
   useEffect(() => {
     if (!appearancePopover.isOpen) return
@@ -121,11 +117,8 @@ export default function TopMenuBar({
   }, [appearancePopover])
 
   useEffect(() => {
-    const resetCommandState = () => setIsCommandPressed(false)
-
     const handleKeyDown = (event: KeyboardEvent) => {
       const isModifierPressed = event.metaKey || event.ctrlKey
-      setIsCommandPressed(isModifierPressed)
       if (!isModifierPressed || event.altKey || event.shiftKey) return
 
       const shortcutPath = NAV_SHORTCUT_PATHS.get(event.key)
@@ -135,19 +128,9 @@ export default function TopMenuBar({
       navigate(shortcutPath)
     }
 
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (!event.metaKey && !event.ctrlKey) setIsCommandPressed(false)
-    }
-
     window.addEventListener("keydown", handleKeyDown)
-    window.addEventListener("keyup", handleKeyUp)
-    window.addEventListener("blur", resetCommandState)
-    document.addEventListener("visibilitychange", resetCommandState)
     return () => {
       window.removeEventListener("keydown", handleKeyDown)
-      window.removeEventListener("keyup", handleKeyUp)
-      window.removeEventListener("blur", resetCommandState)
-      document.removeEventListener("visibilitychange", resetCommandState)
     }
   }, [navigate])
 
@@ -310,7 +293,6 @@ export default function TopMenuBar({
             {NAV_ITEMS.map((item) => {
               const active = isActive(item.path)
               const Icon = item.icon
-              const shortcutLabel = `${shortcutModifier}${item.shortcutKey}`
               return (
                 <Tooltip
                   key={item.path}
@@ -347,14 +329,6 @@ export default function TopMenuBar({
                     w="auto"
                     gap={2}
                     sx={{
-                      "& .nav-shortcut-hint": {
-                        opacity: isCommandPressed ? 1 : 0,
-                        transform: isCommandPressed ? "translate(-50%, 0)" : "translate(-50%, -2px)",
-                      },
-                      "&:hover .nav-shortcut-hint": {
-                        opacity: 1,
-                        transform: "translate(-50%, 0)",
-                      },
                       "@container topbar (max-width: 1150px)": {
                         px: 2,
                         w: "36px",
@@ -365,18 +339,6 @@ export default function TopMenuBar({
                   >
                     <Icon size={18} />
                     <Box as="span" className="nav-label" lineHeight="1">{item.label}</Box>
-                    <KbdHint
-                      className="nav-shortcut-hint"
-                      position="absolute"
-                      top="calc(100% + 10px)"
-                      left="50%"
-                      ml={0}
-                      pointerEvents="none"
-                      transition="opacity 0.12s ease, transform 0.12s ease"
-                      zIndex={2}
-                    >
-                      {shortcutLabel}
-                    </KbdHint>
                   </Box>
                 </Tooltip>
               )

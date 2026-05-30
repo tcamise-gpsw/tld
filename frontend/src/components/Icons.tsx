@@ -274,3 +274,41 @@ export function FocusIcon({ size = 14, strokeWidth = 2.5 }: { size?: number, str
     </svg>
   )
 }
+
+/**
+ * Signal-bars icon reflecting the noise gate level.
+ * densityLevel: -2 (Quiet, 1 bar) → 2 (Full, 5 bars).
+ * Filled bars use currentColor; unfilled bars are dimmed.
+ */
+export function NoiseGateIcon({ size = 14, level = 0 }: { size?: number, level?: number }) {
+  // Map density level (-2..2) to filled bar count (1..5)
+  const filledBars = Math.max(1, Math.min(5, level + 3))
+  const barCount = 5
+  const barWidth = 2.4
+  const gap = 1.6
+  const totalWidth = barCount * barWidth + (barCount - 1) * gap
+  const startX = (24 - totalWidth) / 2
+
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      {Array.from({ length: barCount }, (_, i) => {
+        const barHeight = 4 + i * 3.2
+        const x = startX + i * (barWidth + gap)
+        const y = 20 - barHeight
+        const filled = i < filledBars
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={y}
+            width={barWidth}
+            height={barHeight}
+            rx={1}
+            fill={filled ? 'currentColor' : 'currentColor'}
+            opacity={filled ? 1 : 0.2}
+          />
+        )
+      })}
+    </svg>
+  )
+}

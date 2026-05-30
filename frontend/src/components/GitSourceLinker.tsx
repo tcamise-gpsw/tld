@@ -620,7 +620,7 @@ export default function GitSourceLinker({ element, isReadOnly, onUpdate }: Props
 
   // --- RENDER ---
   return (
-    <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={1} overflow="visible">
+    <Box overflow="visible">
       <Accordion allowToggle overflow="visible">
         <AccordionItem border="none" overflow="visible">
           <h2>

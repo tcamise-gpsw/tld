@@ -14,6 +14,7 @@ import {
   ExpandExtrasIcon as ExpandExtrasSvg,
   CollapseExtrasIcon as CollapseExtrasSvg,
   FocusIcon as FocusSvg,
+  NoiseGateIcon,
   TagsIcon,
   ChevronDownIcon,
 } from './Icons'
@@ -46,6 +47,9 @@ export interface ViewFloatingMenuProps extends ViewFloatingMenuSlots {
   onFocusModeChange: (enabled: boolean) => void
   densityLevel?: number
   onDensityLevelChange?: (level: number) => void
+  noiseGateEnabled?: boolean
+  noiseGateBusy?: boolean
+  onNoiseGateEnabledChange?: (enabled: boolean) => void
   canUndo?: boolean
   canRedo?: boolean
   undoRedoDisabled?: boolean
@@ -94,6 +98,9 @@ function ViewFloatingMenu({
   onFocusModeChange,
   densityLevel = 0,
   onDensityLevelChange,
+  noiseGateEnabled = false,
+  noiseGateBusy = false,
+  onNoiseGateEnabledChange,
   canUndo = false,
   canRedo = false,
   undoRedoDisabled = false,
@@ -123,8 +130,9 @@ function ViewFloatingMenu({
   const { isOpen: isFiltersOpen, onClose: onFiltersClose, onToggle: onFiltersToggle } = useDisclosure()
   const [draftDensityLevel, setDraftDensityLevel] = React.useState(densityLevel)
   const activeDensityLabel = DENSITY_STOPS.find((stop) => stop.value === draftDensityLevel)?.label ?? 'Normal'
+  const activeNoiseGateLabel = noiseGateEnabled ? activeDensityLabel : 'Off'
   const showFilters = !hideFocusView || !!onDensityLevelChange
-  const hasActiveFilters = (!hideFocusView && focusMode) || (!!onDensityLevelChange && densityLevel !== 0)
+  const hasActiveFilters = (!hideFocusView && focusMode) || (!!onDensityLevelChange && noiseGateEnabled && densityLevel !== 2)
   const visibleTags = React.useMemo(
     () => allTags.filter((tag) => (tagCounts[tag] ?? 0) > 0),
     [allTags, tagCounts],
@@ -225,9 +233,14 @@ function ViewFloatingMenu({
                   aria-label="Open filters"
                 >
                   <HStack spacing={1.5}>
-                    <FocusSvg />
-                    <Text fontSize="11px" fontWeight={hasActiveFilters ? 'semibold' : 'normal'}>Filters</Text>
-                    {hasActiveFilters && <Box w="6px" h="6px" rounded="full" bg="var(--accent)" />}
+                    {hasActiveFilters && onDensityLevelChange ? (
+                      noiseGateEnabled ? <NoiseGateIcon size={14} level={densityLevel} /> : <FocusSvg />
+                    ) : (
+                      <FocusSvg />
+                    )}
+                    <Text fontSize="11px" fontWeight={hasActiveFilters ? 'semibold' : 'normal'}>
+                      {noiseGateEnabled ? activeNoiseGateLabel : 'Filters'}
+                    </Text>
                     <ChevronDownIcon size={10} strokeWidth={3.5} />
                   </HStack>
                 </Button>
@@ -283,41 +296,54 @@ function ViewFloatingMenu({
                           border="1px solid"
                           borderColor="whiteAlpha.100"
                         >
-                          <HStack justify="space-between" mb={2.5}>
+                          <HStack justify="space-between" mb={2.5} align="flex-start">
                             <Box>
-                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Density</Text>
+                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Noise Gate</Text>
                               <Text fontSize="10px" color="whiteAlpha.600">Control how much detail is shown</Text>
                             </Box>
-                            <Text
-                              fontSize="10px"
-                              fontWeight="bold"
-                              color="var(--accent)"
-                              bg="rgba(var(--accent-rgb), 0.10)"
-                              border="1px solid"
-                              borderColor="rgba(var(--accent-rgb), 0.18)"
-                              rounded="full"
-                              px={2}
-                              py={0.5}
-                            >
-                              {activeDensityLabel}
-                            </Text>
+                            <HStack spacing={2} flexShrink={0}>
+                              <Text
+                                fontSize="10px"
+                                fontWeight="bold"
+                                color={noiseGateEnabled ? 'var(--accent)' : 'whiteAlpha.600'}
+                                bg={noiseGateEnabled ? 'rgba(var(--accent-rgb), 0.10)' : 'whiteAlpha.100'}
+                                border="1px solid"
+                                borderColor={noiseGateEnabled ? 'rgba(var(--accent-rgb), 0.18)' : 'whiteAlpha.200'}
+                                rounded="full"
+                                px={2}
+                                py={0.5}
+                              >
+                                {activeNoiseGateLabel}
+                              </Text>
+                              <Switch
+                                data-testid="vieweditor-noise-gate-toggle"
+                                size="sm"
+                                isChecked={noiseGateEnabled}
+                                isDisabled={noiseGateBusy || !onNoiseGateEnabledChange}
+                                onChange={(event) => onNoiseGateEnabledChange?.(event.target.checked)}
+                                colorScheme="teal"
+                                aria-label="Toggle noise gate"
+                              />
+                            </HStack>
                           </HStack>
-                          <Box px={1} pt={1} pb={0.5}>
+                          <Box px={1} pt={1} pb={0.5} opacity={noiseGateEnabled ? 1 : 0.45}>
                             <Slider
-                              aria-label="Density"
+                              aria-label="Noise gate"
                               min={-2}
                               max={2}
                               step={1}
                               value={draftDensityLevel}
                               onChange={setDraftDensityLevel}
                               onChangeEnd={(value) => {
+                                if (!noiseGateEnabled || noiseGateBusy) return
                                 setDraftDensityLevel(value)
                                 onDensityLevelChange(value)
                               }}
+                              isDisabled={!noiseGateEnabled || noiseGateBusy}
                               focusThumbOnChange={false}
                             >
                               <SliderTrack h="4px" bg="whiteAlpha.200">
-                                <SliderFilledTrack bg="var(--accent)" />
+                                <SliderFilledTrack bg={noiseGateEnabled ? 'var(--accent)' : 'whiteAlpha.400'} />
                               </SliderTrack>
                               {DENSITY_STOPS.map((stop) => (
                                 <Box

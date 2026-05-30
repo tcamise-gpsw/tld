@@ -87,24 +87,25 @@ func (p ViewPlacement) MarshalYAML() (any, error) {
 // Element is the primary workspace resource.
 // It combines reusable identity with optional internal view metadata.
 type Element struct {
-	Name         string          `yaml:"name"`
-	Kind         string          `yaml:"kind"`
-	Owner        string          `yaml:"owner,omitempty"`
-	Description  string          `yaml:"description,omitempty"`
-	Technology   string          `yaml:"technology,omitempty"`
-	URL          string          `yaml:"url,omitempty"`
-	LogoURL      string          `yaml:"logo_url,omitempty"`
-	Repo         string          `yaml:"repo,omitempty"`
-	Branch       string          `yaml:"branch,omitempty"`
-	Language     string          `yaml:"language,omitempty"`
-	FilePath     string          `yaml:"file_path,omitempty"`
-	Symbol       string          `yaml:"symbol,omitempty"` // Named code symbol within FilePath (e.g. "MyFunc")
-	Tags         []string        `yaml:"tags,omitempty"`
-	HasView      bool            `yaml:"has_view"`
-	ViewName     string          `yaml:"view_name,omitempty"`
-	ViewLabel    string          `yaml:"view_label,omitempty"`
-	DensityLevel int             `yaml:"density_level,omitempty"`
-	Placements   []ViewPlacement `yaml:"placements,omitempty"`
+	Name            string          `yaml:"name"`
+	Kind            string          `yaml:"kind"`
+	Owner           string          `yaml:"owner,omitempty"`
+	Description     string          `yaml:"description,omitempty"`
+	Technology      string          `yaml:"technology,omitempty"`
+	URL             string          `yaml:"url,omitempty"`
+	LogoURL         string          `yaml:"logo_url,omitempty"`
+	Repo            string          `yaml:"repo,omitempty"`
+	Branch          string          `yaml:"branch,omitempty"`
+	Language        string          `yaml:"language,omitempty"`
+	FilePath        string          `yaml:"file_path,omitempty"`
+	Symbol          string          `yaml:"symbol,omitempty"` // Named code symbol within FilePath (e.g. "MyFunc")
+	Tags            []string        `yaml:"tags,omitempty"`
+	HasView         bool            `yaml:"has_view"`
+	ViewName        string          `yaml:"view_name,omitempty"`
+	ViewLabel       string          `yaml:"view_label,omitempty"`
+	DensityLevel    int             `yaml:"density_level,omitempty"`
+	BypassNoiseGate *bool           `yaml:"bypass_noise_gate,omitempty"`
+	Placements      []ViewPlacement `yaml:"placements,omitempty"`
 }
 
 // Connector is one entry in connectors.yaml.

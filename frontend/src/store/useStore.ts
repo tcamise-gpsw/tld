@@ -198,6 +198,7 @@ export function placedElementToLibraryElement(element: PlacedElement): LibraryEl
     updated_at: '',
     has_view: element.has_view,
     view_label: element.view_label,
+    bypass_noise_gate: element.bypass_noise_gate ?? false,
   }
 }
 
@@ -215,6 +216,7 @@ export function buildElementLibraryItems(allElements: LibraryElement[], viewElem
         updated_at: existing.updated_at,
         has_view: existing.has_view,
         view_label: existing.view_label,
+        bypass_noise_gate: existing.bypass_noise_gate ?? placed.bypass_noise_gate ?? false,
       }
       : placed)
   })
@@ -253,6 +255,7 @@ export function mergeSavedElementIntoPlacements(elements: PlacedElement[], saved
         branch: saved.branch,
         file_path: saved.file_path,
         language: saved.language,
+        bypass_noise_gate: saved.bypass_noise_gate ?? false,
       }
       : element,
   )
@@ -312,6 +315,7 @@ export function mergeElementReplacements(elements: PlacedElement[], sourceId: nu
           language: survivor.language,
           has_view: survivor.has_view,
           view_label: survivor.view_label,
+          bypass_noise_gate: survivor.bypass_noise_gate ?? false,
         }
       }
       return el

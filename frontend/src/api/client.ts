@@ -7,6 +7,7 @@ import type {
   ElementPlacement,
   ExploreData,
   LibraryElement,
+  NoiseGateInitialization,
   PlacedElement,
   Tag,
   View,
@@ -410,6 +411,7 @@ export function protoElementToLibrary(e: Record<string, unknown>): LibraryElemen
     updated_at: String(e.updated_at ?? e.updatedAt ?? new Date().toISOString()),
     has_view: Boolean(e.has_view ?? e.hasView ?? false),
     view_label: (e.view_label ?? e.viewLabel ?? null) as string | null,
+    bypass_noise_gate: Boolean(e.bypass_noise_gate ?? e.bypassNoiseGate ?? false),
   }
 }
 
@@ -424,6 +426,7 @@ export function libraryElementToDependency(element: LibraryElement): DependencyE
     logo_url: element.logo_url,
     technology_connectors: element.technology_connectors,
     tags: element.tags,
+    bypass_noise_gate: element.bypass_noise_gate ?? false,
     repo: element.repo,
     branch: element.branch,
     language: element.language,
@@ -455,6 +458,7 @@ export function protoPlacedElement(p: Record<string, unknown>): PlacedElement {
     language: (p.language ?? null) as string | null,
     has_view: Boolean(p.has_view ?? p.hasView ?? false),
     view_label: (p.view_label ?? p.viewLabel ?? null) as string | null,
+    bypass_noise_gate: Boolean(p.bypass_noise_gate ?? p.bypassNoiseGate ?? false),
   }
 }
 
@@ -475,6 +479,28 @@ export function protoConnector(e: Record<string, unknown>): Connector {
     tags: (e.tags ?? []) as string[],
     created_at: String(e.created_at ?? e.createdAt ?? new Date().toISOString()),
     updated_at: String(e.updated_at ?? e.updatedAt ?? new Date().toISOString()),
+  }
+}
+
+export function normalizeFrontendImportElements(elements: PlanElement[]): PlanElement[] {
+  return elements.map((element) => {
+    const raw = element as Record<string, unknown>
+    if (raw.bypassNoiseGate != null || raw.bypass_noise_gate != null) {
+      return element
+    }
+    return { ...element, bypassNoiseGate: false } as PlanElement
+  })
+}
+
+function normalizeVisibilityOverride(value: Record<string, unknown>, fallback?: { viewId: number; resourceType: VisibilityOverride['resource_type']; resourceId: number; levelDelta: number }): VisibilityOverride {
+  const rawLevelDelta = value.level_delta ?? value.levelDelta
+  return {
+    view_id: Number(value.view_id ?? value.viewId ?? fallback?.viewId ?? 0),
+    resource_type: (value.resource_type ?? value.resourceType ?? fallback?.resourceType ?? 'element') as VisibilityOverride['resource_type'],
+    resource_id: Number(value.resource_id ?? value.resourceId ?? fallback?.resourceId ?? 0),
+    level_delta: rawLevelDelta != null ? Number(rawLevelDelta) : (fallback?.levelDelta ?? 0),
+    created_at: (value.created_at ?? value.createdAt) as string | undefined,
+    updated_at: (value.updated_at ?? value.updatedAt) as string | undefined,
   }
 }
 
@@ -569,7 +595,7 @@ export const api = {
 
     create: (data: Partial<LibraryElement>): Promise<LibraryElement> =>
       rpc(async () => {
-        const res = await workspaceClient.createElement({
+        const request = {
           name: data.name ?? '',
           kind: data.kind ?? '',
           description: data.description ?? undefined,
@@ -587,14 +613,16 @@ export const api = {
           branch: data.branch ?? undefined,
           filePath: data.file_path ?? undefined,
           language: data.language ?? undefined,
-        })
+          bypassNoiseGate: data.bypass_noise_gate ?? false,
+        }
+        const res = await workspaceClient.createElement(request as Parameters<typeof workspaceClient.createElement>[0])
         const json = j<{ element: Record<string, unknown> }>(CreateElementResponseSchema, res)
         return protoElementToLibrary(json.element ?? {})
       }),
 
     update: (id: number, data: Partial<LibraryElement>): Promise<LibraryElement> =>
       rpc(async () => {
-        const res = await workspaceClient.updateElement({
+        const request = {
           elementId: id,
           name: data.name ?? undefined,
           kind: data.kind ?? undefined,
@@ -613,7 +641,9 @@ export const api = {
           branch: data.branch ?? undefined,
           filePath: data.file_path ?? undefined,
           language: data.language ?? undefined,
-        })
+          bypassNoiseGate: data.bypass_noise_gate,
+        }
+        const res = await workspaceClient.updateElement(request as Parameters<typeof workspaceClient.updateElement>[0])
         const json = j<{ element: Record<string, unknown> }>(UpdateElementResponseSchema, res)
         return protoElementToLibrary(json.element ?? {})
       }),
@@ -914,6 +944,24 @@ export const api = {
         },
       },
 
+      noiseGate: {
+        initialize: async (id: number, densityLevel?: number): Promise<NoiseGateInitialization> => {
+          const res = await fetch(apiUrl(`/views/${id}/noise-gate/initialize`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(densityLevel == null ? {} : { density_level: densityLevel }),
+          })
+          if (!res.ok) throw new Error('Failed to initialize noise gate')
+          const json = await res.json() as Partial<NoiseGateInitialization>
+          return {
+            view_id: Number(json.view_id ?? id),
+            density_level: Number(json.density_level ?? densityLevel ?? 0),
+            elements_enabled: Number(json.elements_enabled ?? 0),
+            overrides_created: Number(json.overrides_created ?? 0),
+          }
+        },
+      },
+
       populate: {
         getQuery: async (id: number): Promise<{ query: string; enriched_query: string }> => {
           const res = await fetch(apiUrl(`/views/${id}/populate-query`))
@@ -939,30 +987,34 @@ export const api = {
         list: async (id: number): Promise<VisibilityOverride[]> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides`))
           if (!res.ok) throw new Error('Failed to load visibility overrides')
-          const json = await res.json() as { overrides?: VisibilityOverride[] }
-          return json.overrides ?? []
+          const json = await res.json() as { overrides?: Record<string, unknown>[] }
+          return (json.overrides ?? []).map((override) => normalizeVisibilityOverride(override))
         },
         set: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number, levelDelta: number): Promise<VisibilityOverride> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides`), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, level_delta: levelDelta }),
+            body: JSON.stringify({
+              resource_type: resourceType,
+              resource_id: resourceId,
+              level_delta: levelDelta,
+            }),
           })
           if (!res.ok) throw new Error('Failed to save visibility override')
-          const json = await res.json() as { override?: VisibilityOverride }
-          return json.override ?? { view_id: id, resource_type: resourceType, resource_id: resourceId, level_delta: levelDelta }
+          const json = await res.json() as { override?: Record<string, unknown> }
+          return normalizeVisibilityOverride(json.override ?? {}, { viewId: id, resourceType, resourceId, levelDelta })
         },
         promote: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number): Promise<VisibilityOverride> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides/${resourceType}/${resourceId}/promote`), { method: 'POST' })
           if (!res.ok) throw new Error('Failed to promote visibility')
-          const json = await res.json() as { override?: VisibilityOverride }
-          return json.override ?? { view_id: id, resource_type: resourceType, resource_id: resourceId, level_delta: 1 }
+          const json = await res.json() as { override?: Record<string, unknown> }
+          return normalizeVisibilityOverride(json.override ?? {}, { viewId: id, resourceType, resourceId, levelDelta: 1 })
         },
         demote: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number): Promise<VisibilityOverride> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides/${resourceType}/${resourceId}/demote`), { method: 'POST' })
           if (!res.ok) throw new Error('Failed to demote visibility')
-          const json = await res.json() as { override?: VisibilityOverride }
-          return json.override ?? { view_id: id, resource_type: resourceType, resource_id: resourceId, level_delta: -1 }
+          const json = await res.json() as { override?: Record<string, unknown> }
+          return normalizeVisibilityOverride(json.override ?? {}, { viewId: id, resourceType, resourceId, levelDelta: -1 })
         },
         reset: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number): Promise<void> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides/${resourceType}/${resourceId}`), { method: 'DELETE' })
@@ -1276,7 +1328,7 @@ export const api = {
       rpc(async () => {
         const res = await importClient.importResources({
           orgId: orgIdOrLocal(orgId),
-          elements: data.elements,
+          elements: normalizeFrontendImportElements(data.elements),
           connectors: data.connectors,
         })
         return { view_id: res.viewId, view_url: res.viewUrl }

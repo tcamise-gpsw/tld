@@ -23,6 +23,8 @@ type LibraryElement struct {
 	Branch               *string               `json:"branch,omitempty"`
 	FilePath             *string               `json:"file_path,omitempty"`
 	Language             *string               `json:"language,omitempty"`
+	BypassNoiseGate      bool                  `json:"bypass_noise_gate"`
+	BypassNoiseGateSet   bool                  `json:"-"`
 	CreatedAt            string                `json:"created_at"`
 	UpdatedAt            string                `json:"updated_at"`
 	HasView              bool                  `json:"has_view"`
@@ -47,6 +49,7 @@ type PlacedElement struct {
 	Branch               *string               `json:"branch,omitempty"`
 	FilePath             *string               `json:"file_path,omitempty"`
 	Language             *string               `json:"language,omitempty"`
+	BypassNoiseGate      bool                  `json:"bypass_noise_gate"`
 	HasView              bool                  `json:"has_view"`
 	ViewLabel            *string               `json:"view_label"`
 }
@@ -73,6 +76,7 @@ type DependencyElement struct {
 	Branch               *string               `json:"branch,omitempty"`
 	Language             *string               `json:"language,omitempty"`
 	FilePath             *string               `json:"file_path,omitempty"`
+	BypassNoiseGate      bool                  `json:"bypass_noise_gate"`
 	CreatedAt            string                `json:"created_at"`
 	UpdatedAt            string                `json:"updated_at"`
 }
@@ -91,8 +95,20 @@ type PlanElement struct {
 	Branch          *string               `json:"branch"`
 	Language        *string               `json:"language"`
 	FilePath        *string               `json:"file_path"`
+	BypassNoiseGate *bool                 `json:"bypass_noise_gate"`
 	HasView         bool                  `json:"has_view"`
 	ViewLabel       *string               `json:"view_label"`
+}
+
+func optionalBool(value bool, set bool) *bool {
+	if !set {
+		return nil
+	}
+	return &value
+}
+
+func boolValue(value *bool) bool {
+	return value != nil && *value
 }
 
 func (s *Store) Elements(ctx context.Context, limit, offset int, search string) ([]LibraryElement, int, error) {
@@ -175,6 +191,7 @@ func (s *Store) CreateElement(ctx context.Context, input LibraryElement) (Librar
 		Branch:               input.Branch,
 		FilePath:             input.FilePath,
 		Language:             input.Language,
+		BypassNoiseGate:      input.BypassNoiseGate,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}
@@ -213,6 +230,7 @@ func (s *Store) UpdateElement(ctx context.Context, id int64, input LibraryElemen
 		Set("branch = COALESCE(?, branch)", input.Branch).
 		Set("file_path = COALESCE(?, file_path)", input.FilePath).
 		Set("language = COALESCE(?, language)", input.Language).
+		Set("bypass_noise_gate = COALESCE(?, bypass_noise_gate)", optionalBool(input.BypassNoiseGate, input.BypassNoiseGateSet)).
 		Set("updated_at = ?", nowString()).
 		Where("id = ?", id).
 		Exec(ctx)

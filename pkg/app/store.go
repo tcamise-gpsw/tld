@@ -403,6 +403,7 @@ func (s *Store) Dependencies(ctx context.Context) (map[string]any, error) {
 			Branch:               element.Branch,
 			Language:             element.Language,
 			FilePath:             element.FilePath,
+			BypassNoiseGate:      element.BypassNoiseGate,
 			CreatedAt:            element.CreatedAt,
 			UpdatedAt:            element.UpdatedAt,
 		})
@@ -435,6 +436,7 @@ func (s *Store) ImportPlan(ctx context.Context, elements []PlanElement, connecto
 			Branch:               element.Branch,
 			FilePath:             element.FilePath,
 			Language:             element.Language,
+			BypassNoiseGate:      boolValue(element.BypassNoiseGate),
 		})
 		if err != nil {
 			return 0, err

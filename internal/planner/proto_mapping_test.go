@@ -25,6 +25,10 @@ func TestProtoMapping_ElementFields(t *testing.T) {
 				HasView:      true,
 				ViewLabel:    "Container",
 				DensityLevel: -1,
+				BypassNoiseGate: func() *bool {
+					value := false
+					return &value
+				}(),
 				Placements: []workspace.ViewPlacement{{
 					ParentRef:       "root",
 					PositionX:       42,
@@ -59,6 +63,9 @@ func TestProtoMapping_ElementFields(t *testing.T) {
 	if element.ViewDensityLevel == nil || *element.ViewDensityLevel != -1 {
 		t.Fatalf("ViewDensityLevel = %v", element.ViewDensityLevel)
 	}
+	if element.BypassNoiseGate == nil || element.GetBypassNoiseGate() {
+		t.Fatalf("BypassNoiseGate = %v, want explicit false preserved", element.BypassNoiseGate)
+	}
 	if len(element.Placements) != 1 {
 		t.Fatalf("Placements = %d", len(element.Placements))
 	}
@@ -67,6 +74,21 @@ func TestProtoMapping_ElementFields(t *testing.T) {
 	}
 	if element.Placements[0].VisibilityDelta == nil || *element.Placements[0].VisibilityDelta != 2 {
 		t.Fatalf("VisibilityDelta = %v", element.Placements[0].VisibilityDelta)
+	}
+}
+
+func TestProtoMapping_ElementBypassNoiseGateDefaultsTrueForWorkspaceApply(t *testing.T) {
+	plan, err := planner.Build(&workspace.Workspace{
+		Elements: map[string]*workspace.Element{
+			"api": {Name: "API"},
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	element := plan.Request.Elements[0]
+	if element.BypassNoiseGate == nil || !element.GetBypassNoiseGate() {
+		t.Fatalf("BypassNoiseGate = %v, want omitted workspace YAML to default true", element.BypassNoiseGate)
 	}
 }
 

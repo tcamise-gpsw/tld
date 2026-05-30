@@ -59,6 +59,62 @@ func TestServerReadyReportsResourceCounts(t *testing.T) {
 	}
 }
 
+func TestServerInitializesViewNoiseGate(t *testing.T) {
+	sqliteStore, routes := newTestServer(t, uuid.Nil, nil)
+	if _, err := sqliteStore.DB().Exec(`
+		INSERT INTO elements(id, name, tags, technology_connectors, bypass_noise_gate, created_at, updated_at)
+		VALUES
+			(101, 'A', '[]', '[]', 1, 'now', 'now'),
+			(102, 'B', '[]', '[]', 1, 'now', 'now'),
+			(103, 'C', '[]', '[]', 1, 'now', 'now'),
+			(104, 'D', '[]', '[]', 1, 'now', 'now'),
+			(105, 'E', '[]', '[]', 1, 'now', 'now');
+		INSERT INTO placements(view_id, element_id, position_x, position_y, created_at, updated_at)
+		VALUES
+			(1, 101, 0, 0, 'now', 'now'),
+			(1, 102, 10, 0, 'now', 'now'),
+			(1, 103, 20, 0, 'now', 'now'),
+			(1, 104, 30, 0, 'now', 'now'),
+			(1, 105, 40, 0, 'now', 'now');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/views/1/noise-gate/initialize", strings.NewReader(`{"density_level":-1}`))
+	routes.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		ViewID           int64 `json:"view_id"`
+		DensityLevel     int   `json:"density_level"`
+		ElementsEnabled  int   `json:"elements_enabled"`
+		OverridesCreated int   `json:"overrides_created"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ViewID != 1 || body.DensityLevel != -1 || body.ElementsEnabled != 5 || body.OverridesCreated != 5 {
+		t.Fatalf("initialize body = %+v", body)
+	}
+
+	var bypassed int
+	if err := sqliteStore.DB().QueryRow(`SELECT COUNT(*) FROM elements WHERE id BETWEEN 101 AND 105 AND bypass_noise_gate = 1`).Scan(&bypassed); err != nil {
+		t.Fatal(err)
+	}
+	if bypassed != 0 {
+		t.Fatalf("bypassed initialized elements = %d, want 0", bypassed)
+	}
+	level, err := sqliteStore.ViewDensityLevel(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if level != -1 {
+		t.Fatalf("density = %d, want -1", level)
+	}
+}
+
 func TestServerAllowsVSCodeWebviewCORSPreflight(t *testing.T) {
 	_, routes := newTestServer(t, uuid.New(), nil)
 	req := httptest.NewRequest(http.MethodOptions, "/api/diag.v1.WorkspaceService/ListViews", nil)
