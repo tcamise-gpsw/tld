@@ -742,6 +742,8 @@ function ElementNode({ data, selected }: Props) {
       data-element-id={data.element_id}
       data-node-name={data.name}
       data-pending={isPending ? 'true' : undefined}
+      tabIndex={isPending ? undefined : -1}
+      aria-selected={selected}
       isSelected={selected}
       isSource={isSource}
       isTarget={isTarget}

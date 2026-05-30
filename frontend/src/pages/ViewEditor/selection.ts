@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import type { Node as RFNode } from 'reactflow'
 
 const DEFAULT_NODE_WIDTH = 180
@@ -27,6 +28,14 @@ type NodeRect = {
   elementId: number
   x: number
   y: number
+  width: number
+  height: number
+}
+
+export type SelectionViewport = {
+  x: number
+  y: number
+  zoom: number
   width: number
   height: number
 }
@@ -71,6 +80,36 @@ export function elementSelectionRects(nodes: SelectionNode[]): NodeRect[] {
     .filter((node) => node.selected)
     .map(nodeRect)
     .filter((rect): rect is NodeRect => rect !== null)
+}
+
+function isNodeHidden(node: SelectionNode & { style?: CSSProperties }): boolean {
+  return node.style?.pointerEvents === 'none' || node.style?.display === 'none' || node.style?.visibility === 'hidden' || Number(node.style?.opacity ?? 1) <= 0
+}
+
+function intersectsViewport(rect: NodeRect, viewport: SelectionViewport): boolean {
+  if (viewport.zoom <= 0 || viewport.width <= 0 || viewport.height <= 0) return true
+
+  const left = -viewport.x / viewport.zoom
+  const top = -viewport.y / viewport.zoom
+  const right = (viewport.width - viewport.x) / viewport.zoom
+  const bottom = (viewport.height - viewport.y) / viewport.zoom
+
+  return rect.x < right && rect.x + rect.width > left && rect.y < bottom && rect.y + rect.height > top
+}
+
+export function visibleElementSelectionRects(
+  nodes: Array<SelectionNode & { style?: CSSProperties }>,
+  viewport: SelectionViewport | null,
+): NodeRect[] {
+  return nodes
+    .filter((node) => !isNodeHidden(node))
+    .map(nodeRect)
+    .filter((rect): rect is NodeRect => rect !== null)
+    .filter((rect) => viewport === null || intersectsViewport(rect, viewport))
+    .sort((left, right) => {
+      if (left.y !== right.y) return left.y - right.y
+      return left.x - right.x
+    })
 }
 
 export function selectionBounds(rects: NodeRect[]) {

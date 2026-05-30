@@ -118,6 +118,7 @@ import {
   planSelectionDistribution,
   selectedElementIds,
   selectionBounds,
+  visibleElementSelectionRects,
   type SelectionAlign,
   type SelectionDistribute,
   type SelectionNodeUpdate,
@@ -338,6 +339,17 @@ function nodesMatchCurrentView(nodes: RFNode[], elements: PlacedElement[], viewI
 function alphaColor(color: string, opacity: number): string {
   if (opacity >= 1) return color
   return `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return !!target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]')
+}
+
+function isCanvasKeyboardTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return true
+  if (target === document.body || target === document.documentElement) return true
+  return !!target.closest('[data-testid="vieweditor-canvas"]')
 }
 
 function fadeMarker(marker: string | RFEdgeMarker | undefined, opacity: number) {
@@ -1345,6 +1357,105 @@ function ViewEditorInner({
     })
     return counts
   }, [selectedCanvasElements])
+
+  const focusCanvasElement = useCallback((elementId: number) => {
+    window.requestAnimationFrame(() => {
+      const target = containerRef.current?.querySelector<HTMLElement>(`[data-testid="vieweditor-node"][data-element-id="${elementId}"]`)
+      target?.focus({ preventScroll: true })
+    })
+  }, [])
+
+  const replaceCanvasElementSelection = useCallback((elementId: number) => {
+    const placedElement = viewElementsRef.current.find((element) => element.element_id === elementId)
+
+    setSelectedElement(placedElement ? placedElementToLibraryElement(placedElement) : null)
+    setSelectedEdge(null)
+    setSelectedProxyConnectorDetails(null)
+    closeConnectorPanelRef.current()
+    closeProxyConnectorPanelRef.current()
+
+    setRfEdges((edges) => edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+    setRfNodes((nodes) => nodes.map((node) => {
+      const nodeElementId = node.type === 'elementNode' ? parseNumericId(node.id) : null
+      const selected = nodeElementId === elementId
+      return node.selected === selected ? node : { ...node, selected }
+    }))
+    focusCanvasElement(elementId)
+  }, [focusCanvasElement, setRfEdges, setRfNodes, viewElementsRef])
+
+  const selectAllVisibleCanvasElements = useCallback((elementIds: number[]) => {
+    const selectedIds = new Set(elementIds)
+    const singleSelectedId = selectedIds.size === 1 ? elementIds[0] : null
+    const placedElement = singleSelectedId === null
+      ? null
+      : viewElementsRef.current.find((element) => element.element_id === singleSelectedId) ?? null
+
+    setSelectedElement(placedElement ? placedElementToLibraryElement(placedElement) : null)
+    setSelectedEdge(null)
+    setSelectedProxyConnectorDetails(null)
+    closeConnectorPanelRef.current()
+    closeProxyConnectorPanelRef.current()
+    if (selectedIds.size !== 1) closeElementPanelRef.current()
+
+    setRfEdges((edges) => edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+    setRfNodes((nodes) => nodes.map((node) => {
+      const nodeElementId = node.type === 'elementNode' ? parseNumericId(node.id) : null
+      const selected = nodeElementId !== null && selectedIds.has(nodeElementId)
+      return node.selected === selected ? node : { ...node, selected }
+    }))
+
+    if (singleSelectedId !== null) focusCanvasElement(singleSelectedId)
+  }, [focusCanvasElement, setRfEdges, setRfNodes, viewElementsRef])
+
+  const getVisibleCanvasElementRects = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    const viewport = getViewport()
+    return visibleElementSelectionRects(
+      rfNodesRef.current,
+      rect
+        ? { ...viewport, width: rect.width, height: rect.height }
+        : null,
+    )
+  }, [getViewport, rfNodesRef])
+
+  useEffect(() => {
+    if (drawingMode) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isEditableKeyboardTarget(e.target) || !isCanvasKeyboardTarget(e.target)) return
+
+      const key = e.key.toLowerCase()
+      if (key === 'tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const visibleRects = getVisibleCanvasElementRects()
+        if (visibleRects.length === 0) return
+
+        e.preventDefault()
+        const selectedIndex = visibleRects.findIndex((rect) => selectedCanvasElementIds.includes(rect.elementId))
+        const nextIndex = selectedIndex === -1
+          ? e.shiftKey ? visibleRects.length - 1 : 0
+          : (selectedIndex + (e.shiftKey ? -1 : 1) + visibleRects.length) % visibleRects.length
+        replaceCanvasElementSelection(visibleRects[nextIndex].elementId)
+        return
+      }
+
+      if (key === 'a' && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        const visibleRects = getVisibleCanvasElementRects()
+        if (visibleRects.length === 0) return
+
+        e.preventDefault()
+        selectAllVisibleCanvasElements(visibleRects.map((rect) => rect.elementId))
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    drawingMode,
+    getVisibleCanvasElementRects,
+    replaceCanvasElementSelection,
+    selectAllVisibleCanvasElements,
+    selectedCanvasElementIds,
+  ])
 
   useEffect(() => {
     const pendingSelection = pendingPasteSelectionRef.current

@@ -14,6 +14,7 @@ import {
   ExpandExtrasIcon as ExpandExtrasSvg,
   CollapseExtrasIcon as CollapseExtrasSvg,
   FocusIcon as FocusSvg,
+  NoiseGateIcon,
   TagsIcon,
   ChevronDownIcon,
 } from './Icons'
@@ -124,7 +125,7 @@ function ViewFloatingMenu({
   const [draftDensityLevel, setDraftDensityLevel] = React.useState(densityLevel)
   const activeNoiseGateLabel = DENSITY_STOPS.find((stop) => stop.value === draftDensityLevel)?.label ?? 'Normal'
   const showFilters = !hideFocusView || !!onDensityLevelChange
-  const hasActiveFilters = (!hideFocusView && focusMode) || (!!onDensityLevelChange && densityLevel !== 0)
+  const hasActiveFilters = (!hideFocusView && focusMode) || (!!onDensityLevelChange && densityLevel !== 2)
   const visibleTags = React.useMemo(
     () => allTags.filter((tag) => (tagCounts[tag] ?? 0) > 0),
     [allTags, tagCounts],
@@ -225,9 +226,14 @@ function ViewFloatingMenu({
                   aria-label="Open filters"
                 >
                   <HStack spacing={1.5}>
-                    <FocusSvg />
-                    <Text fontSize="11px" fontWeight={hasActiveFilters ? 'semibold' : 'normal'}>Filters</Text>
-                    {hasActiveFilters && <Box w="6px" h="6px" rounded="full" bg="var(--accent)" />}
+                    {hasActiveFilters && onDensityLevelChange ? (
+                      <NoiseGateIcon size={14} level={densityLevel} />
+                    ) : (
+                      <FocusSvg />
+                    )}
+                    <Text fontSize="11px" fontWeight={hasActiveFilters ? 'semibold' : 'normal'}>
+                      {hasActiveFilters ? activeNoiseGateLabel : 'Filters'}
+                    </Text>
                     <ChevronDownIcon size={10} strokeWidth={3.5} />
                   </HStack>
                 </Button>
