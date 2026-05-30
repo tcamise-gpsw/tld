@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Handle, Position, useStore } from 'reactflow'
-import { Box, Flex, Text, Tooltip, HStack, Button, Divider, Input, VStack } from '@chakra-ui/react'
+import { Box, Flex, Text, Tooltip, HStack, Button, Divider, Input, VStack, Portal } from '@chakra-ui/react'
 import { LinkIcon } from '@chakra-ui/icons'
 
 import type { LibraryElement, PlacedElement, ViewConnector, Tag } from '../types'
@@ -295,6 +295,21 @@ const HANDLE_CONFIGS = [
   { side: 'bottom', position: Position.Bottom },
 ] as const
 
+type PendingInputRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+function pendingInputRectsEqual(a: PendingInputRect | null, b: PendingInputRect) {
+  return !!a &&
+    a.left === b.left &&
+    a.top === b.top &&
+    a.width === b.width &&
+    a.height === b.height
+}
+
 function getReconnectZoneStyle(position: Position, slot: number): React.CSSProperties {
   const baseStyle = getVisualHandleStyle(position, slot)
 
@@ -318,6 +333,8 @@ function PendingElementLabelEditor({
   const { query, setQuery, remoteElements } = useElementSearch()
   const [activeIndex, setActiveIndex] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [inputRect, setInputRect] = useState<PendingInputRect | null>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const results = buildElementCreateSearchResults({
     query,
@@ -327,12 +344,40 @@ function PendingElementLabelEditor({
   })
   const inputWidth = `clamp(156px, ${Math.max(query.length + 1, 2)}ch, 206px)`
 
-  const focusInput = useCallback(() => {
-    inputRef.current?.focus({ preventScroll: true })
-    inputRef.current?.select()
+  const updateInputRect = useCallback(() => {
+    const anchor = anchorRef.current
+    const node = anchor?.closest('[data-testid="vieweditor-node"]')
+    if (typeof HTMLElement === 'undefined' || !(node instanceof HTMLElement)) return
+
+    const rect = node.getBoundingClientRect()
+    const next = {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    }
+    setInputRect((current) => pendingInputRectsEqual(current, next) ? current : next)
   }, [])
 
+  const focusInput = useCallback(() => {
+    updateInputRect()
+    inputRef.current?.focus({ preventScroll: true })
+  }, [updateInputRect])
+
   useEffect(() => {
+    updateInputRect()
+    if (typeof window === 'undefined') return
+
+    window.addEventListener('resize', updateInputRect)
+    window.addEventListener('scroll', updateInputRect, true)
+    return () => {
+      window.removeEventListener('resize', updateInputRect)
+      window.removeEventListener('scroll', updateInputRect, true)
+    }
+  }, [updateInputRect])
+
+  useEffect(() => {
+    if (!inputRect) return
     focusInput()
     const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(focusInput) : null
     const timers = [0, 50, 100, 200, 350].map((delay) => setTimeout(focusInput, delay))
@@ -340,7 +385,7 @@ function PendingElementLabelEditor({
       if (raf !== null) cancelAnimationFrame(raf)
       timers.forEach(clearTimeout)
     }
-  }, [focusInput])
+  }, [focusInput, inputRect])
 
   useEffect(() => { setActiveIndex(0) }, [query])
 
@@ -387,39 +432,86 @@ function PendingElementLabelEditor({
 
   return (
     <Box
+      ref={anchorRef}
       position="relative"
       display="inline-flex"
       justifyContent="center"
       maxW="100%"
       minW={0}
+      cursor="text"
       onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        focusInput()
+      }}
     >
-      <Input
-        data-testid="pending-element-label-input"
-        aria-label="Element name"
-        ref={inputRef}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={onKeyDown}
-        variant="unstyled"
+      <Text
         textAlign="center"
         fontSize="xl"
         fontWeight="semibold"
         lineHeight={1.15}
         color="gray.100"
+        opacity={query ? 1 : 0}
         minW={0}
         w={inputWidth}
         maxW="100%"
-        border={0}
-        boxShadow="none"
         px={1}
         py={0}
         h="32px"
-        isDisabled={busy}
-        autoComplete="off"
-        sx={{ caretColor: 'var(--accent)' }}
-      />
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+        noOfLines={1}
+        pointerEvents="none"
+      >
+        {query || ' '}
+      </Text>
+      {inputRect && (
+        <Portal>
+          <Input
+            data-testid="pending-element-label-input"
+            aria-label="Element name"
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            variant="unstyled"
+            textAlign="center"
+            fontSize="xl"
+            fontWeight="semibold"
+            lineHeight={1.15}
+            color="transparent"
+            position="fixed"
+            left={`${inputRect.left}px`}
+            top={`${inputRect.top}px`}
+            zIndex={2400}
+            minW={0}
+            w={`${inputRect.width}px`}
+            maxW="none"
+            border={0}
+            boxShadow="none"
+            bg="transparent"
+            px={1}
+            py={0}
+            h={`${inputRect.height}px`}
+            isDisabled={busy}
+            autoComplete="off"
+            pointerEvents="auto"
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              updateInputRect()
+            }}
+            onClick={(e) => e.stopPropagation()}
+            sx={{
+              caretColor: 'var(--accent)',
+              touchAction: 'auto',
+              userSelect: 'text',
+              WebkitUserSelect: 'text',
+              WebkitAppearance: 'none',
+            }}
+          />
+        </Portal>
+      )}
       {results.length > 0 && (
         <Box
           position="absolute"
