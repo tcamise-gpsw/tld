@@ -14,6 +14,7 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import TagUpsert from '../../../components/TagUpsert'
+import { CopyIcon } from '@chakra-ui/icons'
 import { FitViewIcon, MergeIcon, TagsIcon, TrashIcon } from '../../../components/Icons'
 import type { Tag } from '../../../types'
 import type { SelectionAlign, SelectionDistribute } from '../selection'
@@ -137,6 +138,7 @@ export interface SelectionBulkBarProps {
   onRemoveTag: (tag: string) => void
   onMergeInto?: (survivorId: number) => void
   onRemoveFromView: () => void
+  onCopyMermaid: () => void
 }
 
 export default function SelectionBulkBar({
@@ -153,6 +155,7 @@ export default function SelectionBulkBar({
   onRemoveTag,
   onMergeInto,
   onRemoveFromView,
+  onCopyMermaid,
 }: SelectionBulkBarProps) {
   if (count < 2) return null
 
@@ -319,6 +322,9 @@ export default function SelectionBulkBar({
         </Popover>
       )}
 
+      <ToolbarIconButton testId="selection-bulk-copy-mermaid" label="Copy as Mermaid" onClick={onCopyMermaid}>
+        <CopyIcon boxSize="14px" />
+      </ToolbarIconButton>
       <ToolbarIconButton testId="selection-bulk-fit" label="Fit selection" onClick={onFitSelection}>
         <FitViewIcon size={16} />
       </ToolbarIconButton>

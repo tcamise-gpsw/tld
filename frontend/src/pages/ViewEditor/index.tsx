@@ -3154,6 +3154,16 @@ function ViewEditorInner({
     }
   }, [connectors, setCanvasMenu, toast, viewElements])
 
+  const handleBulkCopyMermaid = useCallback(async () => {
+    const code = serializeViewToMermaid(selectedCanvasElements, connectors)
+    try {
+      await copyTextToClipboard(code)
+      toast({ status: 'success', title: 'Copied Mermaid', description: 'Mermaid source copied to clipboard.' })
+    } catch {
+      toast({ status: 'error', title: 'Copy failed', description: 'Could not write Mermaid source to the clipboard.' })
+    }
+  }, [connectors, selectedCanvasElements, toast])
+
   const handleExportView = useCallback(async (options: ExportOptions) => {
     const flowRoot = containerRef.current?.querySelector('.react-flow') as HTMLElement | null
     if (!flowRoot) { toast({ status: 'error', title: 'Export failed', description: 'Could not find the view canvas.' }); return }
@@ -3866,6 +3876,7 @@ function ViewEditorInner({
               onRemoveTag={(tag) => { void handleBulkTagChange(tag, 'remove') }}
               onMergeInto={(survivorId) => { void handleBulkMergeInto(survivorId) }}
               onRemoveFromView={() => { void handleBulkRemoveFromView() }}
+              onCopyMermaid={handleBulkCopyMermaid}
             />
 
             <ViewHeaderButton

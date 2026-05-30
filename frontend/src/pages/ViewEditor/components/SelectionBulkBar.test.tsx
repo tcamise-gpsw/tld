@@ -50,6 +50,7 @@ function renderBulkBar(overrides: Partial<React.ComponentProps<typeof SelectionB
       onAddTag={vi.fn()}
       onRemoveTag={vi.fn()}
       onRemoveFromView={vi.fn()}
+      onCopyMermaid={vi.fn()}
       {...overrides}
     />,
   )
@@ -87,5 +88,21 @@ describe('SelectionBulkBar bulk merge', () => {
     })
 
     expect(onMergeInto).toHaveBeenCalledWith(2)
+  })
+})
+
+describe('SelectionBulkBar copy as mermaid', () => {
+  it('renders copy as mermaid button and calls onCopyMermaid when clicked', () => {
+    const onCopyMermaid = vi.fn()
+    const renderer = renderBulkBar({ onCopyMermaid })
+
+    const button = renderer.root.findByProps({ 'data-testid': 'selection-bulk-copy-mermaid' })
+    expect(button).toBeTruthy()
+
+    act(() => {
+      button.props.onClick()
+    })
+
+    expect(onCopyMermaid).toHaveBeenCalled()
   })
 })
