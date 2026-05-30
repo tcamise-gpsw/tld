@@ -515,13 +515,14 @@ function ElementPanel({
 
     const nextDelta = visibilityDeltaFromNoiseGateLevel(nextLevel)
     const currentDelta = visibilityDeltaFromNoiseGateLevel(noiseGateLevelFromVisibilityDelta(visibilityOverrideDelta))
-    if (nextDelta === currentDelta) return
 
     try {
       if (onVisibilityOverrideDeltaChange) {
         await onVisibilityOverrideDeltaChange(element.id, nextDelta)
         return
       }
+
+      if (nextDelta === currentDelta) return
 
       let delta = currentDelta
       while (delta < nextDelta) {

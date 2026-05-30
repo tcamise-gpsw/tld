@@ -201,7 +201,116 @@ func TestWorkspaceServiceSQLiteCriticalPathRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkspaceServiceSQLiteGetViewHonorsElementOverrideThreshold(t *testing.T) {
+	for _, tt := range []struct {
+		name           string
+		noiseGateLevel int
+		hiddenDensity  int
+		visibleDensity int
+	}{
+		{name: "rich gate hides at normal", noiseGateLevel: 1, hiddenDensity: 0, visibleDensity: 1},
+		{name: "full gate hides at rich", noiseGateLevel: 2, hiddenDensity: 1, visibleDensity: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			orgID := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+			store, client := newSQLiteWorkspaceClientWithStore(t)
+
+			view, err := client.CreateView(ctx, connect.NewRequest(&diagv1.CreateViewRequest{
+				OrgId: orgID.String(),
+				Name:  "Noise Gate",
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, err := client.CreateElement(ctx, connect.NewRequest(&diagv1.CreateElementRequest{
+				Name: "Visible Source",
+				Kind: ptr("service"),
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := client.CreateElement(ctx, connect.NewRequest(&diagv1.CreateElementRequest{
+				Name: "Gated Target",
+				Kind: ptr("service"),
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.CreatePlacement(ctx, connect.NewRequest(&diagv1.CreatePlacementRequest{
+				ViewId:    view.Msg.GetView().GetId(),
+				ElementId: source.Msg.GetElement().GetId(),
+			})); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.CreatePlacement(ctx, connect.NewRequest(&diagv1.CreatePlacementRequest{
+				ViewId:    view.Msg.GetView().GetId(),
+				ElementId: target.Msg.GetElement().GetId(),
+			})); err != nil {
+				t.Fatal(err)
+			}
+			connector, err := client.CreateConnector(ctx, connect.NewRequest(&diagv1.CreateConnectorRequest{
+				ViewId:          view.Msg.GetView().GetId(),
+				SourceElementId: source.Msg.GetElement().GetId(),
+				TargetElementId: target.Msg.GetElement().GetId(),
+				Direction:       "forward",
+				Style:           "bezier",
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			viewID := int64(view.Msg.GetView().GetId())
+			targetID := target.Msg.GetElement().GetId()
+			connectorID := connector.Msg.GetConnector().GetId()
+			if _, err := store.SetVisibilityOverride(ctx, viewID, "element", int64(targetID), -tt.noiseGateLevel); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SetViewDensityLevel(ctx, viewID, tt.hiddenDensity); err != nil {
+				t.Fatal(err)
+			}
+
+			hidden, err := client.GetView(ctx, connect.NewRequest(&diagv1.GetViewRequest{
+				ViewId:         view.Msg.GetView().GetId(),
+				IncludeContent: true,
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if protoContentHasPlacement(hidden.Msg.GetContent(), targetID) {
+				t.Fatalf("gated element appeared at density %d: %+v", tt.hiddenDensity, hidden.Msg.GetContent().GetPlacements())
+			}
+			if protoContentHasConnector(hidden.Msg.GetContent(), connectorID) {
+				t.Fatalf("connector incident to gated element appeared at density %d: %+v", tt.hiddenDensity, hidden.Msg.GetContent().GetConnectors())
+			}
+
+			if err := store.SetViewDensityLevel(ctx, viewID, tt.visibleDensity); err != nil {
+				t.Fatal(err)
+			}
+			visible, err := client.GetView(ctx, connect.NewRequest(&diagv1.GetViewRequest{
+				ViewId:         view.Msg.GetView().GetId(),
+				IncludeContent: true,
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !protoContentHasPlacement(visible.Msg.GetContent(), targetID) {
+				t.Fatalf("gated element missing at density %d: %+v", tt.visibleDensity, visible.Msg.GetContent().GetPlacements())
+			}
+			if !protoContentHasConnector(visible.Msg.GetContent(), connectorID) {
+				t.Fatalf("connector incident to gated element missing at density %d: %+v", tt.visibleDensity, visible.Msg.GetContent().GetConnectors())
+			}
+		})
+	}
+}
+
 func newSQLiteWorkspaceClient(t *testing.T) diagv1connect.WorkspaceServiceClient {
+	t.Helper()
+	_, client := newSQLiteWorkspaceClientWithStore(t)
+	return client
+}
+
+func newSQLiteWorkspaceClientWithStore(t *testing.T) (*app.Store, diagv1connect.WorkspaceServiceClient) {
 	t.Helper()
 
 	store, err := app.OpenStore(filepath.Join(t.TempDir(), "tld.db"), assets.FS)
@@ -218,12 +327,30 @@ func newSQLiteWorkspaceClient(t *testing.T) diagv1connect.WorkspaceServiceClient
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	return diagv1connect.NewWorkspaceServiceClient(server.Client(), server.URL+"/api")
+	return store, diagv1connect.NewWorkspaceServiceClient(server.Client(), server.URL+"/api")
 }
 
 func workspaceHasView(views []*diagv1.View, id int32) bool {
 	for _, view := range views {
 		if view.GetId() == id || workspaceHasView(view.GetChildren(), id) {
+			return true
+		}
+	}
+	return false
+}
+
+func protoContentHasPlacement(content *diagv1.ViewContent, elementID int32) bool {
+	for _, placement := range content.GetPlacements() {
+		if placement.GetElementId() == elementID {
+			return true
+		}
+	}
+	return false
+}
+
+func protoContentHasConnector(content *diagv1.ViewContent, connectorID int32) bool {
+	for _, connector := range content.GetConnectors() {
+		if connector.GetId() == connectorID {
 			return true
 		}
 	}

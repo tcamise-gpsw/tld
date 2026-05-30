@@ -478,6 +478,18 @@ export function protoConnector(e: Record<string, unknown>): Connector {
   }
 }
 
+function normalizeVisibilityOverride(value: Record<string, unknown>, fallback?: { viewId: number; resourceType: VisibilityOverride['resource_type']; resourceId: number; levelDelta: number }): VisibilityOverride {
+  const rawLevelDelta = value.level_delta ?? value.levelDelta
+  return {
+    view_id: Number(value.view_id ?? value.viewId ?? fallback?.viewId ?? 0),
+    resource_type: (value.resource_type ?? value.resourceType ?? fallback?.resourceType ?? 'element') as VisibilityOverride['resource_type'],
+    resource_id: Number(value.resource_id ?? value.resourceId ?? fallback?.resourceId ?? 0),
+    level_delta: rawLevelDelta != null ? Number(rawLevelDelta) : (fallback?.levelDelta ?? 0),
+    created_at: (value.created_at ?? value.createdAt) as string | undefined,
+    updated_at: (value.updated_at ?? value.updatedAt) as string | undefined,
+  }
+}
+
 export function protoDependencyConnector(e: Record<string, unknown>): DependencyConnector {
   return {
     id: String(e.id ?? 0),
@@ -939,30 +951,34 @@ export const api = {
         list: async (id: number): Promise<VisibilityOverride[]> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides`))
           if (!res.ok) throw new Error('Failed to load visibility overrides')
-          const json = await res.json() as { overrides?: VisibilityOverride[] }
-          return json.overrides ?? []
+          const json = await res.json() as { overrides?: Record<string, unknown>[] }
+          return (json.overrides ?? []).map((override) => normalizeVisibilityOverride(override))
         },
         set: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number, levelDelta: number): Promise<VisibilityOverride> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides`), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, level_delta: levelDelta }),
+            body: JSON.stringify({
+              resource_type: resourceType,
+              resource_id: resourceId,
+              level_delta: levelDelta,
+            }),
           })
           if (!res.ok) throw new Error('Failed to save visibility override')
-          const json = await res.json() as { override?: VisibilityOverride }
-          return json.override ?? { view_id: id, resource_type: resourceType, resource_id: resourceId, level_delta: levelDelta }
+          const json = await res.json() as { override?: Record<string, unknown> }
+          return normalizeVisibilityOverride(json.override ?? {}, { viewId: id, resourceType, resourceId, levelDelta })
         },
         promote: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number): Promise<VisibilityOverride> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides/${resourceType}/${resourceId}/promote`), { method: 'POST' })
           if (!res.ok) throw new Error('Failed to promote visibility')
-          const json = await res.json() as { override?: VisibilityOverride }
-          return json.override ?? { view_id: id, resource_type: resourceType, resource_id: resourceId, level_delta: 1 }
+          const json = await res.json() as { override?: Record<string, unknown> }
+          return normalizeVisibilityOverride(json.override ?? {}, { viewId: id, resourceType, resourceId, levelDelta: 1 })
         },
         demote: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number): Promise<VisibilityOverride> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides/${resourceType}/${resourceId}/demote`), { method: 'POST' })
           if (!res.ok) throw new Error('Failed to demote visibility')
-          const json = await res.json() as { override?: VisibilityOverride }
-          return json.override ?? { view_id: id, resource_type: resourceType, resource_id: resourceId, level_delta: -1 }
+          const json = await res.json() as { override?: Record<string, unknown> }
+          return normalizeVisibilityOverride(json.override ?? {}, { viewId: id, resourceType, resourceId, levelDelta: -1 })
         },
         reset: async (id: number, resourceType: VisibilityOverride['resource_type'], resourceId: number): Promise<void> => {
           const res = await fetch(apiUrl(`/views/${id}/visibility-overrides/${resourceType}/${resourceId}`), { method: 'DELETE' })
