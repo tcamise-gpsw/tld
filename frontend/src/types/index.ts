@@ -37,6 +37,7 @@ export interface LibraryElement {
   branch?: string | null
   file_path?: string | null
   language?: string | null
+  bypass_noise_gate?: boolean
   created_at: string
   updated_at: string
   has_view: boolean
@@ -80,6 +81,7 @@ export interface PlacedElement {
   branch?: string | null
   file_path?: string | null
   language?: string | null
+  bypass_noise_gate?: boolean
   has_view: boolean
   view_label: string | null
 }
@@ -165,6 +167,7 @@ export interface DependencyElement {
   branch?: string | null
   language?: string | null
   file_path?: string | null
+  bypass_noise_gate?: boolean
   created_at: string
   updated_at: string
 }

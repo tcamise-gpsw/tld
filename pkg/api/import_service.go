@@ -7,6 +7,7 @@ import (
 	diagv1 "buf.build/gen/go/tldiagramcom/diagram/protocolbuffers/go/diag/v1"
 	"connectrpc.com/connect"
 	"github.com/mertcikla/tld/v2/internal/importer"
+	"google.golang.org/protobuf/proto"
 )
 
 // ImportService implements import-related RPCs.
@@ -30,9 +31,17 @@ func (s *ImportService) ImportResources(ctx context.Context, req *connect.Reques
 		return nil, err
 	}
 
+	elements := proto.Clone(&diagv1.ApplyPlanRequest{Elements: m.GetElements()}).(*diagv1.ApplyPlanRequest).GetElements()
+	frontendBypassDefault := false
+	for _, element := range elements {
+		if element.BypassNoiseGate == nil {
+			element.BypassNoiseGate = &frontendBypassDefault
+		}
+	}
+
 	planReq := &diagv1.ApplyPlanRequest{
 		OrgId:      m.GetOrgId(),
-		Elements:   m.GetElements(),
+		Elements:   elements,
 		Connectors: m.GetConnectors(),
 	}
 

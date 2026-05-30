@@ -1877,10 +1877,10 @@ func (m *materializer) upsertElement(ctx context.Context, ownerType, ownerKey st
 	tags, _ := json.Marshal(input.Tags)
 	techLinks, _ := json.Marshal(technologyLinksForElement(input.Technology, input.Language))
 	id, err := m.store.insertReturningID(ctx, `
-		INSERT INTO elements(name, kind, description, technology, technology_connectors, tags, repo, branch, file_path, language, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO elements(name, kind, description, technology, technology_connectors, tags, repo, branch, file_path, language, bypass_noise_gate, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		input.Name, nullString(input.Kind), nullString(input.Description), nullString(input.Technology), string(techLinks), string(tags),
-		nullString(input.Repo), nullString(input.Branch), nullString(input.FilePath), nullString(input.Language), now, now)
+		nullString(input.Repo), nullString(input.Branch), nullString(input.FilePath), nullString(input.Language), true, now, now)
 	if err != nil {
 		return 0, err
 	}

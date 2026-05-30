@@ -31,6 +31,42 @@ func TestProjectViewContentIsMonotonicAcrossDensityLevels(t *testing.T) {
 	}
 }
 
+func TestProjectViewContentBypassNoiseGateDoesNotConsumeElementCap(t *testing.T) {
+	placements := make([]PlacedElement, 0, 6)
+	for id := int64(1); id <= 6; id++ {
+		placement := densityTestPlacement(id)
+		if id == 6 {
+			placement.BypassNoiseGate = true
+		}
+		placements = append(placements, placement)
+	}
+
+	content := ProjectViewContent(placements, nil, nil, MinDensityLevel, EmptyDensitySignals())
+	if len(content.Placements) != 5 {
+		t.Fatalf("placements = %d, want cap 4 plus bypass element; ids=%v", len(content.Placements), sortedIDs(placementIDSet(content.Placements)))
+	}
+	if !containsDensityPlacement(content.Placements, 6) {
+		t.Fatalf("bypass element missing from compact projection: ids=%v", sortedIDs(placementIDSet(content.Placements)))
+	}
+}
+
+func TestProjectViewContentBypassNoiseGateIgnoresElementOverrideUntilDisabled(t *testing.T) {
+	bypassed := densityTestPlacement(1)
+	bypassed.BypassNoiseGate = true
+	gateToFull := []VisibilityOverride{densityTestGate(1, 2)}
+
+	content := ProjectViewContent([]PlacedElement{bypassed}, nil, gateToFull, MinDensityLevel, EmptyDensitySignals())
+	if !containsDensityPlacement(content.Placements, 1) {
+		t.Fatal("bypass element should ignore an element visibility override")
+	}
+
+	bypassed.BypassNoiseGate = false
+	content = ProjectViewContent([]PlacedElement{bypassed}, nil, gateToFull, MinDensityLevel, EmptyDensitySignals())
+	if containsDensityPlacement(content.Placements, 1) {
+		t.Fatal("element visibility override should apply again when bypass is disabled")
+	}
+}
+
 func FuzzProjectViewContentPlacementsAreMonotonicAcrossDensityLevels(f *testing.F) {
 	f.Add([]byte{14, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2})
 	f.Add([]byte{40, 1, 5, 9, 13, 17, 21, 25, 29, 33})
@@ -127,6 +163,15 @@ func connectorIDSet(connectors []Connector) map[int64]struct{} {
 		out[connector.ID] = struct{}{}
 	}
 	return out
+}
+
+func containsDensityPlacement(items []PlacedElement, elementID int64) bool {
+	for _, item := range items {
+		if item.ElementID == elementID {
+			return true
+		}
+	}
+	return false
 }
 
 func assertPlacementSubset(t *testing.T, lower, higher map[int64]struct{}, lowerLevel, higherLevel int) {

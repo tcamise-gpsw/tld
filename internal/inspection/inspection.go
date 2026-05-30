@@ -51,26 +51,27 @@ type Report struct {
 }
 
 type ElementReport struct {
-	Ref          string          `json:"ref"`
-	Name         string          `json:"name"`
-	Kind         string          `json:"kind"`
-	Owner        string          `json:"owner,omitempty"`
-	Description  string          `json:"description,omitempty"`
-	Technology   string          `json:"technology,omitempty"`
-	URL          string          `json:"url,omitempty"`
-	LogoURL      string          `json:"logo_url,omitempty"`
-	Repo         string          `json:"repo,omitempty"`
-	Branch       string          `json:"branch,omitempty"`
-	Language     string          `json:"language,omitempty"`
-	FilePath     string          `json:"file_path,omitempty"`
-	Symbol       string          `json:"symbol,omitempty"`
-	Tags         []string        `json:"tags,omitempty"`
-	HasView      bool            `json:"has_view"`
-	ViewLabel    string          `json:"view_label,omitempty"`
-	DensityLevel int             `json:"density_level,omitempty"`
-	Placements   []PlacementInfo `json:"placements,omitempty"`
-	Children     []string        `json:"derived_children,omitempty"`
-	Metadata     *MetadataInfo   `json:"metadata,omitempty"`
+	Ref             string          `json:"ref"`
+	Name            string          `json:"name"`
+	Kind            string          `json:"kind"`
+	Owner           string          `json:"owner,omitempty"`
+	Description     string          `json:"description,omitempty"`
+	Technology      string          `json:"technology,omitempty"`
+	URL             string          `json:"url,omitempty"`
+	LogoURL         string          `json:"logo_url,omitempty"`
+	Repo            string          `json:"repo,omitempty"`
+	Branch          string          `json:"branch,omitempty"`
+	Language        string          `json:"language,omitempty"`
+	FilePath        string          `json:"file_path,omitempty"`
+	Symbol          string          `json:"symbol,omitempty"`
+	Tags            []string        `json:"tags,omitempty"`
+	HasView         bool            `json:"has_view"`
+	ViewLabel       string          `json:"view_label,omitempty"`
+	DensityLevel    int             `json:"density_level,omitempty"`
+	BypassNoiseGate *bool           `json:"bypass_noise_gate,omitempty"`
+	Placements      []PlacementInfo `json:"placements,omitempty"`
+	Children        []string        `json:"derived_children,omitempty"`
+	Metadata        *MetadataInfo   `json:"metadata,omitempty"`
 }
 
 type ConnectorReport struct {
@@ -230,25 +231,26 @@ func matchesFor(ws *workspace.Workspace, ref string) []string {
 
 func buildElementReport(ref string, element *workspace.Element, index resourceIndex, meta *workspace.ResourceMetadata) *ElementReport {
 	out := &ElementReport{
-		Ref:          ref,
-		Name:         element.Name,
-		Kind:         element.Kind,
-		Owner:        element.Owner,
-		Description:  element.Description,
-		Technology:   element.Technology,
-		URL:          element.URL,
-		LogoURL:      element.LogoURL,
-		Repo:         element.Repo,
-		Branch:       element.Branch,
-		Language:     element.Language,
-		FilePath:     element.FilePath,
-		Symbol:       element.Symbol,
-		Tags:         cloneStrings(element.Tags),
-		HasView:      element.HasView,
-		ViewLabel:    element.ViewLabel,
-		DensityLevel: element.DensityLevel,
-		Children:     cloneStrings(index.children[ref]),
-		Metadata:     metadataInfo(meta),
+		Ref:             ref,
+		Name:            element.Name,
+		Kind:            element.Kind,
+		Owner:           element.Owner,
+		Description:     element.Description,
+		Technology:      element.Technology,
+		URL:             element.URL,
+		LogoURL:         element.LogoURL,
+		Repo:            element.Repo,
+		Branch:          element.Branch,
+		Language:        element.Language,
+		FilePath:        element.FilePath,
+		Symbol:          element.Symbol,
+		Tags:            cloneStrings(element.Tags),
+		HasView:         element.HasView,
+		ViewLabel:       element.ViewLabel,
+		DensityLevel:    element.DensityLevel,
+		BypassNoiseGate: element.BypassNoiseGate,
+		Children:        cloneStrings(index.children[ref]),
+		Metadata:        metadataInfo(meta),
 	}
 	for _, placement := range element.Placements {
 		out.Placements = append(out.Placements, PlacementInfo{

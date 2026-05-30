@@ -125,6 +125,64 @@ func TestDensityProjectionPromotedConnectorPullsEndpoints(t *testing.T) {
 	}
 }
 
+func TestDensityProjectionBypassNoiseGateDoesNotConsumeElementCap(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 1 WHERE id = 106`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -2); err != nil {
+		t.Fatal(err)
+	}
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content.Placements) != 5 {
+		t.Fatalf("compact placements = %d, want cap 4 plus bypass element; ids=%v", len(content.Placements), placementIDs(content.Placements))
+	}
+	if !containsPlacement(content.Placements, 106) {
+		t.Fatalf("bypass element missing from compact projection: ids=%v", placementIDs(content.Placements))
+	}
+}
+
+func TestDensityProjectionBypassNoiseGateIgnoresOverrideUntilDisabled(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	seedDensityView(t, sqliteStore)
+	ctx := context.Background()
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 1 WHERE id = 106`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqliteStore.SetVisibilityOverride(ctx, 1, "element", 106, -2); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.SetViewDensityLevel(ctx, 1, -2); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPlacement(content.Placements, 106) {
+		t.Fatal("bypass element should ignore its element visibility override")
+	}
+
+	if _, err := sqliteStore.DB().ExecContext(ctx, `UPDATE elements SET bypass_noise_gate = 0 WHERE id = 106`); err != nil {
+		t.Fatal(err)
+	}
+	content, err = sqliteStore.ProjectedViewContent(ctx, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPlacement(content.Placements, 106) {
+		t.Fatal("element visibility override should apply again when bypass is disabled")
+	}
+}
+
 func TestRichNoiseGateRemainsVisibleAtRichAndFullDensity(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	seedDensityView(t, sqliteStore)

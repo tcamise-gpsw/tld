@@ -781,6 +781,7 @@ function ViewEditorInner({
           technology: obj.technology, url: obj.url, logo_url: obj.logo_url,
           technology_connectors: obj.technology_connectors, tags: obj.tags, repo: obj.repo,
           branch: obj.branch, file_path: obj.file_path, language: obj.language,
+          bypass_noise_gate: obj.bypass_noise_gate ?? false,
           created_at: '', updated_at: '', has_view: false, view_label: null,
         })
         openElementPanelRef.current()
@@ -1573,6 +1574,7 @@ function ViewEditorInner({
       branch: match.branch,
       file_path: match.file_path,
       language: match.language,
+      bypass_noise_gate: match.bypass_noise_gate ?? false,
       created_at: '',
       updated_at: '',
       has_view: match.has_view,
@@ -2236,6 +2238,7 @@ function ViewEditorInner({
         logo_url: null,
         technology_connectors: [],
         tags: [],
+        bypass_noise_gate: false,
         has_view: false,
         view_label: null,
         links: EMPTY_LINKS,

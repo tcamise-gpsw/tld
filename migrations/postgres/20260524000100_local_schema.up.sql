@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS elements (
   branch TEXT NULL,
   file_path TEXT NULL,
   language TEXT NULL,
+  bypass_noise_gate BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

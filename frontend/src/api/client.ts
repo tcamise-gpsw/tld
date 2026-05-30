@@ -410,6 +410,7 @@ export function protoElementToLibrary(e: Record<string, unknown>): LibraryElemen
     updated_at: String(e.updated_at ?? e.updatedAt ?? new Date().toISOString()),
     has_view: Boolean(e.has_view ?? e.hasView ?? false),
     view_label: (e.view_label ?? e.viewLabel ?? null) as string | null,
+    bypass_noise_gate: Boolean(e.bypass_noise_gate ?? e.bypassNoiseGate ?? false),
   }
 }
 
@@ -424,6 +425,7 @@ export function libraryElementToDependency(element: LibraryElement): DependencyE
     logo_url: element.logo_url,
     technology_connectors: element.technology_connectors,
     tags: element.tags,
+    bypass_noise_gate: element.bypass_noise_gate ?? false,
     repo: element.repo,
     branch: element.branch,
     language: element.language,
@@ -455,6 +457,7 @@ export function protoPlacedElement(p: Record<string, unknown>): PlacedElement {
     language: (p.language ?? null) as string | null,
     has_view: Boolean(p.has_view ?? p.hasView ?? false),
     view_label: (p.view_label ?? p.viewLabel ?? null) as string | null,
+    bypass_noise_gate: Boolean(p.bypass_noise_gate ?? p.bypassNoiseGate ?? false),
   }
 }
 
@@ -476,6 +479,16 @@ export function protoConnector(e: Record<string, unknown>): Connector {
     created_at: String(e.created_at ?? e.createdAt ?? new Date().toISOString()),
     updated_at: String(e.updated_at ?? e.updatedAt ?? new Date().toISOString()),
   }
+}
+
+export function normalizeFrontendImportElements(elements: PlanElement[]): PlanElement[] {
+  return elements.map((element) => {
+    const raw = element as Record<string, unknown>
+    if (raw.bypassNoiseGate != null || raw.bypass_noise_gate != null) {
+      return element
+    }
+    return { ...element, bypassNoiseGate: false } as PlanElement
+  })
 }
 
 function normalizeVisibilityOverride(value: Record<string, unknown>, fallback?: { viewId: number; resourceType: VisibilityOverride['resource_type']; resourceId: number; levelDelta: number }): VisibilityOverride {
@@ -581,7 +594,7 @@ export const api = {
 
     create: (data: Partial<LibraryElement>): Promise<LibraryElement> =>
       rpc(async () => {
-        const res = await workspaceClient.createElement({
+        const request = {
           name: data.name ?? '',
           kind: data.kind ?? '',
           description: data.description ?? undefined,
@@ -599,14 +612,16 @@ export const api = {
           branch: data.branch ?? undefined,
           filePath: data.file_path ?? undefined,
           language: data.language ?? undefined,
-        })
+          bypassNoiseGate: data.bypass_noise_gate ?? false,
+        }
+        const res = await workspaceClient.createElement(request as Parameters<typeof workspaceClient.createElement>[0])
         const json = j<{ element: Record<string, unknown> }>(CreateElementResponseSchema, res)
         return protoElementToLibrary(json.element ?? {})
       }),
 
     update: (id: number, data: Partial<LibraryElement>): Promise<LibraryElement> =>
       rpc(async () => {
-        const res = await workspaceClient.updateElement({
+        const request = {
           elementId: id,
           name: data.name ?? undefined,
           kind: data.kind ?? undefined,
@@ -625,7 +640,9 @@ export const api = {
           branch: data.branch ?? undefined,
           filePath: data.file_path ?? undefined,
           language: data.language ?? undefined,
-        })
+          bypassNoiseGate: data.bypass_noise_gate,
+        }
+        const res = await workspaceClient.updateElement(request as Parameters<typeof workspaceClient.updateElement>[0])
         const json = j<{ element: Record<string, unknown> }>(UpdateElementResponseSchema, res)
         return protoElementToLibrary(json.element ?? {})
       }),
@@ -1292,7 +1309,7 @@ export const api = {
       rpc(async () => {
         const res = await importClient.importResources({
           orgId: orgIdOrLocal(orgId),
-          elements: data.elements,
+          elements: normalizeFrontendImportElements(data.elements),
           connectors: data.connectors,
         })
         return { view_id: res.viewId, view_url: res.viewUrl }

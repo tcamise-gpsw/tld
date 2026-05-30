@@ -178,6 +178,8 @@ func (a *APIAdapter) CreateElement(ctx context.Context, _ uuid.UUID, input api.E
 		Branch:               input.Branch,
 		Language:             input.Language,
 		FilePath:             input.FilePath,
+		BypassNoiseGate:      boolValue(input.BypassNoiseGate),
+		BypassNoiseGateSet:   input.BypassNoiseGate != nil,
 		HasView:              input.HasView,
 		ViewLabel:            input.ViewLabel,
 	})
@@ -201,6 +203,8 @@ func (a *APIAdapter) UpdateElement(ctx context.Context, id int32, _ uuid.UUID, i
 		Branch:               input.Branch,
 		Language:             input.Language,
 		FilePath:             input.FilePath,
+		BypassNoiseGate:      boolValue(input.BypassNoiseGate),
+		BypassNoiseGateSet:   input.BypassNoiseGate != nil,
 		HasView:              input.HasView,
 		ViewLabel:            input.ViewLabel,
 	})
@@ -563,22 +567,27 @@ func (a *APIAdapter) ApplyPlan(ctx context.Context, _ uuid.UUID, req *diagv1.App
 		if planned.GetRef() == "" {
 			return nil, fmt.Errorf("plan element ref is required")
 		}
+		bypassNoiseGate := true
+		if planned.BypassNoiseGate != nil {
+			bypassNoiseGate = planned.GetBypassNoiseGate()
+		}
 
 		input := api.ElementInput{
-			Name:        planned.GetName(),
-			Description: planned.Description,
-			Kind:        planned.Kind,
-			Technology:  planned.Technology,
-			URL:         planned.Url,
-			LogoURL:     planned.LogoUrl,
-			TechLinks:   cloneTechLinks(planned.GetTechnologyLinks()),
-			Tags:        cloneStrings(planned.GetTags()),
-			Repo:        planned.Repo,
-			Branch:      planned.Branch,
-			Language:    planned.Language,
-			FilePath:    planned.FilePath,
-			HasView:     planned.GetHasView(),
-			ViewLabel:   planned.ViewLabel,
+			Name:            planned.GetName(),
+			Description:     planned.Description,
+			Kind:            planned.Kind,
+			Technology:      planned.Technology,
+			URL:             planned.Url,
+			LogoURL:         planned.LogoUrl,
+			TechLinks:       cloneTechLinks(planned.GetTechnologyLinks()),
+			Tags:            cloneStrings(planned.GetTags()),
+			Repo:            planned.Repo,
+			Branch:          planned.Branch,
+			Language:        planned.Language,
+			FilePath:        planned.FilePath,
+			BypassNoiseGate: &bypassNoiseGate,
+			HasView:         planned.GetHasView(),
+			ViewLabel:       planned.ViewLabel,
 		}
 
 		var element *diagv1.Element
@@ -1095,15 +1104,16 @@ func viewNodeToProto(node app.ViewTreeNode, workspaceID uuid.UUID) *diagv1.View 
 
 func elementToProto(element app.LibraryElement, workspaceID uuid.UUID) *diagv1.Element {
 	p := &diagv1.Element{
-		Id:        int32(element.ID),
-		OrgId:     workspaceID.String(),
-		Name:      element.Name,
-		Kind:      element.Kind,
-		Tags:      cloneStrings(element.Tags),
-		CreatedAt: ts(element.CreatedAt),
-		UpdatedAt: ts(element.UpdatedAt),
-		HasView:   element.HasView,
-		ViewLabel: element.ViewLabel,
+		Id:              int32(element.ID),
+		OrgId:           workspaceID.String(),
+		Name:            element.Name,
+		Kind:            element.Kind,
+		Tags:            cloneStrings(element.Tags),
+		CreatedAt:       ts(element.CreatedAt),
+		UpdatedAt:       ts(element.UpdatedAt),
+		HasView:         element.HasView,
+		ViewLabel:       element.ViewLabel,
+		BypassNoiseGate: element.BypassNoiseGate,
 	}
 	if element.Description != nil {
 		p.Description = element.Description
@@ -1149,16 +1159,17 @@ func elementToProto(element app.LibraryElement, workspaceID uuid.UUID) *diagv1.E
 
 func placedElementToProto(item app.PlacedElement) *diagv1.PlacedElement {
 	p := &diagv1.PlacedElement{
-		Id:        int32(item.ID),
-		ViewId:    int32(item.ViewID),
-		ElementId: int32(item.ElementID),
-		PositionX: item.PositionX,
-		PositionY: item.PositionY,
-		Name:      item.Name,
-		Kind:      item.Kind,
-		Tags:      cloneStrings(item.Tags),
-		HasView:   item.HasView,
-		ViewLabel: item.ViewLabel,
+		Id:              int32(item.ID),
+		ViewId:          int32(item.ViewID),
+		ElementId:       int32(item.ElementID),
+		PositionX:       item.PositionX,
+		PositionY:       item.PositionY,
+		Name:            item.Name,
+		Kind:            item.Kind,
+		Tags:            cloneStrings(item.Tags),
+		HasView:         item.HasView,
+		ViewLabel:       item.ViewLabel,
+		BypassNoiseGate: item.BypassNoiseGate,
 	}
 	if item.Description != nil {
 		p.Description = item.Description
@@ -1346,6 +1357,10 @@ func derefStringDefault(value *string, fallback string) string {
 		return fallback
 	}
 	return *value
+}
+
+func boolValue(value *bool) bool {
+	return value != nil && *value
 }
 
 func containsFold(s, substr string) bool {

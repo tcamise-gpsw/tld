@@ -53,6 +53,7 @@ type ElementInput struct {
 	Branch      *string
 	Language    *string
 	FilePath    *string
+	BypassNoiseGate *bool
 	HasView     bool
 	ViewLabel   *string
 }

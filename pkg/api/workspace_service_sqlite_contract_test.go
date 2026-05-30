@@ -201,6 +201,64 @@ func TestWorkspaceServiceSQLiteCriticalPathRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkspaceServiceSQLiteElementBypassNoiseGateCreateAndUpdate(t *testing.T) {
+	ctx := context.Background()
+	client := newSQLiteWorkspaceClient(t)
+
+	created, err := client.CreateElement(ctx, connect.NewRequest(&diagv1.CreateElementRequest{
+		Name: "Manual Element",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Msg.GetElement().GetBypassNoiseGate() {
+		t.Fatal("CreateElement should default bypass_noise_gate to false")
+	}
+
+	enabled := true
+	updated, err := client.UpdateElement(ctx, connect.NewRequest(&diagv1.UpdateElementRequest{
+		ElementId:       created.Msg.GetElement().GetId(),
+		Name:            "Manual Element",
+		BypassNoiseGate: &enabled,
+		TechnologyLinks: created.Msg.GetElement().GetTechnologyLinks(),
+		Tags:            created.Msg.GetElement().GetTags(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Msg.GetElement().GetBypassNoiseGate() {
+		t.Fatal("UpdateElement should enable explicit bypass_noise_gate=true")
+	}
+
+	preserved, err := client.UpdateElement(ctx, connect.NewRequest(&diagv1.UpdateElementRequest{
+		ElementId:       created.Msg.GetElement().GetId(),
+		Name:            "Manual Element Renamed",
+		TechnologyLinks: updated.Msg.GetElement().GetTechnologyLinks(),
+		Tags:            updated.Msg.GetElement().GetTags(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preserved.Msg.GetElement().GetBypassNoiseGate() {
+		t.Fatal("UpdateElement should preserve bypass_noise_gate when omitted")
+	}
+
+	disabled := false
+	updated, err = client.UpdateElement(ctx, connect.NewRequest(&diagv1.UpdateElementRequest{
+		ElementId:       created.Msg.GetElement().GetId(),
+		Name:            "Manual Element Renamed",
+		BypassNoiseGate: &disabled,
+		TechnologyLinks: preserved.Msg.GetElement().GetTechnologyLinks(),
+		Tags:            preserved.Msg.GetElement().GetTags(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Msg.GetElement().GetBypassNoiseGate() {
+		t.Fatal("UpdateElement should disable explicit bypass_noise_gate=false")
+	}
+}
+
 func TestWorkspaceServiceSQLiteGetViewHonorsElementOverrideThreshold(t *testing.T) {
 	for _, tt := range []struct {
 		name           string

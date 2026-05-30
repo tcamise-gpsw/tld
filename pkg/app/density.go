@@ -166,6 +166,14 @@ func projectViewContentAtLevel(placements []PlacedElement, connectors []Connecto
 	rankedElements := make([]rankedElement, 0, len(placements))
 	gatedElements := make(map[int64]struct{})
 	for _, placement := range placements {
+		if placement.BypassNoiseGate {
+			rankedElements = append(rankedElements, rankedElement{
+				item:         placement,
+				score:        baseElementScore(placement, degree[placement.ElementID], signals),
+				forceVisible: true,
+			})
+			continue
+		}
 		if level < 2 && placement.Kind != nil && *placement.Kind == "dependency-group" {
 			continue
 		}

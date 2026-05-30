@@ -22,6 +22,7 @@ import {
   SliderFilledTrack,
   SliderThumb,
   SliderTrack,
+  Switch,
   Tag,
   TagCloseButton,
   TagLabel,
@@ -204,6 +205,7 @@ function buildTechnologyFingerprintPayload(
     logo_url: element.logo_url ?? '',
     technology_connectors: normalizedLinks,
     tags: element.tags ?? [],
+    bypass_noise_gate: element.bypass_noise_gate ?? false,
     repo: element.repo,
     branch: element.branch,
     file_path: element.file_path,
@@ -302,6 +304,7 @@ function ElementPanel({
   const [technologyMeta, setTechnologyMeta] = useState<Record<string, TechnologyCatalogItem>>({})
   const [technologySearchLoading, setTechnologySearchLoading] = useState(false)
   const [tags, setTags] = useState<string[]>([])
+  const [bypassNoiseGate, setBypassNoiseGate] = useState(false)
   const [loading, setLoading] = useState(false)
   const [explicitLogoClear, setExplicitLogoClear] = useState(false)
   const [draftNoiseGateLevel, setDraftNoiseGateLevel] = useState(() => noiseGateLevelFromVisibilityDelta(visibilityOverrideDelta))
@@ -344,6 +347,7 @@ function ElementPanel({
       setTypeResults([])
       setUrl(element.url ?? '')
       setTags(element.tags ?? [])
+      setBypassNoiseGate(element.bypass_noise_gate ?? false)
       setExplicitLogoClear(element.logo_url === '')
 
       const linksFromElement = (element.technology_connectors ?? []).map(tl => ({
@@ -392,6 +396,7 @@ function ElementPanel({
       setTechnologyResults([])
       setTechnologyMeta({})
       setTags([])
+      setBypassNoiseGate(false)
       setExplicitLogoClear(false)
       lastSavedFingerprintRef.current = ''
     }
@@ -444,13 +449,14 @@ function ElementPanel({
       logo_url: logoUrl,
       technology_connectors: normalizedLinks,
       tags,
+      bypass_noise_gate: bypassNoiseGate,
       repo: element?.repo,
       branch: element?.branch,
       file_path: element?.file_path,
       language: element?.language,
     }
     return { payload, fingerprint: JSON.stringify(payload) }
-  }, [technologyLinks, technologyMeta, explicitLogoClear, type, element, name, description, url, tags])
+  }, [technologyLinks, technologyMeta, explicitLogoClear, type, element, name, description, url, tags, bypassNoiseGate])
 
   const saveIfDirty = useCallback(async () => {
     if (!autoSaveEdit || !element) return
@@ -497,7 +503,7 @@ function ElementPanel({
       void saveIfDirtyRef.current?.()
     }, 150)
     return () => window.clearTimeout(timer)
-  }, [autoSaveEdit, element, name, description, type, url, tags, technologyLinks, explicitLogoClear])
+  }, [autoSaveEdit, element, name, description, type, url, tags, technologyLinks, explicitLogoClear, bypassNoiseGate])
 
   const handleClose = useCallback(async () => {
     if (autoSaveEdit) {
@@ -640,6 +646,7 @@ function ElementPanel({
         logo_url: explicitLogoClear ? '' : (primaryMetadata?.iconUrl ?? ''),
         technology_connectors: normalizedLinks,
         tags,
+        bypass_noise_gate: bypassNoiseGate,
       }
       const saved = isEdit
         ? await api.elements.update(element!.id, payload)
@@ -651,7 +658,7 @@ function ElementPanel({
     } finally {
       setLoading(false)
     }
-  }, [isReadOnly, name, technologyLinks, technologyMeta, type, explicitLogoClear, tags, isEdit, element, onSave, handleClose, description, url])
+  }, [isReadOnly, name, technologyLinks, technologyMeta, type, explicitLogoClear, tags, bypassNoiseGate, isEdit, element, onSave, handleClose, description, url])
 
   useEffect(() => {
     if (!isOpen) return
@@ -778,7 +785,7 @@ function ElementPanel({
     } catch { /* intentionally empty */ }
   }
 
-  const activeNoiseGateLabel = NOISE_GATE_STOPS.find((stop) => stop.value === draftNoiseGateLevel)?.label ?? 'Normal'
+  const activeNoiseGateLabel = bypassNoiseGate ? 'Bypassed' : (NOISE_GATE_STOPS.find((stop) => stop.value === draftNoiseGateLevel)?.label ?? 'Normal')
   const showNoiseGateControls = !!element && !!(onVisibilityOverrideDeltaChange || onPromoteVisibility || onDemoteVisibility || onResetVisibility)
 
   return (
@@ -1108,6 +1115,25 @@ function ElementPanel({
               <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1}>
                 {showNoiseGateControls && (
                   <>
+                    <HStack justify="space-between" align="center" mb={3}>
+                      <Box>
+                        <FormLabel fontSize="sm" fontFamily="var(--chakra-fonts-heading)" mb={0.5}>
+                          Bypass noise gate
+                        </FormLabel>
+                        <Text fontSize="xs" color="gray.500">Keep this element visible at every density</Text>
+                      </Box>
+                      <Switch
+                        data-testid="element-panel-bypass-noise-gate"
+                        aria-label="Bypass noise gate"
+                        isChecked={bypassNoiseGate}
+                        isDisabled={isReadOnly}
+                        colorScheme="blue"
+                        onChange={(event) => {
+                          setBypassNoiseGate(event.target.checked)
+                          scheduleAutoSave()
+                        }}
+                      />
+                    </HStack>
                     <HStack justify="space-between" align="flex-start" mb={2.5}>
                       <Box>
                         <FormLabel fontSize="sm" fontFamily="var(--chakra-fonts-heading)">
@@ -1142,7 +1168,7 @@ function ElementPanel({
                           void handleNoiseGateChange(value)
                         }}
                         focusThumbOnChange={false}
-                        isDisabled={isReadOnly}
+                        isDisabled={isReadOnly || bypassNoiseGate}
                       >
                         <SliderTrack h="4px" bg="whiteAlpha.200">
                           <SliderFilledTrack bg="var(--accent)" />

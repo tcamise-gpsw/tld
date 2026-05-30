@@ -339,6 +339,57 @@ func TestStoreUndoableElementUpdatesPreserveAndRestoreFields(t *testing.T) {
 	}
 }
 
+func TestStoreElementBypassNoiseGateDefaultsFalseAndPatches(t *testing.T) {
+	store := openAppStore(t)
+	ctx := context.Background()
+
+	defaulted, err := store.CreateElement(ctx, LibraryElement{Name: "Defaulted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaulted.BypassNoiseGate {
+		t.Fatal("frontend/default element should not bypass noise gate unless explicitly set")
+	}
+
+	enabled, err := store.UpdateElement(ctx, defaulted.ID, LibraryElement{Name: "Defaulted", BypassNoiseGate: true, BypassNoiseGateSet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !enabled.BypassNoiseGate {
+		t.Fatal("explicit update should enable noise gate bypass")
+	}
+
+	preserved, err := store.UpdateElement(ctx, defaulted.ID, LibraryElement{Name: "Renamed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preserved.BypassNoiseGate {
+		t.Fatal("omitted update should preserve existing noise gate bypass")
+	}
+
+	disabled, err := store.UpdateElement(ctx, defaulted.ID, LibraryElement{Name: "Renamed", BypassNoiseGate: false, BypassNoiseGateSet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.BypassNoiseGate {
+		t.Fatal("explicit update should disable noise gate bypass")
+	}
+
+	if _, err := store.DB().ExecContext(ctx, `
+		INSERT INTO elements(name, tags, technology_connectors, created_at, updated_at)
+		VALUES ('Existing Row', '[]', '[]', 'now', 'now')
+	`); err != nil {
+		t.Fatal(err)
+	}
+	existing, _, err := store.Elements(ctx, 0, 0, "Existing Row")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(existing) != 1 || existing[0].BypassNoiseGate {
+		t.Fatalf("existing row default = %+v, want bypass false", existing)
+	}
+}
+
 func TestStoreUndoablePlacementRemoveAndRestorePreservesElement(t *testing.T) {
 	store := openAppStore(t)
 	ctx := context.Background()

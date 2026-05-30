@@ -112,6 +112,10 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 			HasView:     false,
 			ViewLabel:   strings.TrimSpace(elem.GetViewLabel()),
 		}
+		if !elem.GetBypassNoiseGate() {
+			value := false
+			newElem.BypassNoiseGate = &value
+		}
 		existing := base.Elements[ref]
 		if existing != nil {
 			if existing.Name != "" {
@@ -164,6 +168,10 @@ func ExportWithProgress(ctx context.Context, sqliteStore *store.SQLiteStore, wat
 			}
 			if existing.DensityLevel > 0 {
 				newElem.DensityLevel = existing.DensityLevel
+			}
+			if existing.BypassNoiseGate != nil {
+				value := *existing.BypassNoiseGate
+				newElem.BypassNoiseGate = &value
 			}
 			newElem.Placements = append([]workspace.ViewPlacement(nil), existing.Placements...)
 		}

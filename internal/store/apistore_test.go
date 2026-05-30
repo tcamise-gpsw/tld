@@ -274,6 +274,39 @@ func TestApplyPlanPreservesExplicitPlacementCoordinates(t *testing.T) {
 	}
 }
 
+func TestApplyPlanDefaultsBypassNoiseGateTrueAndPreservesExplicitFalse(t *testing.T) {
+	sqliteStore := openAdapterTestStore(t)
+	explicitFalse := false
+
+	resp, err := NewAPIAdapter(sqliteStore).ApplyPlan(context.Background(), uuid.Nil, &diagv1.ApplyPlanRequest{
+		Elements: []*diagv1.PlanElement{
+			{Ref: "api", Name: "API"},
+			{Ref: "manual", Name: "Manual", BypassNoiseGate: &explicitFalse},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetCreatedElements()) != 2 {
+		t.Fatalf("created elements = %d, want 2", len(resp.GetCreatedElements()))
+	}
+
+	items, _, err := NewAPIAdapter(sqliteStore).ListElements(context.Background(), uuid.Nil, 0, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, item := range items {
+		got[item.GetName()] = item.GetBypassNoiseGate()
+	}
+	if !got["API"] {
+		t.Fatalf("CLI/apply element bypass = %v, want true by default", got["API"])
+	}
+	if got["Manual"] {
+		t.Fatalf("explicit false bypass = %v, want false preserved", got["Manual"])
+	}
+}
+
 func TestListElementsMapsSearchPaginationAndViewMetadata(t *testing.T) {
 	sqliteStore := openAdapterTestStore(t)
 	db := sqliteStore.DB()

@@ -119,6 +119,7 @@ type elementModel struct {
 	Branch               *string    `bun:"branch"`
 	FilePath             *string    `bun:"file_path"`
 	Language             *string    `bun:"language"`
+	BypassNoiseGate      bool       `bun:"bypass_noise_gate"`
 	CreatedAt            string     `bun:"created_at"`
 	UpdatedAt            string     `bun:"updated_at"`
 }
@@ -290,6 +291,7 @@ func elementFromModel(row elementModel) LibraryElement {
 		Branch:               row.Branch,
 		FilePath:             row.FilePath,
 		Language:             row.Language,
+		BypassNoiseGate:      row.BypassNoiseGate,
 		CreatedAt:            row.CreatedAt,
 		UpdatedAt:            row.UpdatedAt,
 	}

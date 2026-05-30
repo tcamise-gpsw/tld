@@ -24,6 +24,7 @@ type placementJoinRow struct {
 	Branch               *string `bun:"branch"`
 	FilePath             *string `bun:"file_path"`
 	Language             *string `bun:"language"`
+	BypassNoiseGate      bool    `bun:"bypass_noise_gate"`
 }
 
 func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, error) {
@@ -31,7 +32,7 @@ func (s *Store) Placements(ctx context.Context, viewID int64) ([]PlacedElement, 
 	query := s.bun.NewSelect().
 		TableExpr("placements AS p").
 		ColumnExpr("p.id, p.view_id, p.element_id, p.position_x, p.position_y").
-		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language").
+		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language, e.bypass_noise_gate").
 		Join("JOIN elements AS e ON e.id = p.element_id").
 		Where("p.view_id = ?", viewID).
 		Order("p.id")
@@ -63,7 +64,7 @@ func (s *Store) AllPlacements(ctx context.Context) ([]PlacedElement, error) {
 	query := s.bun.NewSelect().
 		TableExpr("placements AS p").
 		ColumnExpr("p.id, p.view_id, p.element_id, p.position_x, p.position_y").
-		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language").
+		ColumnExpr("e.name, e.kind, e.description, e.technology, e.url, e.logo_url, e.technology_connectors, e.tags, e.repo, e.branch, e.file_path, e.language, e.bypass_noise_gate").
 		Join("JOIN elements AS e ON e.id = p.element_id").
 		Order("p.view_id").
 		Order("p.id")
@@ -206,5 +207,6 @@ func placedElementFromPlacementRow(row placementJoinRow) PlacedElement {
 		Branch:               row.Branch,
 		FilePath:             row.FilePath,
 		Language:             row.Language,
+		BypassNoiseGate:      row.BypassNoiseGate,
 	}
 }

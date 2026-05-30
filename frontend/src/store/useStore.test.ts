@@ -148,17 +148,17 @@ describe('pure view helpers', () => {
   it('removes placements and merges saved element fields', () => {
     const elements = [element(10), element(20)]
     expect(removePlacedElement(elements, 10).map((item) => item.element_id)).toEqual([20])
-    const merged = mergeSavedElementIntoPlacements(elements, libraryElement(10))
-    expect(merged[0]).toMatchObject({ name: 'Saved', kind: 'service', repo: 'repo', tags: ['api'] })
+    const merged = mergeSavedElementIntoPlacements(elements, { ...libraryElement(10), bypass_noise_gate: true })
+    expect(merged[0]).toMatchObject({ name: 'Saved', kind: 'service', repo: 'repo', tags: ['api'], bypass_noise_gate: true })
     expect(merged[1]).toBe(elements[1])
   })
 
   it('keeps library items available after removing their canvas placement', () => {
-    const onCanvas = element(10)
+    const onCanvas = { ...element(10), bypass_noise_gate: true }
     const libraryItems = buildElementLibraryItems([libraryElement(10), libraryElement(20)], [onCanvas])
 
     expect(libraryItems.map((item) => item.id)).toEqual([10, 20])
-    expect(libraryItems[0]).toMatchObject({ id: 10, name: onCanvas.name, created_at: '2024-01-01' })
+    expect(libraryItems[0]).toMatchObject({ id: 10, name: onCanvas.name, created_at: '2024-01-01', bypass_noise_gate: true })
 
     const afterRemoval = buildElementLibraryItems([libraryElement(10), libraryElement(20)], removePlacedElement([onCanvas], 10))
     expect(afterRemoval.map((item) => item.id)).toEqual([10, 20])

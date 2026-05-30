@@ -683,18 +683,19 @@ func (s *WorkspaceService) CreateElement(
 		tags = []string{}
 	}
 	input := ElementInput{
-		Name:        strings.TrimSpace(m.GetName()),
-		Description: OptStr(m.GetDescription()),
-		Kind:        OptStr(m.GetKind()),
-		Technology:  OptStr(m.GetTechnology()),
-		URL:         OptStr(m.GetUrl()),
-		LogoURL:     OptStr(m.GetLogoUrl()),
-		TechLinks:   techLinks,
-		Tags:        tags,
-		Repo:        OptStr(m.GetRepo()),
-		Branch:      OptStr(m.GetBranch()),
-		Language:    OptStr(m.GetLanguage()),
-		FilePath:    OptStr(m.GetFilePath()),
+		Name:            strings.TrimSpace(m.GetName()),
+		Description:     OptStr(m.GetDescription()),
+		Kind:            OptStr(m.GetKind()),
+		Technology:      OptStr(m.GetTechnology()),
+		URL:             OptStr(m.GetUrl()),
+		LogoURL:         OptStr(m.GetLogoUrl()),
+		TechLinks:       techLinks,
+		Tags:            tags,
+		Repo:            OptStr(m.GetRepo()),
+		Branch:          OptStr(m.GetBranch()),
+		Language:        OptStr(m.GetLanguage()),
+		FilePath:        OptStr(m.GetFilePath()),
+		BypassNoiseGate: m.BypassNoiseGate,
 	}
 	e, err := s.Store.CreateElement(ctx, workspaceID, input)
 	if err != nil {
@@ -759,20 +760,21 @@ func (s *WorkspaceService) UpdateElement(
 	}
 
 	input := ElementInput{
-		Name:        m.GetName(),
-		Description: m.Description,
-		Kind:        m.Kind,
-		Technology:  m.Technology,
-		URL:         m.Url,
-		LogoURL:     logoURL,
-		TechLinks:   techLinks,
-		Tags:        tags,
-		Repo:        m.Repo,
-		Branch:      m.Branch,
-		Language:    m.Language,
-		FilePath:    m.FilePath,
-		HasView:     existing.HasView,
-		ViewLabel:   existing.ViewLabel,
+		Name:            m.GetName(),
+		Description:     m.Description,
+		Kind:            m.Kind,
+		Technology:      m.Technology,
+		URL:             m.Url,
+		LogoURL:         logoURL,
+		TechLinks:       techLinks,
+		Tags:            tags,
+		Repo:            m.Repo,
+		Branch:          m.Branch,
+		Language:        m.Language,
+		FilePath:        m.FilePath,
+		BypassNoiseGate: m.BypassNoiseGate,
+		HasView:         existing.HasView,
+		ViewLabel:       existing.ViewLabel,
 	}
 	e, err := s.Store.UpdateElement(ctx, elementID, workspaceID, input)
 	if err != nil {
