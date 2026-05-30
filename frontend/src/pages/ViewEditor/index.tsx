@@ -1403,9 +1403,22 @@ function ViewEditorInner({
       clearEditHistory()
       await refreshElements()
     } catch {
-      toast({ status: 'error', title: 'Density was not saved' })
+      toast({ status: 'error', title: 'Noise gate was not saved' })
     }
   }, [clearEditHistory, refreshElements, toast, viewId])
+
+  const handleVisibilityOverrideDeltaChange = useCallback(async (resourceType: VisibilityOverride['resource_type'], resourceId: number, levelDelta: number) => {
+    if (viewId == null) return
+    try {
+      await api.workspace.views.visibilityOverrides.set(viewId, resourceType, resourceId, levelDelta)
+      clearEditHistory()
+      await reloadVisibilityOverrides()
+      await refreshElements()
+    } catch (error) {
+      toast({ status: 'error', title: 'Noise gate override was not saved' })
+      throw error
+    }
+  }, [clearEditHistory, refreshElements, reloadVisibilityOverrides, toast, viewId])
 
   const handleVisibilityOverride = useCallback(async (resourceType: VisibilityOverride['resource_type'], resourceId: number, action: 'promote' | 'demote' | 'reset') => {
     if (viewId == null) return
@@ -3536,8 +3549,7 @@ function ViewEditorInner({
             handleElementDeleted(elementId)
           }} onPermanentDelete={handleElementPermanentlyDeletedEverywhere}
           visibilityOverrideDelta={overrideDeltaFor('element', selectedElement?.id)}
-          onPromoteVisibility={(id) => handleVisibilityOverride('element', id, 'promote')}
-          onDemoteVisibility={(id) => handleVisibilityOverride('element', id, 'demote')}
+          onVisibilityOverrideDeltaChange={(id, delta) => handleVisibilityOverrideDeltaChange('element', id, delta)}
           onResetVisibility={(id) => handleVisibilityOverride('element', id, 'reset')}
           orgId={''}
           links={selectedElement ? (linksMap[selectedElement.id] || EMPTY_LINKS) : EMPTY_LINKS}

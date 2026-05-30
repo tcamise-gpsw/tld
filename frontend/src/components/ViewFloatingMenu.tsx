@@ -122,7 +122,7 @@ function ViewFloatingMenu({
   const { isOpen: isTagsOpen, onClose: onTagsClose, onToggle: onTagsToggle } = useDisclosure()
   const { isOpen: isFiltersOpen, onClose: onFiltersClose, onToggle: onFiltersToggle } = useDisclosure()
   const [draftDensityLevel, setDraftDensityLevel] = React.useState(densityLevel)
-  const activeDensityLabel = DENSITY_STOPS.find((stop) => stop.value === draftDensityLevel)?.label ?? 'Normal'
+  const activeNoiseGateLabel = DENSITY_STOPS.find((stop) => stop.value === draftDensityLevel)?.label ?? 'Normal'
   const showFilters = !hideFocusView || !!onDensityLevelChange
   const hasActiveFilters = (!hideFocusView && focusMode) || (!!onDensityLevelChange && densityLevel !== 0)
   const visibleTags = React.useMemo(
@@ -285,7 +285,7 @@ function ViewFloatingMenu({
                         >
                           <HStack justify="space-between" mb={2.5}>
                             <Box>
-                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Density</Text>
+                              <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Noise gate</Text>
                               <Text fontSize="10px" color="whiteAlpha.600">Control how much detail is shown</Text>
                             </Box>
                             <Text
@@ -299,12 +299,12 @@ function ViewFloatingMenu({
                               px={2}
                               py={0.5}
                             >
-                              {activeDensityLabel}
+                              {activeNoiseGateLabel}
                             </Text>
                           </HStack>
                           <Box px={1} pt={1} pb={0.5}>
                             <Slider
-                              aria-label="Density"
+                              aria-label="Noise gate"
                               min={-2}
                               max={2}
                               step={1}

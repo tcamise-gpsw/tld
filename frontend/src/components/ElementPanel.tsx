@@ -18,6 +18,10 @@ import {
   PopoverBody,
   PopoverContent,
   PopoverTrigger,
+  Slider,
+  SliderFilledTrack,
+  SliderThumb,
+  SliderTrack,
   Tag,
   TagCloseButton,
   TagLabel,
@@ -207,6 +211,26 @@ function buildTechnologyFingerprintPayload(
   }
 }
 
+const NOISE_GATE_STOPS = [
+  { value: -2, label: 'Quiet' },
+  { value: -1, label: 'Lean' },
+  { value: 0, label: 'Normal' },
+  { value: 1, label: 'Rich' },
+  { value: 2, label: 'Full' },
+] as const
+
+function clampNoiseGateLevel(level: number) {
+  return Math.max(-2, Math.min(2, level))
+}
+
+function noiseGateLevelFromVisibilityDelta(delta: number) {
+  return clampNoiseGateLevel(-delta)
+}
+
+function visibilityDeltaFromNoiseGateLevel(level: number) {
+  return -clampNoiseGateLevel(level)
+}
+
 export interface ElementPanelProps extends ElementPanelSlots {
   isOpen: boolean
   onClose: () => void
@@ -217,6 +241,7 @@ export interface ElementPanelProps extends ElementPanelSlots {
   onPermanentDelete?: (id: number) => void
   onMerge?: (id: number) => void
   visibilityOverrideDelta?: number
+  onVisibilityOverrideDeltaChange?: (id: number, delta: number) => Promise<void> | void
   onPromoteVisibility?: (id: number) => Promise<void> | void
   onDemoteVisibility?: (id: number) => Promise<void> | void
   onResetVisibility?: (id: number) => Promise<void> | void
@@ -246,6 +271,7 @@ function ElementPanel({
   onPermanentDelete,
   onMerge,
   visibilityOverrideDelta = 0,
+  onVisibilityOverrideDeltaChange,
   onPromoteVisibility,
   onDemoteVisibility,
   onResetVisibility,
@@ -278,6 +304,7 @@ function ElementPanel({
   const [tags, setTags] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [explicitLogoClear, setExplicitLogoClear] = useState(false)
+  const [draftNoiseGateLevel, setDraftNoiseGateLevel] = useState(() => noiseGateLevelFromVisibilityDelta(visibilityOverrideDelta))
   const typeInputRef = useRef<HTMLInputElement>(null)
   const techInputRef = useRef<HTMLInputElement>(null)
   const suppressTypeBlurRef = useRef(false)
@@ -480,6 +507,42 @@ function ElementPanel({
   }, [autoSaveEdit, onClose])
 
   useEffect(() => {
+    setDraftNoiseGateLevel(noiseGateLevelFromVisibilityDelta(visibilityOverrideDelta))
+  }, [element?.id, visibilityOverrideDelta])
+
+  const handleNoiseGateChange = useCallback(async (nextLevel: number) => {
+    if (!element) return
+
+    const nextDelta = visibilityDeltaFromNoiseGateLevel(nextLevel)
+    const currentDelta = visibilityDeltaFromNoiseGateLevel(noiseGateLevelFromVisibilityDelta(visibilityOverrideDelta))
+    if (nextDelta === currentDelta) return
+
+    try {
+      if (onVisibilityOverrideDeltaChange) {
+        await onVisibilityOverrideDeltaChange(element.id, nextDelta)
+        return
+      }
+
+      let delta = currentDelta
+      while (delta < nextDelta) {
+        if (!onPromoteVisibility) break
+        await onPromoteVisibility(element.id)
+        delta += 1
+      }
+      while (delta > nextDelta) {
+        if (!onDemoteVisibility) break
+        await onDemoteVisibility(element.id)
+        delta -= 1
+      }
+      if (delta !== nextDelta && nextDelta === 0 && onResetVisibility) {
+        await onResetVisibility(element.id)
+      }
+    } catch {
+      setDraftNoiseGateLevel(noiseGateLevelFromVisibilityDelta(visibilityOverrideDelta))
+    }
+  }, [element, onDemoteVisibility, onPromoteVisibility, onResetVisibility, onVisibilityOverrideDeltaChange, visibilityOverrideDelta])
+
+  useEffect(() => {
     if (!isOpen) return
     const query = typeQuery.trim()
     if (!query) {
@@ -596,7 +659,7 @@ function ElementPanel({
       const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target.isContentEditable
 
       if (e.key === 'Escape' && !isInput) handleClose()
-      
+
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         if (!autoSaveEdit) {
@@ -713,6 +776,9 @@ function ElementPanel({
       onClose()
     } catch { /* intentionally empty */ }
   }
+
+  const activeNoiseGateLabel = NOISE_GATE_STOPS.find((stop) => stop.value === draftNoiseGateLevel)?.label ?? 'Normal'
+  const showNoiseGateControls = !!element && !!(onVisibilityOverrideDeltaChange || onPromoteVisibility || onDemoteVisibility || onResetVisibility)
 
   return (
     <>
@@ -1037,7 +1103,100 @@ function ElementPanel({
                 ))}
               </Wrap>
             </FormControl>
+            {showNoiseGateControls || (isEdit && canEdit && onMerge) ? (
+              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1}>
+                {showNoiseGateControls && (
+                  <>
+                    <HStack justify="space-between" align="flex-start" mb={2.5}>
+                      <Box>
+                        <FormLabel fontSize="sm" fontFamily="var(--chakra-fonts-heading)">
+                          Noise gate
+                        </FormLabel>
+                        <Text fontSize="xs" color="gray.500">Choose when this element starts appearing</Text>
+                      </Box>
+                      <Text
+                        fontSize="xs"
+                        fontWeight="bold"
+                        color="var(--accent)"
+                        bg="rgba(var(--accent-rgb), 0.10)"
+                        border="1px solid"
+                        borderColor="rgba(var(--accent-rgb), 0.18)"
+                        rounded="full"
+                        px={2}
+                        py={0.5}
+                      >
+                        {activeNoiseGateLabel}
+                      </Text>
+                    </HStack>
+                    <Box px={1} pt={1} pb={0.5} mb={isEdit && canEdit && onMerge ? 3 : 0}>
+                      <Slider
+                        aria-label="Element noise gate"
+                        min={-2}
+                        max={2}
+                        step={1}
+                        value={draftNoiseGateLevel}
+                        onChange={setDraftNoiseGateLevel}
+                        onChangeEnd={(value) => {
+                          setDraftNoiseGateLevel(value)
+                          void handleNoiseGateChange(value)
+                        }}
+                        focusThumbOnChange={false}
+                        isDisabled={isReadOnly}
+                      >
+                        <SliderTrack h="4px" bg="whiteAlpha.200">
+                          <SliderFilledTrack bg="var(--accent)" />
+                        </SliderTrack>
+                        {NOISE_GATE_STOPS.map((stop) => (
+                          <Box
+                            key={stop.value}
+                            position="absolute"
+                            left={`${((stop.value + 2) / 4) * 100}%`}
+                            top="50%"
+                            transform="translate(-50%, -50%)"
+                            w={stop.value === draftNoiseGateLevel ? '6px' : '2px'}
+                            h={stop.value === draftNoiseGateLevel ? '6px' : '10px'}
+                            rounded="full"
+                            bg={draftNoiseGateLevel >= stop.value ? 'var(--accent)' : 'whiteAlpha.500'}
+                            pointerEvents="none"
+                          />
+                        ))}
+                        <SliderThumb boxSize="14px" bg="white" border="2px solid" borderColor="var(--accent)" />
+                      </Slider>
+                      <HStack justify="space-between" mt={2} px={0.5}>
+                        {NOISE_GATE_STOPS.map((stop) => (
+                          <Text
+                            key={stop.value}
+                            fontSize="9px"
+                            fontWeight={stop.value === draftNoiseGateLevel ? 'bold' : 'medium'}
+                            color={stop.value === draftNoiseGateLevel ? 'whiteAlpha.900' : 'whiteAlpha.500'}
+                          >
+                            {stop.label}
+                          </Text>
+                        ))}
+                      </HStack>
+                    </Box>
+                  </>
+                )}
 
+              </Box>
+            ) : null}
+            <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1}>
+              {isEdit && canEdit && onMerge && (
+                <Button
+                  data-testid="element-panel-merge"
+                  variant="outline"
+                  size="sm"
+                  borderColor="teal.700"
+                  color="teal.300"
+                  _hover={{ bg: 'teal.900', borderColor: 'teal.500', color: 'teal.100' }}
+                  onClick={() => onMerge(element.id)}
+                  w="full"
+                >
+                  Merge
+                </Button>
+              )}
+
+            </Box>
             {isEdit && element && (
               <GitSourceLinker
                 element={element}
@@ -1113,67 +1272,7 @@ function ElementPanel({
 
             {elementPanelAfterContentSlot}
 
-            {(element && (onPromoteVisibility || onDemoteVisibility || onResetVisibility)) || (isEdit && canEdit && onMerge) ? (
-              <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1}>
-                {element && (onPromoteVisibility || onDemoteVisibility || onResetVisibility) && (
-                  <>
-                    <HStack justify="space-between" mb={2}>
-                      <FormLabel fontSize="xs" fontWeight="semibold" letterSpacing="wider" color="gray.500" mb={0} textTransform="uppercase">Density</FormLabel>
-                      {visibilityOverrideDelta !== 0 && (
-                        <Badge colorScheme={visibilityOverrideDelta > 0 ? 'teal' : 'orange'} variant="subtle" fontSize="xs">
-                          {visibilityOverrideDelta > 0 ? `+${visibilityOverrideDelta}` : visibilityOverrideDelta}
-                        </Badge>
-                      )}
-                    </HStack>
-                    <HStack spacing={2} mb={isEdit && canEdit && onMerge ? 2 : 0}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        borderColor="teal.700"
-                        color="teal.300"
-                        _hover={{ bg: 'teal.900', borderColor: 'teal.500', color: 'teal.100' }}
-                        onClick={() => onPromoteVisibility?.(element.id)}
-                        flex={1}
-                        isDisabled={isReadOnly}
-                      >
-                        Promote
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        borderColor="orange.700"
-                        color="orange.300"
-                        _hover={{ bg: 'orange.900', borderColor: 'orange.500', color: 'orange.100' }}
-                        onClick={() => onDemoteVisibility?.(element.id)}
-                        flex={1}
-                        isDisabled={isReadOnly}
-                      >
-                        Demote
-                      </Button>
-                      {visibilityOverrideDelta !== 0 && (
-                        <Button variant="ghost" size="sm" color="gray.400" _hover={{ bg: 'whiteAlpha.100', color: 'white' }} onClick={() => onResetVisibility?.(element.id)} isDisabled={isReadOnly}>
-                          Reset
-                        </Button>
-                      )}
-                    </HStack>
-                  </>
-                )}
-                {isEdit && canEdit && onMerge && (
-                  <Button
-                    data-testid="element-panel-merge"
-                    variant="outline"
-                    size="sm"
-                    borderColor="teal.700"
-                    color="teal.300"
-                    _hover={{ bg: 'teal.900', borderColor: 'teal.500', color: 'teal.100' }}
-                    onClick={() => onMerge(element.id)}
-                    w="full"
-                  >
-                    Merge
-                  </Button>
-                )}
-              </Box>
-            ) : null}
+
 
             {isEdit && canEdit && (
               <HStack borderTop="1px solid" borderColor="whiteAlpha.100" pt={4} pb={1} spacing={2}>
@@ -1219,7 +1318,7 @@ function ElementPanel({
             )}
           </HStack>
         )}
-      </SlidingPanel>
+      </SlidingPanel >
 
       <ConfirmDialog
         isOpen={confirmPermanentDelete.isOpen}
