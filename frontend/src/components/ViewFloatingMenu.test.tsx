@@ -9,9 +9,7 @@ vi.mock('../pages/ViewEditor/context', () => ({
   }),
 }))
 
-vi.mock('@chakra-ui/icons', () => ({
-  DownloadIcon: () => <span />,
-}))
+
 
 vi.mock('@chakra-ui/react', async () => {
   const ReactModule = await import('react')

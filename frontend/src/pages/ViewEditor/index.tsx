@@ -633,6 +633,7 @@ function ViewEditorInner({
   const isPasteImportingRef = useRef(false)
   const pendingPasteSelectionRef = useRef<{ viewId: number; elementIds: Set<number> } | null>(null)
   const [isExporting, setIsExporting] = useState(false)
+  const [bulkMergeLoadingId, setBulkMergeLoadingId] = useState<number | null>(null)
   const setViewEditorUi = useStore((state) => state.setViewEditorUi)
   const snapToGrid = useStore((state) => state.snapToGrid)
   const setStoreSnapToGrid = useStore((state) => state.setSnapToGrid)
@@ -1382,6 +1383,11 @@ function ViewEditorInner({
     const selectedIds = new Set(selectedCanvasElementIds)
     return viewElements.filter((element) => selectedIds.has(element.element_id))
   }, [selectedCanvasElementIds, viewElements])
+  const selectedCanvasMergeOptions = useMemo(() => selectedCanvasElements.map((element) => ({
+    id: element.element_id,
+    name: element.name,
+    kind: element.kind,
+  })), [selectedCanvasElements])
   const selectedCanvasTagCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     selectedCanvasElements.forEach((element) => {
@@ -2000,6 +2006,59 @@ function ViewEditorInner({
       await refreshElements()
     }
   }, [canEdit, connectorPanel, elementPanel, pushPlacementRemoveBatchAction, refreshElements, selectedCanvasElements, setRfNodes, setViewElements, toast])
+
+  const handleBulkMergeInto = useCallback(async (survivorId: number) => {
+    if (!canEdit || selectedCanvasElements.length < 2) return
+
+    const sourceIds = selectedCanvasElements
+      .map((element) => element.element_id)
+      .filter((elementId) => elementId !== survivorId)
+    if (sourceIds.length === 0) return
+
+    const sourceIdSet = new Set(sourceIds)
+    let survivor: WorkspaceElement | null = null
+
+    setBulkMergeLoadingId(survivorId)
+    try {
+      for (const sourceId of sourceIds) {
+        const result = await api.elements.merge(sourceId, survivorId, {})
+        survivor = result.survivor
+        mergeElementsInto(sourceId, result.survivor)
+      }
+
+      setSelectedElement(survivor)
+      setSelectedEdge(null)
+      setSelectedProxyConnectorDetails(null)
+      elementPanel.onClose()
+      connectorPanel.onClose()
+      setRfEdges((edges) => edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge))
+      setRfNodes((nodes) => nodes
+        .filter((node) => !sourceIdSet.has(parseNumericId(node.id) ?? -1))
+        .map((node) => {
+          const nodeElementId = node.type === 'elementNode' ? parseNumericId(node.id) : null
+          const selected = nodeElementId === survivorId
+          return node.selected === selected ? node : { ...node, selected }
+        }))
+      focusCanvasElement(survivorId)
+      await refreshElements()
+    } catch (err) {
+      toast({ status: 'error', title: 'Failed to merge selection', description: String(err) })
+      await refreshElements()
+    } finally {
+      setBulkMergeLoadingId(null)
+    }
+  }, [
+    canEdit,
+    connectorPanel,
+    elementPanel,
+    focusCanvasElement,
+    mergeElementsInto,
+    refreshElements,
+    selectedCanvasElements,
+    setRfEdges,
+    setRfNodes,
+    toast,
+  ])
 
   const handleBulkTagChange = useCallback(async (tag: string, mode: 'add' | 'remove') => {
     if (!canEdit) return
@@ -3095,6 +3154,16 @@ function ViewEditorInner({
     }
   }, [connectors, setCanvasMenu, toast, viewElements])
 
+  const handleBulkCopyMermaid = useCallback(async () => {
+    const code = serializeViewToMermaid(selectedCanvasElements, connectors)
+    try {
+      await copyTextToClipboard(code)
+      toast({ status: 'success', title: 'Copied Mermaid', description: 'Mermaid source copied to clipboard.' })
+    } catch {
+      toast({ status: 'error', title: 'Copy failed', description: 'Could not write Mermaid source to the clipboard.' })
+    }
+  }, [connectors, selectedCanvasElements, toast])
+
   const handleExportView = useCallback(async (options: ExportOptions) => {
     const flowRoot = containerRef.current?.querySelector('.react-flow') as HTMLElement | null
     if (!flowRoot) { toast({ status: 'error', title: 'Export failed', description: 'Could not find the view canvas.' }); return }
@@ -3798,12 +3867,16 @@ function ViewEditorInner({
               availableTags={availableTags}
               selectedTagCounts={selectedCanvasTagCounts}
               tagColors={tagColors}
+              mergeOptions={selectedCanvasMergeOptions}
+              mergeLoadingId={bulkMergeLoadingId}
               onAlign={handleSelectionAlign}
               onDistribute={handleSelectionDistribute}
               onFitSelection={handleFitSelection}
               onAddTag={(tag) => { void handleBulkTagChange(tag, 'add') }}
               onRemoveTag={(tag) => { void handleBulkTagChange(tag, 'remove') }}
+              onMergeInto={(survivorId) => { void handleBulkMergeInto(survivorId) }}
               onRemoveFromView={() => { void handleBulkRemoveFromView() }}
+              onCopyMermaid={handleBulkCopyMermaid}
             />
 
             <ViewHeaderButton

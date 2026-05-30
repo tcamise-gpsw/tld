@@ -4,13 +4,14 @@ import type { ViewFloatingMenuSlots } from '../slots'
 import {
   HStack, Tooltip, Button, Box, Text, Popover, PopoverTrigger, Portal, PopoverContent, PopoverBody, IconButton, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Switch, VStack, useDisclosure
 } from '@chakra-ui/react'
-import { DownloadIcon } from '@chakra-ui/icons'
+
 import {
   DrawIcon as PencilSvg,
   EyeIcon as EyeSvg,
   EyeOffIcon as EyeOffSvg,
   MarkdownIcon as MarkdownSvg,
   ImportIcon,
+  ExportIcon,
   ExpandExtrasIcon as ExpandExtrasSvg,
   CollapseExtrasIcon as CollapseExtrasSvg,
   FocusIcon as FocusSvg,
@@ -183,11 +184,14 @@ function ViewFloatingMenu({
               <Tooltip label="Undo" placement="top" openDelay={200}>
                 <IconButton
                   aria-label="Undo"
-                  icon={<UndoSvg />}
+                  icon={<UndoSvg size={16} />}
                   variant="ghost"
                   h="28px"
                   minW="28px"
                   px={0}
+                  display="inline-flex"
+                  alignItems="center"
+                  justifyContent="center"
                   color="gray.300"
                   isDisabled={undoRedoDisabled}
                   _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
@@ -201,11 +205,14 @@ function ViewFloatingMenu({
               <Tooltip label="Redo" placement="top" openDelay={200}>
                 <IconButton
                   aria-label="Redo"
-                  icon={<RedoSvg />}
+                  icon={<RedoSvg size={16} />}
                   variant="ghost"
                   h="28px"
                   minW="28px"
                   px={0}
+                  display="inline-flex"
+                  alignItems="center"
+                  justifyContent="center"
                   color="gray.300"
                   isDisabled={undoRedoDisabled}
                   _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
@@ -234,9 +241,9 @@ function ViewFloatingMenu({
                 >
                   <HStack spacing={1.5}>
                     {hasActiveFilters && onDensityLevelChange ? (
-                      noiseGateEnabled ? <NoiseGateIcon size={14} level={densityLevel} /> : <FocusSvg />
+                      noiseGateEnabled ? <NoiseGateIcon size={15} level={densityLevel} /> : <FocusSvg size={15} />
                     ) : (
-                      <FocusSvg />
+                      <FocusSvg size={15} />
                     )}
                     <Text fontSize="11px" fontWeight={hasActiveFilters ? 'semibold' : 'normal'}>
                       {noiseGateEnabled ? activeNoiseGateLabel : 'Filters'}
@@ -270,7 +277,7 @@ function ViewFloatingMenu({
                         >
                           <HStack spacing={2.5} minW={0}>
                             <Box color={focusMode ? 'var(--accent)' : 'gray.400'} flexShrink={0}>
-                              <FocusSvg />
+                              <FocusSvg size={15} />
                             </Box>
                             <Box minW={0}>
                               <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Hide External</Text>
@@ -403,7 +410,7 @@ function ViewFloatingMenu({
                   onClick={onTagsToggle}
                 >
                   <HStack spacing={1.5}>
-                    <TagsIcon />
+                    <TagsIcon size={15} />
                     <Text fontSize="11px" fontWeight="normal">Tags</Text>
                   </HStack>
                 </Button>
@@ -548,7 +555,7 @@ function ViewFloatingMenu({
             aria-label={drawingMode ? 'Exit drawing mode' : 'Enter drawing mode'}
           >
             <HStack spacing={1.5}>
-              <PencilSvg />
+              <PencilSvg size={15} />
               <Text fontSize="11px" fontWeight="normal">Draw</Text>
             </HStack>
           </Button>
@@ -576,12 +583,12 @@ function ViewFloatingMenu({
               >
                 {drawingVisible ? (
                   <HStack spacing={1.5}>
-                    <EyeSvg />
+                    <EyeSvg size={15} />
                     <Text fontSize="11px" fontWeight="normal">Hide Drawings</Text>
                   </HStack>
                 ) : (
                   <HStack spacing={1.5}>
-                    <EyeOffSvg />
+                    <EyeOffSvg size={15} />
                     <Text fontSize="11px" fontWeight="normal">Show Drawings</Text>
                   </HStack>
                 )}
@@ -601,7 +608,7 @@ function ViewFloatingMenu({
                 h="28px"
                 px={2.5}
                 color="gray.300"
-                leftIcon={<ImportIcon />}
+                leftIcon={<ImportIcon size={14} />}
                 isDisabled={disableImportExport}
                 _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
                 _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
@@ -618,7 +625,7 @@ function ViewFloatingMenu({
                 h="28px"
                 px={2.5}
                 color="gray.300"
-                leftIcon={<DownloadIcon />}
+                leftIcon={<ExportIcon size={14} />}
                 isDisabled={disableImportExport}
                 _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
                 _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
@@ -650,7 +657,7 @@ function ViewFloatingMenu({
               onClick={() => setExtrasOpen((prev) => !prev)}
               aria-label={extrasOpen ? 'Collapse extras' : 'Expand extras'}
             >
-              {extrasOpen ? <CollapseExtrasSvg /> : <ExpandExtrasSvg />}
+              {extrasOpen ? <CollapseExtrasSvg size={16} /> : <ExpandExtrasSvg size={16} />}
             </Button>
           </>
         )}

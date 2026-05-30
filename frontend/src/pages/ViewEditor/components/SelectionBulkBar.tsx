@@ -14,28 +14,78 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import TagUpsert from '../../../components/TagUpsert'
-import { FitViewIcon, TagsIcon, TrashIcon } from '../../../components/Icons'
+import { CopyIcon } from '@chakra-ui/icons'
+import { FitViewIcon, MergeIcon, TagsIcon, TrashIcon } from '../../../components/Icons'
 import type { Tag } from '../../../types'
 import type { SelectionAlign, SelectionDistribute } from '../selection'
 
 function AlignIcon({ kind }: { kind: SelectionAlign | SelectionDistribute }) {
-  const isVertical = kind === 'top' || kind === 'middle' || kind === 'bottom' || kind === 'vertical'
-  const line = (() => {
-    switch (kind) {
-      case 'left': return <path d="M5 4v16M9 7h10M9 17h7" />
-      case 'center': return <path d="M12 4v16M6 7h12M8 17h8" />
-      case 'right': return <path d="M19 4v16M5 7h10M8 17h7" />
-      case 'top': return <path d="M4 5h16M7 9v10M17 9v7" />
-      case 'middle': return <path d="M4 12h16M7 6v12M17 8v8" />
-      case 'bottom': return <path d="M4 19h16M7 5v10M17 8v7" />
-      case 'horizontal': return <path d="M6 7v10M18 7v10M9 12h6M12 9l3 3-3 3" />
-      case 'vertical': return <path d="M7 6h10M7 18h10M12 9v6M9 12l3 3 3-3" />
-    }
-  })()
-
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={isVertical ? 2.4 : 2.2} strokeLinecap="round" strokeLinejoin="round">
-      {line}
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+      {(() => {
+        switch (kind) {
+          case 'left': return (
+            <>
+              <line x1="4" y1="3" x2="4" y2="21" strokeWidth="2.5" />
+              <rect x="7" y="5.5" width="13" height="4.5" rx="1.5" strokeWidth="1.8" />
+              <rect x="7" y="14" width="9" height="4.5" rx="1.5" strokeWidth="1.8" />
+            </>
+          )
+          case 'center': return (
+            <>
+              <line x1="12" y1="3" x2="12" y2="21" strokeWidth="2.5" />
+              <rect x="4.5" y="5.5" width="15" height="4.5" rx="1.5" strokeWidth="1.8" />
+              <rect x="6.5" y="14" width="11" height="4.5" rx="1.5" strokeWidth="1.8" />
+            </>
+          )
+          case 'right': return (
+            <>
+              <line x1="20" y1="3" x2="20" y2="21" strokeWidth="2.5" />
+              <rect x="4" y="5.5" width="13" height="4.5" rx="1.5" strokeWidth="1.8" />
+              <rect x="8" y="14" width="9" height="4.5" rx="1.5" strokeWidth="1.8" />
+            </>
+          )
+          case 'top': return (
+            <>
+              <line x1="3" y1="4" x2="21" y2="4" strokeWidth="2.5" />
+              <rect x="5.5" y="7" width="4.5" height="13" rx="1.5" strokeWidth="1.8" />
+              <rect x="14" y="7" width="4.5" height="9" rx="1.5" strokeWidth="1.8" />
+            </>
+          )
+          case 'middle': return (
+            <>
+              <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2.5" />
+              <rect x="5.5" y="4.5" width="4.5" height="15" rx="1.5" strokeWidth="1.8" />
+              <rect x="14" y="6.5" width="4.5" height="11" rx="1.5" strokeWidth="1.8" />
+            </>
+          )
+          case 'bottom': return (
+            <>
+              <line x1="3" y1="20" x2="21" y2="20" strokeWidth="2.5" />
+              <rect x="5.5" y="4" width="4.5" height="13" rx="1.5" strokeWidth="1.8" />
+              <rect x="14" y="8" width="4.5" height="9" rx="1.5" strokeWidth="1.8" />
+            </>
+          )
+          case 'horizontal': return (
+            <>
+              <rect x="3" y="6" width="5" height="12" rx="1.5" strokeWidth="1.8" />
+              <rect x="16" y="6" width="5" height="12" rx="1.5" strokeWidth="1.8" />
+              <line x1="10" y1="12" x2="14" y2="12" strokeWidth="1.8" />
+              <path d="M10 9.5l-2 2.5 2 2.5" strokeWidth="1.8" fill="none" />
+              <path d="M14 9.5l2 2.5-2 2.5" strokeWidth="1.8" fill="none" />
+            </>
+          )
+          case 'vertical': return (
+            <>
+              <rect x="6" y="3" width="12" height="5" rx="1.5" strokeWidth="1.8" />
+              <rect x="6" y="16" width="12" height="5" rx="1.5" strokeWidth="1.8" />
+              <line x1="12" y1="10" x2="12" y2="14" strokeWidth="1.8" />
+              <path d="M9.5 10l2.5-2 2.5 2" strokeWidth="1.8" fill="none" />
+              <path d="M9.5 14l2.5 2 2.5-2" strokeWidth="1.8" fill="none" />
+            </>
+          )
+        }
+      })()}
     </svg>
   )
 }
@@ -63,6 +113,9 @@ function ToolbarIconButton({
         h="28px"
         minW="28px"
         px={0}
+        display="inline-flex"
+        alignItems="center"
+        justifyContent="center"
         color={color ?? 'gray.300'}
         _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: color ?? 'var(--accent)' }}
         onClick={onClick}
@@ -76,12 +129,16 @@ export interface SelectionBulkBarProps {
   availableTags: string[]
   selectedTagCounts: Record<string, number>
   tagColors: Record<string, Tag>
+  mergeOptions?: { id: number; name: string; kind?: string | null }[]
+  mergeLoadingId?: number | null
   onAlign: (align: SelectionAlign) => void
   onDistribute: (direction: SelectionDistribute) => void
   onFitSelection: () => void
   onAddTag: (tag: string) => void
   onRemoveTag: (tag: string) => void
+  onMergeInto?: (survivorId: number) => void
   onRemoveFromView: () => void
+  onCopyMermaid: () => void
 }
 
 export default function SelectionBulkBar({
@@ -89,12 +146,16 @@ export default function SelectionBulkBar({
   availableTags,
   selectedTagCounts,
   tagColors,
+  mergeOptions = [],
+  mergeLoadingId = null,
   onAlign,
   onDistribute,
   onFitSelection,
   onAddTag,
   onRemoveTag,
+  onMergeInto,
   onRemoveFromView,
+  onCopyMermaid,
 }: SelectionBulkBarProps) {
   if (count < 2) return null
 
@@ -156,15 +217,16 @@ export default function SelectionBulkBar({
             aria-label="Bulk tags"
           >
             <HStack spacing={1.5}>
-              <TagsIcon />
+              <TagsIcon size={15} />
               <Text fontSize="11px">Tags</Text>
             </HStack>
           </Button>
         </PopoverTrigger>
         <Portal>
           <PopoverContent
-            bg="gray.900"
-            borderColor="whiteAlpha.200"
+            bg="var(--bg-panel)"
+            backdropFilter="blur(20px)"
+            borderColor="whiteAlpha.100"
             boxShadow="0 18px 48px rgba(0,0,0,0.48)"
             borderRadius="lg"
             width="280px"
@@ -196,11 +258,78 @@ export default function SelectionBulkBar({
         </Portal>
       </Popover>
 
+      {onMergeInto && mergeOptions.length >= 2 && (
+        <Popover placement="top" isLazy closeOnBlur>
+          <PopoverTrigger>
+            <Button
+              data-testid="selection-bulk-merge"
+              variant="ghost"
+              h="28px"
+              px={2.5}
+              color="gray.300"
+              _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
+              aria-label="Merge selection"
+              isDisabled={mergeLoadingId !== null}
+            >
+              <HStack spacing={1.5}>
+                <MergeIcon size={15} />
+                <Text fontSize="11px">Merge</Text>
+              </HStack>
+            </Button>
+          </PopoverTrigger>
+          <Portal>
+            <PopoverContent
+              bg="var(--bg-panel)"
+              backdropFilter="blur(20px)"
+              borderColor="whiteAlpha.100"
+              boxShadow="0 18px 48px rgba(0,0,0,0.48)"
+              borderRadius="lg"
+              width="260px"
+              _focus={{ boxShadow: 'none' }}
+            >
+              <PopoverBody p={2.5}>
+                <VStack align="stretch" spacing={1}>
+                  <Text fontSize="xs" color="whiteAlpha.500" fontWeight="semibold" px={1} pb={1}>
+                    Choose survivor
+                  </Text>
+                  {mergeOptions.map((option) => (
+                    <Button
+                      key={option.id}
+                      data-testid={`selection-bulk-merge-survivor-${option.id}`}
+                      variant="ghost"
+                      size="sm"
+                      h="auto"
+                      minH="32px"
+                      py={2}
+                      px={2.5}
+                      justifyContent="flex-start"
+                      color="gray.300"
+                      _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
+                      isLoading={mergeLoadingId === option.id}
+                      isDisabled={mergeLoadingId !== null}
+                      onClick={() => onMergeInto(option.id)}
+                    >
+                      <VStack spacing={0.5} align="start" minW={0}>
+                        <Text fontSize="xs" fontWeight="medium" noOfLines={1}>{option.name}</Text>
+                        {option.kind && <Text fontSize="10px" color="whiteAlpha.500" noOfLines={1}>{option.kind}</Text>}
+                      </VStack>
+                    </Button>
+                  ))}
+                </VStack>
+              </PopoverBody>
+            </PopoverContent>
+          </Portal>
+        </Popover>
+      )}
+
+      <ToolbarIconButton testId="selection-bulk-copy-mermaid" label="Copy as Mermaid" onClick={onCopyMermaid}>
+        <CopyIcon boxSize="14px" />
+      </ToolbarIconButton>
       <ToolbarIconButton testId="selection-bulk-fit" label="Fit selection" onClick={onFitSelection}>
-        <FitViewIcon size={14} />
+        <FitViewIcon size={16} />
       </ToolbarIconButton>
       <ToolbarIconButton testId="selection-bulk-remove" label="Remove from view" onClick={onRemoveFromView} color="red.300">
-        <TrashIcon size={13} />
+        <TrashIcon size={15} />
       </ToolbarIconButton>
     </HStack>
   )
