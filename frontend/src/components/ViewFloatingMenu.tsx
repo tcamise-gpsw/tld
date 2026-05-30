@@ -4,13 +4,14 @@ import type { ViewFloatingMenuSlots } from '../slots'
 import {
   HStack, Tooltip, Button, Box, Text, Popover, PopoverTrigger, Portal, PopoverContent, PopoverBody, IconButton, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Switch, VStack, useDisclosure
 } from '@chakra-ui/react'
-import { DownloadIcon } from '@chakra-ui/icons'
+
 import {
   DrawIcon as PencilSvg,
   EyeIcon as EyeSvg,
   EyeOffIcon as EyeOffSvg,
   MarkdownIcon as MarkdownSvg,
   ImportIcon,
+  ExportIcon,
   ExpandExtrasIcon as ExpandExtrasSvg,
   CollapseExtrasIcon as CollapseExtrasSvg,
   FocusIcon as FocusSvg,
@@ -618,7 +619,7 @@ function ViewFloatingMenu({
                 h="28px"
                 px={2.5}
                 color="gray.300"
-                leftIcon={<DownloadIcon />}
+                leftIcon={<ExportIcon />}
                 isDisabled={disableImportExport}
                 _disabled={{ opacity: 0.35, cursor: 'not-allowed' }}
                 _hover={{ bg: 'rgba(var(--accent-rgb), 0.12)', color: 'var(--accent)' }}
