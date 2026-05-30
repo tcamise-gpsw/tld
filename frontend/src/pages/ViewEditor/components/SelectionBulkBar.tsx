@@ -221,8 +221,9 @@ export default function SelectionBulkBar({
         </PopoverTrigger>
         <Portal>
           <PopoverContent
-            bg="gray.900"
-            borderColor="whiteAlpha.200"
+            bg="var(--bg-panel)"
+            backdropFilter="blur(20px)"
+            borderColor="whiteAlpha.100"
             boxShadow="0 18px 48px rgba(0,0,0,0.48)"
             borderRadius="lg"
             width="280px"
@@ -275,8 +276,9 @@ export default function SelectionBulkBar({
           </PopoverTrigger>
           <Portal>
             <PopoverContent
-              bg="gray.900"
-              borderColor="whiteAlpha.200"
+              bg="var(--bg-panel)"
+              backdropFilter="blur(20px)"
+              borderColor="whiteAlpha.100"
               boxShadow="0 18px 48px rgba(0,0,0,0.48)"
               borderRadius="lg"
               width="260px"
@@ -284,7 +286,7 @@ export default function SelectionBulkBar({
             >
               <PopoverBody p={2.5}>
                 <VStack align="stretch" spacing={1}>
-                  <Text fontSize="xs" color="gray.400" px={1} pb={1}>
+                  <Text fontSize="xs" color="whiteAlpha.500" fontWeight="semibold" px={1} pb={1}>
                     Choose survivor
                   </Text>
                   {mergeOptions.map((option) => (
@@ -298,15 +300,15 @@ export default function SelectionBulkBar({
                       py={2}
                       px={2.5}
                       justifyContent="flex-start"
-                      color="clay.text"
-                      _hover={{ bg: 'whiteAlpha.100' }}
+                      color="gray.300"
+                      _hover={{ bg: 'whiteAlpha.100', color: 'white' }}
                       isLoading={mergeLoadingId === option.id}
                       isDisabled={mergeLoadingId !== null}
                       onClick={() => onMergeInto(option.id)}
                     >
                       <VStack spacing={0.5} align="start" minW={0}>
                         <Text fontSize="xs" fontWeight="medium" noOfLines={1}>{option.name}</Text>
-                        {option.kind && <Text fontSize="10px" color="gray.500" noOfLines={1}>{option.kind}</Text>}
+                        {option.kind && <Text fontSize="10px" color="whiteAlpha.500" noOfLines={1}>{option.kind}</Text>}
                       </VStack>
                     </Button>
                   ))}
