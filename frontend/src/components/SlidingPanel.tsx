@@ -58,6 +58,7 @@ export default function SlidingPanel({
   const rightOffset = (!isMobileLayout && isMarkdownOpen && side === 'right')
     ? `${markdownPaneWidth + 10}px`
     : '0px'
+  const focusLockDisabled = !isOpen || noFocusLock || !hasBackdrop
 
   if (isInline) {
     return (
@@ -151,7 +152,7 @@ export default function SlidingPanel({
               }}
             >
               <FocusLock
-                isDisabled={!isOpen || noFocusLock}
+                isDisabled={focusLockDisabled}
                 autoFocus={autoFocus}
                 restoreFocus
               >
