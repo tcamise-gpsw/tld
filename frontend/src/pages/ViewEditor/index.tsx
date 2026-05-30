@@ -50,6 +50,7 @@ import type {
 import ElementNode from '../../components/ElementNode'
 import ElementPanel from '../../components/ElementPanel'
 import MergeDialog from '../../components/MergeDialog'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import CodePreviewPanel from '../../components/CodePreviewPanel'
 import ConnectorPanel from '../../components/ConnectorPanel'
 import ElementLibrary from '../../components/ElementLibrary'
@@ -104,6 +105,17 @@ import { pickUnusedColor } from '../../components/ViewExplorer/utils'
 import { EmptyCanvasState } from './components/EmptyCanvasState'
 import { EditorOverlays } from './components/EditorOverlays'
 import { ConnectorContextMenu, CanvasContextMenu } from './components/EditorMenus'
+import {
+  VIEW_SELECTION_CLIPBOARD_MIME,
+  buildViewSelectionClipboardPayload,
+  findViewSelectionPasteConflicts,
+  mapViewSelectionElementIds,
+  parseViewSelectionClipboardPayload,
+  planViewSelectionPasteConnectors,
+  planViewSelectionPastePlacements,
+  serializeViewSelectionClipboardPayload,
+  type ViewSelectionClipboardPayload,
+} from './clipboard'
 import SelectionBulkBar from './components/SelectionBulkBar'
 import { overrideViewContentInSnapshot } from '../../crossBranch/graph'
 import { useCrossBranchContextSettings } from '../../crossBranch/settings'
@@ -171,6 +183,13 @@ type RemoteCursorState = RealtimeCursor & {
 }
 
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
+
+type PendingDuplicatePaste = {
+  payload: ViewSelectionClipboardPayload
+  targetViewId: number
+  pasteCenter: { x: number; y: number }
+  conflictElementIds: number[]
+}
 
 function cursorColorForUser(userId: string) {
   let hash = 0
@@ -519,8 +538,11 @@ function ViewEditorInner({
   const importModal = useDisclosure()
   const codePreview = useDisclosure()
   const mergeDialog = useDisclosure()
+  const duplicatePasteConfirm = useDisclosure()
   const [mergeSourceElement, setMergeSourceElement] = useState<WorkspaceElement | null>(null)
   const [adjustingLayout, setAdjustingLayout] = useState(false)
+  const [pendingDuplicatePaste, setPendingDuplicatePaste] = useState<PendingDuplicatePaste | null>(null)
+  const [isClipboardPasting, setIsClipboardPasting] = useState(false)
 
   useEffect(() => {
     if (viewId == null) {
@@ -3103,12 +3125,176 @@ function ViewEditorInner({
     } finally { setIsExporting(false) }
   }, [viewName, viewElements, connectors, toast])
 
-  const handlePasteMermaidImport = useCallback(async (event: ClipboardEvent) => {
+  const getClipboardPasteCenter = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect) return { x: 0, y: 0 }
+
+    const mouse = lastMousePosRef.current
+    const screenPoint = mouse &&
+      mouse.clientX >= rect.left &&
+      mouse.clientX <= rect.right &&
+      mouse.clientY >= rect.top &&
+      mouse.clientY <= rect.bottom
+      ? { x: mouse.clientX, y: mouse.clientY }
+      : { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+
+    return screenToFlowPositionRef.current(screenPoint)
+  }, [lastMousePosRef])
+
+  const pasteViewSelectionPayload = useCallback(async (
+    payload: ViewSelectionClipboardPayload,
+    targetViewId: number,
+    pasteCenter: { x: number; y: number },
+    duplicateElementIds: ReadonlySet<number>,
+  ) => {
+    if (!canEdit || isPasteImportingRef.current) return
+
+    isPasteImportingRef.current = true
+    setIsClipboardPasting(true)
+    try {
+      const duplicatedElementIdsBySourceId = new Map<number, number>()
+      const duplicateElements = payload.elements.filter((element) => duplicateElementIds.has(element.elementId))
+      const duplicated = await Promise.all(duplicateElements.map(async (element) => {
+        const created = await api.elements.create({
+          name: element.name,
+          description: element.description ?? '',
+          kind: element.kind ?? '',
+          technology: element.technology ?? '',
+          url: element.url ?? '',
+          logo_url: element.logo_url ?? '',
+          technology_connectors: element.technology_connectors,
+          tags: element.tags,
+          repo: element.repo,
+          branch: element.branch,
+          file_path: element.file_path,
+          language: element.language,
+          bypass_noise_gate: element.bypass_noise_gate,
+        })
+        return { sourceElementId: element.elementId, targetElementId: created.id }
+      }))
+      duplicated.forEach(({ sourceElementId, targetElementId }) => {
+        duplicatedElementIdsBySourceId.set(sourceElementId, targetElementId)
+      })
+
+      const targetElementIdsBySourceId = mapViewSelectionElementIds(payload, duplicatedElementIdsBySourceId)
+      const placementPlan = planViewSelectionPastePlacements(payload, targetElementIdsBySourceId, pasteCenter)
+      const connectorPlan = planViewSelectionPasteConnectors(payload, targetElementIdsBySourceId)
+
+      await Promise.all(placementPlan.map((placement) =>
+        api.workspace.views.placements.add(targetViewId, placement.elementId, placement.x, placement.y)
+      ))
+      await Promise.all(connectorPlan.map((connector) =>
+        api.workspace.connectors.create(targetViewId, {
+          source_element_id: connector.sourceElementId,
+          target_element_id: connector.targetElementId,
+          label: connector.label ?? '',
+          description: connector.description ?? '',
+          relationship: connector.relationship ?? '',
+          direction: connector.direction,
+          style: connector.style,
+          url: connector.url ?? '',
+          source_handle: connector.source_handle,
+          target_handle: connector.target_handle,
+          tags: connector.tags,
+        })
+      ))
+
+      await refreshElements()
+      pendingPasteSelectionRef.current = {
+        viewId: targetViewId,
+        elementIds: new Set(placementPlan.map((placement) => placement.elementId)),
+      }
+      toast({
+        status: 'success',
+        title: 'Pasted selection',
+        description: `Placed ${placementPlan.length} element${placementPlan.length === 1 ? '' : 's'}.`,
+      })
+    } catch (err) {
+      await refreshElements()
+      toast({ status: 'error', title: 'Paste failed', description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      isPasteImportingRef.current = false
+      setIsClipboardPasting(false)
+    }
+  }, [canEdit, refreshElements, toast])
+
+  const handleCopyCutViewSelection = useCallback((event: ClipboardEvent) => {
+    if (isEditableKeyboardTarget(event.target) || !isCanvasKeyboardTarget(event.target) || drawingMode || textEditorState || pendingElement) return
+    if (event.type === 'cut' && !canEdit) return
+
+    const currentViewId = viewIdRef.current
+    if (!currentViewId || !event.clipboardData) return
+
+    const payload = buildViewSelectionClipboardPayload(
+      currentViewId,
+      viewElements,
+      connectors,
+      selectedCanvasElementIds,
+    )
+    if (!payload) return
+
+    event.preventDefault()
+    event.clipboardData.clearData()
+    event.clipboardData.setData(VIEW_SELECTION_CLIPBOARD_MIME, serializeViewSelectionClipboardPayload(payload))
+
+    if (event.type === 'cut') {
+      void handleBulkRemoveFromView()
+    }
+  }, [
+    canEdit,
+    connectors,
+    drawingMode,
+    handleBulkRemoveFromView,
+    pendingElement,
+    selectedCanvasElementIds,
+    textEditorState,
+    viewElements,
+    viewIdRef,
+  ])
+
+  useEffect(() => {
+    window.addEventListener('copy', handleCopyCutViewSelection)
+    window.addEventListener('cut', handleCopyCutViewSelection)
+    return () => {
+      window.removeEventListener('copy', handleCopyCutViewSelection)
+      window.removeEventListener('cut', handleCopyCutViewSelection)
+    }
+  }, [handleCopyCutViewSelection])
+
+  const handlePasteFromClipboard = useCallback(async (event: ClipboardEvent) => {
     if (!canEdit || isPasteImportingRef.current || textEditorState || pendingElement) return
-    const target = event.target as HTMLElement | null
-    const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' ||
-      target?.tagName === 'SELECT' || target?.isContentEditable
-    if (isInput) return
+    if (isEditableKeyboardTarget(event.target) || !isCanvasKeyboardTarget(event.target)) return
+
+    const clipboardData = event.clipboardData
+    const customRaw = clipboardData?.getData(VIEW_SELECTION_CLIPBOARD_MIME) ?? ''
+    if (customRaw) {
+      const payload = parseViewSelectionClipboardPayload(customRaw)
+      event.preventDefault()
+      if (!payload) {
+        toast({ status: 'error', title: 'Paste failed', description: 'Clipboard data is not compatible with this version.' })
+        return
+      }
+
+      const currentViewId = viewIdRef.current
+      if (!currentViewId) return
+
+      const pasteCenter = getClipboardPasteCenter()
+      const existingIds = new Set(viewElementsRef.current.map((element) => element.element_id))
+      const conflictElementIds = findViewSelectionPasteConflicts(payload, existingIds)
+      if (conflictElementIds.length > 0) {
+        setPendingDuplicatePaste({
+          payload,
+          targetViewId: currentViewId,
+          pasteCenter,
+          conflictElementIds,
+        })
+        duplicatePasteConfirm.onOpen()
+        return
+      }
+
+      await pasteViewSelectionPayload(payload, currentViewId, pasteCenter, new Set())
+      return
+    }
 
     const mermaidCode = extractMermaidCode(event.clipboardData?.getData('text/plain') ?? '')
     if (!mermaidCode) return
@@ -3186,12 +3372,42 @@ function ViewEditorInner({
     } finally {
       isPasteImportingRef.current = false
     }
-  }, [pendingElement, canEdit, clearEditHistory, refreshElements, textEditorState, toast, viewIdRef])
+  }, [
+    canEdit,
+    clearEditHistory,
+    duplicatePasteConfirm,
+    getClipboardPasteCenter,
+    pasteViewSelectionPayload,
+    pendingElement,
+    refreshElements,
+    textEditorState,
+    toast,
+    viewElementsRef,
+    viewIdRef,
+  ])
 
   useEffect(() => {
-    window.addEventListener('paste', handlePasteMermaidImport)
-    return () => window.removeEventListener('paste', handlePasteMermaidImport)
-  }, [handlePasteMermaidImport])
+    window.addEventListener('paste', handlePasteFromClipboard)
+    return () => window.removeEventListener('paste', handlePasteFromClipboard)
+  }, [handlePasteFromClipboard])
+
+  const handleCancelDuplicatePaste = useCallback(() => {
+    setPendingDuplicatePaste(null)
+    duplicatePasteConfirm.onClose()
+  }, [duplicatePasteConfirm])
+
+  const handleConfirmDuplicatePaste = useCallback(() => {
+    const pending = pendingDuplicatePaste
+    if (!pending) return
+    setPendingDuplicatePaste(null)
+    duplicatePasteConfirm.onClose()
+    void pasteViewSelectionPayload(
+      pending.payload,
+      pending.targetViewId,
+      pending.pasteCenter,
+      new Set(pending.conflictElementIds),
+    )
+  }, [duplicatePasteConfirm, pasteViewSelectionPayload, pendingDuplicatePaste])
 
   const handleImportView = useCallback(async (parsed: ParsedImport) => {
     const currentViewId = viewIdRef.current
@@ -3785,6 +4001,18 @@ function ViewEditorInner({
         <ImportModal
           isOpen={importModal.isOpen} onClose={importModal.onClose}
           onImport={handleImportView} isImporting={isImporting}
+        />
+        <ConfirmDialog
+          isOpen={duplicatePasteConfirm.isOpen}
+          onClose={handleCancelDuplicatePaste}
+          onConfirm={handleConfirmDuplicatePaste}
+          title="Duplicate existing elements?"
+          body={pendingDuplicatePaste
+            ? `${pendingDuplicatePaste.conflictElementIds.length} pasted element${pendingDuplicatePaste.conflictElementIds.length === 1 ? '' : 's'} already exist in this view. Duplicate the conflicts to create separate elements, or cancel to leave this view unchanged.`
+            : ''}
+          confirmLabel="Duplicate"
+          confirmColorScheme="blue"
+          isLoading={isClipboardPasting}
         />
         <MergeDialog
           isOpen={mergeDialog.isOpen}
