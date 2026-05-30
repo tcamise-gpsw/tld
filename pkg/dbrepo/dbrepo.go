@@ -219,6 +219,8 @@ func legacySQLiteMigrationAlreadyApplied(ctx context.Context, db *bun.DB, commen
 			return viewsTags, err
 		}
 		return sqliteColumnExists(ctx, db, "connectors", "tags")
+	case "element_noise_gate_bypass":
+		return sqliteColumnExists(ctx, db, "elements", "bypass_noise_gate")
 	default:
 		return false, nil
 	}
@@ -228,6 +230,8 @@ func legacyPostgresMigrationAlreadyApplied(ctx context.Context, db *bun.DB, comm
 	switch comment {
 	case "local_schema":
 		return postgresTablesExist(ctx, db, "elements", "views", "connectors", "watch_embedding_models")
+	case "element_noise_gate_bypass":
+		return postgresColumnExists(ctx, db, "elements", "bypass_noise_gate")
 	default:
 		return false, nil
 	}
@@ -296,6 +300,8 @@ func sqliteColumnExists(ctx context.Context, db *bun.DB, table, column string, r
 
 func sqliteTableInfoQuery(table string) (string, bool) {
 	switch table {
+	case "elements":
+		return "PRAGMA table_info(elements)", true
 	case "views":
 		return "PRAGMA table_info(views)", true
 	case "connectors":
@@ -321,6 +327,19 @@ func postgresTablesExist(ctx context.Context, db *bun.DB, tables ...string) (boo
 		}
 	}
 	return true, nil
+}
+
+func postgresColumnExists(ctx context.Context, db *bun.DB, table, column string) (bool, error) {
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?
+		)`, table, column).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func configureSQLitePool(db *sql.DB) {
