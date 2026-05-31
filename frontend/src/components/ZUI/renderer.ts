@@ -867,26 +867,30 @@ interface HandleUsage {
 
 interface DrawEdgesLayoutMetadata {
   nodeMap: Map<string, LayoutNode>
+  sceneNodeMap: Map<string, SceneNode>
   handleUsage: Record<string, HandleUsage[]>
   handleUsageIndex: Record<string, number>
 }
 
-const drawEdgesMetadataCache = new WeakMap<LayoutNode[], DrawEdgesLayoutMetadata>()
+const drawEdgesMetadataCache = new WeakMap<SceneNode[], DrawEdgesLayoutMetadata>()
 const emptyHandleUsage: HandleUsage[] = []
 
-function getDrawEdgesLayoutMetadata(nodes: LayoutNode[]): DrawEdgesLayoutMetadata {
-  const cached = drawEdgesMetadataCache.get(nodes)
+function getDrawEdgesLayoutMetadata(sceneNodes: SceneNode[]): DrawEdgesLayoutMetadata {
+  const cached = drawEdgesMetadataCache.get(sceneNodes)
   if (cached) return cached
 
   const nodeMap = new Map<string, LayoutNode>()
+  const sceneNodeMap = new Map<string, SceneNode>()
   const handleUsage: Record<string, HandleUsage[]> = {}
   const handleUsageIndex: Record<string, number> = {}
 
-  for (const node of nodes) {
-    nodeMap.set(node.id, node)
+  for (const sceneNode of sceneNodes) {
+    nodeMap.set(sceneNode.layout.id, sceneNode.layout)
+    sceneNodeMap.set(sceneNode.layout.id, sceneNode)
   }
 
-  for (const node of nodes) {
+  for (const sceneNode of sceneNodes) {
+    const node = sceneNode.layout
     for (let edgeIndex = 0; edgeIndex < node.edgesOut.length; edgeIndex++) {
       const edge = node.edgesOut[edgeIndex]
       const target = nodeMap.get(edge.targetId)
@@ -926,18 +930,14 @@ function getDrawEdgesLayoutMetadata(nodes: LayoutNode[]): DrawEdgesLayoutMetadat
     }
   }
 
-  const metadata = { nodeMap, handleUsage, handleUsageIndex }
-  drawEdgesMetadataCache.set(nodes, metadata)
+  const metadata = { nodeMap, sceneNodeMap, handleUsage, handleUsageIndex }
+  drawEdgesMetadataCache.set(sceneNodes, metadata)
   return metadata
 }
 
 function nodeSelfAlphaFromState(node: SceneNode): number {
   if (node.layout.children.length === 0) return 1
   return 1 - node.state.t
-}
-
-function sceneNodeToLayoutNode(node: SceneNode): LayoutNode {
-  return node.layout
 }
 
 function getHandlePos(
@@ -982,13 +982,7 @@ function drawEdges(
   const ox = originX ?? 0
   const oy = originY ?? 0
 
-  const nodes = sceneNodes.map(sceneNodeToLayoutNode)
-  const { nodeMap, handleUsage, handleUsageIndex } = getDrawEdgesLayoutMetadata(nodes)
-
-  const sceneNodeMap = new Map<string, SceneNode>()
-  for (const sn of sceneNodes) {
-    sceneNodeMap.set(sn.layout.id, sn)
-  }
+  const { nodeMap, sceneNodeMap, handleUsage, handleUsageIndex } = getDrawEdgesLayoutMetadata(sceneNodes)
 
   for (const sn of sceneNodes) {
     const node = sn.layout
