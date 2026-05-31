@@ -81,6 +81,7 @@ import ProxyConnectorEdge from '../../components/ProxyConnectorEdge'
 import ProxyConnectorPanel from '../../components/ProxyConnectorPanel'
 import {
   clampContextNodeAxisPosition,
+  reconcileMeasuredContextNodes,
   type ContextNodePositionOverride,
   type ContextSide,
   useViewContextNeighbours,
@@ -1477,6 +1478,7 @@ function ViewEditorInner({
 
   const { hasSignificantOverlaps, dismiss: dismissOverlapSuggestion } = useOverlapDetection(rfNodes, viewId)
   const selectedCanvasElementIds = useMemo(() => selectedElementIds(rfNodes), [rfNodes])
+  const selectedCanvasElementCount = selectedCanvasElementIds.length
   const selectedCanvasElementIdKey = selectedCanvasElementIds.join(',')
   const selectedCanvasElements = useMemo(() => {
     const selectedIds = new Set(selectedCanvasElementIds)
@@ -2537,16 +2539,7 @@ function ViewEditorInner({
       }
       return changed ? next : prev
     })
-    setLiveContextNodes((prev) => {
-      const prevById = new Map(prev.map((p) => [p.id, p]))
-      return contextNodes.map((n) => {
-        const existing = prevById.get(n.id)
-        if (existing?.width != null && existing?.height != null) {
-          return { ...n, width: existing.width, height: existing.height }
-        }
-        return n
-      })
-    })
+    setLiveContextNodes((prev) => reconcileMeasuredContextNodes(prev, contextNodes))
   }, [contextNodes])
 
   const fadedNodeCacheRef = useRef<WeakMap<RFNode, RFNode>>(new WeakMap())
@@ -2672,10 +2665,18 @@ function ViewEditorInner({
     if (!hasNodeSel && !hasEdgeSel) return allNodes
 
     const cache = fadedNodeCacheRef.current
+    const isMultiNodeSelection = selectedCanvasElementCount > 1
+    const withSelectionMeta = (node: RFNode) => {
+      if (!node.selected || node.type !== 'elementNode') return node
+      const data = node.data as { isMultiSelected?: boolean } | undefined
+      if (data?.isMultiSelected === isMultiNodeSelection) return node
+      return { ...node, data: { ...(node.data ?? {}), isMultiSelected: isMultiNodeSelection } }
+    }
+
     return allNodes.map((n) => {
       if (n.id === PENDING_ELEMENT_NODE_ID) return n
       const isHighlighted = selectedNodeIds.has(n.id) || selectedEdgeEndPoints.has(n.id) || neighborNodeIds.has(n.id)
-      if (isHighlighted) return n
+      if (isHighlighted) return withSelectionMeta(n)
       const cached = cache.get(n)
       if (cached) return cached
       const faded: RFNode = {
@@ -2685,7 +2686,7 @@ function ViewEditorInner({
       cache.set(n, faded)
       return faded
     })
-  }, [liveContextNodes, rfNodes, pendingElementNode, contextConnectors, rfEdgesWithProxyBadges])
+  }, [liveContextNodes, rfNodes, pendingElementNode, contextConnectors, rfEdgesWithProxyBadges, selectedCanvasElementCount])
 
   const pendingPreviewEdges = useMemo((): RFEdge[] => {
     const pending = canvas.pendingElement
