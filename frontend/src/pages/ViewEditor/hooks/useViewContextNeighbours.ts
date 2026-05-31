@@ -252,6 +252,178 @@ function summaryConnectorDetails(
   }
 }
 
+function contextElementSignature(element: PlacedElement | null) {
+  if (!element) return null
+  return [
+    element.id,
+    element.view_id,
+    element.element_id,
+    element.name,
+    element.description,
+    element.kind,
+    element.technology,
+    element.url,
+    element.logo_url,
+    element.technology_connectors,
+    element.tags,
+    element.repo,
+    element.branch,
+    element.file_path,
+    element.language,
+    element.bypass_noise_gate,
+    element.has_view,
+    element.view_label,
+  ]
+}
+
+function proxyEndpointSignature(endpoint: ProxyEndpoint) {
+  return [
+    endpoint.actualElementId,
+    endpoint.actualElementName,
+    endpoint.anchorElementId,
+    endpoint.anchorElementName,
+    endpoint.anchorViewId,
+    endpoint.anchorViewName,
+    endpoint.placementViewId,
+    endpoint.placementViewName,
+    endpoint.depth,
+    endpoint.externalToView,
+    endpoint.currentBranchElementId,
+    endpoint.commonAncestorViewId,
+    endpoint.commonAncestorViewName,
+    endpoint.mergeAncestorElementId,
+    endpoint.contextPathElementIds,
+    endpoint.branchPathElementIds,
+  ]
+}
+
+function connectorSignature(connector: Connector) {
+  return [
+    connector.id,
+    connector.view_id,
+    connector.source_element_id,
+    connector.target_element_id,
+    connector.label,
+    connector.description,
+    connector.relationship,
+    connector.direction,
+    connector.style,
+    connector.url,
+    connector.source_handle,
+    connector.target_handle,
+    connector.tags,
+    connector.created_at,
+    connector.updated_at,
+  ]
+}
+
+function proxyConnectorDetailsSignature(details: ProxyConnectorDetails | undefined) {
+  if (!details) return null
+  return [
+    details.key,
+    details.label,
+    details.count,
+    details.sourceAnchorId,
+    details.targetAnchorId,
+    details.sourceAnchorName,
+    details.targetAnchorName,
+    details.ownerViewIds,
+    details.ownerViewNames,
+    details.connectors.map((leaf) => [
+      leaf.ownerViewId,
+      leaf.ownerViewName,
+      connectorSignature(leaf.connector),
+      proxyEndpointSignature(leaf.source),
+      proxyEndpointSignature(leaf.target),
+    ]),
+  ]
+}
+
+const CONTEXT_NODE_RUNTIME_KEYS = new Set(['positionAbsolute', 'dragging', 'resizing', 'measured'])
+const CONTEXT_NODE_DATA_CALLBACK_KEYS = new Set([
+  'onNavigateToDiagram',
+  'onSelectElement',
+  'onOpenRelationshipDetails',
+  'onToggleGroup',
+])
+
+function contextValueEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (typeof left !== typeof right) return false
+  if (left == null || right == null) return false
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+    return left.every((item, index) => contextValueEqual(item, right[index]))
+  }
+
+  if (typeof left !== 'object' || typeof right !== 'object') return false
+
+  const leftRecord = left as Record<string, unknown>
+  const rightRecord = right as Record<string, unknown>
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])
+  for (const key of keys) {
+    if (!contextValueEqual(leftRecord[key], rightRecord[key])) return false
+  }
+  return true
+}
+
+function contextNodeDataEqual(left: unknown, right: unknown) {
+  if (Object.is(left, right)) return true
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false
+
+  const leftRecord = left as Record<string, unknown>
+  const rightRecord = right as Record<string, unknown>
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])
+  for (const key of keys) {
+    const leftValue = leftRecord[key]
+    const rightValue = rightRecord[key]
+    if (CONTEXT_NODE_DATA_CALLBACK_KEYS.has(key)) {
+      if (typeof leftValue !== typeof rightValue) return false
+      continue
+    }
+    if (!contextValueEqual(leftValue, rightValue)) return false
+  }
+  return true
+}
+
+function contextNodeEqual(left: RFNode, right: RFNode) {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+  for (const key of keys) {
+    if (CONTEXT_NODE_RUNTIME_KEYS.has(key)) continue
+
+    const leftValue = left[key as keyof RFNode]
+    const rightValue = right[key as keyof RFNode]
+    if (key === 'data') {
+      if (!contextNodeDataEqual(leftValue, rightValue)) return false
+      continue
+    }
+    if (!contextValueEqual(leftValue, rightValue)) return false
+  }
+  return true
+}
+
+function withMeasuredContextNodeDimensions(node: RFNode, existing: RFNode | undefined): RFNode {
+  if (existing?.width == null || existing.height == null) return node
+  if (node.width === existing.width && node.height === existing.height) return node
+  return { ...node, width: existing.width, height: existing.height }
+}
+
+export function reconcileMeasuredContextNodes(prev: RFNode[], contextNodes: RFNode[]) {
+  const prevById = new Map(prev.map((node) => [node.id, node]))
+  let changed = prev.length !== contextNodes.length
+
+  const next = contextNodes.map((node, index) => {
+    const existing = prevById.get(node.id)
+    const measuredNode = withMeasuredContextNodeDimensions(node, existing)
+    const nextNode = existing && contextNodeEqual(existing, measuredNode) ? existing : measuredNode
+    if (nextNode !== prev[index]) changed = true
+    return nextNode
+  })
+
+  return changed ? next : prev
+}
+
 function visibleSummarySubtreeSpan(
   nodeId: string,
   forest: VisibleContextSummaryForest,
@@ -648,6 +820,7 @@ export function useViewContextNeighbours({
             ),
           )
         }
+        const relationshipDetails = summaryNodeDetailsById.get(summaryNode.id)
         const displayElement = representativeElement
         const isGroupAnchor = summaryNode.childIds.length > 0 && (!summaryNode.isAutoExpanded || summaryNode.isExpanded)
         nodes.push({
@@ -675,12 +848,14 @@ export function useViewContextNeighbours({
             commonAncestorViewId: representativeLeaf?.endpoint.commonAncestorViewId ?? null,
             commonAncestorViewName: representativeLeaf?.endpoint.commonAncestorViewName ?? null,
             connectorCount: connectors.length,
+            contextElementSignature: contextElementSignature(displayElement),
+            relationshipDetailsSignature: proxyConnectorDetailsSignature(relationshipDetails),
             onNavigateToView: stableOnNavigateToView,
             onSelectElement: displayElement
               ? () => onSelectContextElement(placedElementToLibraryElement(displayElement))
               : undefined,
-            onOpenRelationshipDetails: summaryNodeDetailsById.get(summaryNode.id)
-              ? () => onSelectProxyDetails(summaryNodeDetailsById.get(summaryNode.id) as ProxyConnectorDetails)
+            onOpenRelationshipDetails: relationshipDetails
+              ? () => onSelectProxyDetails(relationshipDetails)
               : undefined,
             isGroupAnchor,
             groupChildCount: summaryNode.hiddenLeafCount,

@@ -33,6 +33,7 @@ function ExplorePage({ sharedToken, shareSlot }: Props, ref?: Ref<InfiniteZoomHa
   const [showMiniOnboarding, setShowMiniOnboarding] = useState(false)
   const [miniOnboardingInteractionSeen, setMiniOnboardingInteractionSeen] = useState(false)
   const { isOpen: isTagsOpen, onClose: onTagsClose, onToggle: onTagsToggle } = useDisclosure()
+  const [isCrossBranchControlsOpen, setIsCrossBranchControlsOpen] = useState(false)
   const dataState = useExploreData(sharedToken)
   const { data, loading, error, hasPlacements, reload } = dataState
   const tags = useExploreTags(data, sharedToken)
@@ -162,7 +163,7 @@ function ExplorePage({ sharedToken, shareSlot }: Props, ref?: Ref<InfiniteZoomHa
             versionFollowTarget={versionFollowTarget}
             diffLens={diffMode.diffLens}
             crossBranchSettings={crossBranchSettings}
-            hoverLocked={isTagsOpen}
+            hoverLocked={isTagsOpen || isCrossBranchControlsOpen}
           />
 
           {!sharedToken && <ExploreOnboarding hasLinkedNodes={!!(data.navigations?.length > 0)} />}
@@ -194,6 +195,7 @@ function ExplorePage({ sharedToken, shareSlot }: Props, ref?: Ref<InfiniteZoomHa
             onCrossBranchEnabledChange={setCrossBranchEnabled}
             onCrossBranchBudgetChange={setCrossBranchConnectorBudget}
             onCrossBranchPriorityChange={setCrossBranchConnectorPriority}
+            onCrossBranchOpenChange={setIsCrossBranchControlsOpen}
             allTags={tags.allTags}
             tagColors={tags.tagColors}
             layers={tags.layers}

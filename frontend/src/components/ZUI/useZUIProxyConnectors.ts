@@ -3,11 +3,13 @@ import type { CrossBranchContextSettings } from '../../crossBranch/types'
 import { DEFAULT_MIN_CONNECTOR_ANCHOR_ALPHA } from '../../crossBranch/settings'
 import type { DiagramGroupLayout, HoveredItem, ZUIViewState } from './types'
 import {
+  buildProxyConnectorRenderState,
   buildProxyConnectorSpatialIndex,
   buildVisibleProxyConnectors,
   collectVisibleNodeAnchors,
   findHoveredProxyConnector,
   type ProxyConnectorSpatialIndex,
+  type ZUIProxyConnectorRenderState,
   type VisibleNodeAnchor,
 } from './proxy'
 import type { WorkspaceGraphSnapshot } from '../../crossBranch/types'
@@ -16,6 +18,7 @@ export interface ZUIProxyConnectorState {
   byNodeId: Map<string, VisibleNodeAnchor>
   visibleAnchors: Map<number, VisibleNodeAnchor>
   proxyConnectors: ReturnType<typeof buildVisibleProxyConnectors>['connectors']
+  proxyConnectorRenderState: ZUIProxyConnectorRenderState
   hiddenProxyBadges: ReturnType<typeof buildVisibleProxyConnectors>['hiddenBadges']
   resolveHoveredProxyItem: (worldX: number, worldY: number, view: ZUIViewState, canvasW: number) => HoveredItem | null
 }
@@ -63,9 +66,13 @@ export function useZUIProxyConnectors(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceSnapshot, visibleElementSig, proxySettingsSig])
 
+  const proxyConnectorRenderState = useMemo(() => (
+    buildProxyConnectorRenderState(proxyConnectors.connectors)
+  ), [proxyConnectors.connectors])
+
   const proxyHoverIndex = useMemo(() => (
-    buildProxyConnectorSpatialIndex(proxyConnectors.connectors, anchors.byNodeId)
-  ), [proxyConnectors.connectors, anchors.byNodeId])
+    buildProxyConnectorSpatialIndex(proxyConnectorRenderState, anchors.byNodeId)
+  ), [proxyConnectorRenderState, anchors.byNodeId])
 
   const proxyHoverIndexRef = useRef<ProxyConnectorSpatialIndex | null>(null)
   proxyHoverIndexRef.current = proxyHoverIndex
@@ -79,6 +86,7 @@ export function useZUIProxyConnectors(
   return {
     ...anchors,
     proxyConnectors: proxyConnectors.connectors,
+    proxyConnectorRenderState,
     hiddenProxyBadges: proxyConnectors.hiddenBadges,
     resolveHoveredProxyItem,
   }

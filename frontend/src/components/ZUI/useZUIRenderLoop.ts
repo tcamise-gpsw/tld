@@ -302,7 +302,7 @@ export function useZUIRenderLoop({
       ctx.scale(cameraRebase.view.zoom, cameraRebase.view.zoom)
       drawVisibleProxyConnectors(
         ctx,
-        proxyStateRef.current.proxyConnectors,
+        proxyStateRef.current.proxyConnectorRenderState,
         rebasedProxyAnchors,
         cameraRebase.view.zoom,
         labelBgRef.current,

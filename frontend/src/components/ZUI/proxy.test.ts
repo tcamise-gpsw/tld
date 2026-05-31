@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { collectVisibleNodeAnchors, getProxyBezierBadgeGeometry, type VisibleNodeAnchor } from './proxy'
+import {
+  buildProxyConnectorRenderState,
+  buildProxyConnectorSpatialIndex,
+  collectVisibleNodeAnchors,
+  findHoveredProxyConnector,
+  getProxyBezierBadgeGeometry,
+  type VisibleNodeAnchor,
+} from './proxy'
 import { DEFAULT_MIN_CONNECTOR_ANCHOR_ALPHA } from '../../crossBranch/settings'
+import type { ZUIResolvedConnector } from '../../crossBranch/resolve'
 import type { LayoutNode } from './types'
 
 function node(id: string, elementId: number, children: LayoutNode[] = []): LayoutNode {
@@ -97,5 +105,87 @@ describe('getProxyBezierBadgeGeometry', () => {
 
     expect(geometry.midX).not.toBe((200 + 300) / 2)
     expect(Math.hypot(geometry.tangentX, geometry.tangentY)).toBeGreaterThan(0)
+  })
+})
+
+function proxyConnector(partial: Partial<ZUIResolvedConnector> & Pick<ZUIResolvedConnector, 'key'>): ZUIResolvedConnector {
+  return {
+    sourceElementId: 1,
+    targetElementId: 2,
+    sourceAnchorElementId: 1,
+    targetAnchorElementId: 2,
+    sourceNodeId: 'source',
+    targetNodeId: 'target',
+    direction: 'outgoing',
+    style: 'dashed',
+    label: '',
+    sourceDepth: 1,
+    targetDepth: 1,
+    maxDepth: 1,
+    details: { count: 1 } as ZUIResolvedConnector['details'],
+    ...partial,
+  }
+}
+
+function proxyDetails(label: string): ZUIResolvedConnector['details'] {
+  return {
+    key: label,
+    label,
+    count: 1,
+    sourceAnchorId: 'source',
+    targetAnchorId: 'target',
+    sourceAnchorName: 'Source',
+    targetAnchorName: 'Target',
+    ownerViewIds: [1],
+    ownerViewNames: ['View 1'],
+    connectors: [],
+  } as ZUIResolvedConnector['details']
+}
+
+describe('buildProxyConnectorRenderState', () => {
+  it('precomputes provenance stubs without changing drawable connector order', () => {
+    const renderState = buildProxyConnectorRenderState([
+      proxyConnector({ key: 'deep-provenance-stub', sourceDepth: 3, targetDepth: 3, maxDepth: 3 }),
+      proxyConnector({ key: 'shallow-drawable', sourceDepth: 1, targetDepth: 1, maxDepth: 1 }),
+      proxyConnector({ key: 'unrelated-drawable', sourceElementId: 3, targetElementId: 4 }),
+    ])
+
+    expect(renderState.drawableConnectors.map((connector) => connector.key)).toEqual([
+      'shallow-drawable',
+      'unrelated-drawable',
+    ])
+  })
+
+  it('keeps filtered provenance stubs out of hover detection', () => {
+    const renderState = buildProxyConnectorRenderState([
+      proxyConnector({
+        key: 'deep-provenance-stub',
+        sourceNodeId: 'deep-source',
+        targetNodeId: 'deep-target',
+        sourceDepth: 3,
+        targetDepth: 3,
+        maxDepth: 3,
+        details: proxyDetails('Hidden provenance stub'),
+      }),
+      proxyConnector({
+        key: 'shallow-drawable',
+        sourceNodeId: 'source',
+        targetNodeId: 'target',
+        sourceDepth: 1,
+        targetDepth: 1,
+        maxDepth: 1,
+        details: proxyDetails('Visible connector'),
+      }),
+    ])
+
+    const hoverIndex = buildProxyConnectorSpatialIndex(renderState, new Map([
+      ['source', anchor({ nodeId: 'source', elementId: 1, worldX: 0, worldY: 0 })],
+      ['target', anchor({ nodeId: 'target', elementId: 2, worldX: 300, worldY: 0 })],
+      ['deep-source', anchor({ nodeId: 'deep-source', elementId: 1, worldX: 0, worldY: 200, pathDepth: 3 })],
+      ['deep-target', anchor({ nodeId: 'deep-target', elementId: 2, worldX: 300, worldY: 200, pathDepth: 3 })],
+    ]))
+
+    expect(findHoveredProxyConnector(200, 250, hoverIndex, { x: 0, y: 0, zoom: 1 })).toBeNull()
+    expect(findHoveredProxyConnector(200, 50, hoverIndex, { x: 0, y: 0, zoom: 1 })?.data.label).toBe('Visible connector')
   })
 })

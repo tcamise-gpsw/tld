@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CoreUISlots } from '../../slots'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { parseNumericId } from '../../utils/ids'
@@ -81,6 +81,7 @@ import ProxyConnectorEdge from '../../components/ProxyConnectorEdge'
 import ProxyConnectorPanel from '../../components/ProxyConnectorPanel'
 import {
   clampContextNodeAxisPosition,
+  reconcileMeasuredContextNodes,
   type ContextNodePositionOverride,
   type ContextSide,
   useViewContextNeighbours,
@@ -182,6 +183,18 @@ type RemoteCursorState = RealtimeCursor & {
   updatedAt: number
 }
 
+type CanvasViewport = {
+  x: number
+  y: number
+  zoom: number
+}
+
+type CanvasViewportStore = {
+  getSnapshot: () => CanvasViewport
+  subscribe: (listener: () => void) => () => void
+  setViewport: (viewport: CanvasViewport) => void
+}
+
 type ViewMetadataSnapshot = Pick<ViewTreeNode, 'id' | 'name' | 'level_label'>
 
 type PendingDuplicatePaste = {
@@ -205,6 +218,89 @@ function isRenderableCursor(cursor: RealtimeCursor, selfUserId: string | null): 
     Number.isFinite(cursor.x) &&
     Number.isFinite(cursor.y)
 }
+
+function createCanvasViewportStore(initial: CanvasViewport = { x: 0, y: 0, zoom: 1 }): CanvasViewportStore {
+  let snapshot = { ...initial }
+  const listeners = new Set<() => void>()
+
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    setViewport: (viewport) => {
+      if (snapshot.x === viewport.x && snapshot.y === viewport.y && snapshot.zoom === viewport.zoom) return
+      snapshot = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
+      listeners.forEach((listener) => listener())
+    },
+  }
+}
+
+interface RemoteCursorOverlayProps {
+  cursors: RemoteCursorState[]
+  viewportStore: CanvasViewportStore
+}
+
+const RemoteCursorOverlay = memo(function RemoteCursorOverlay({ cursors, viewportStore }: RemoteCursorOverlayProps) {
+  const canvasViewport = useSyncExternalStore(
+    viewportStore.subscribe,
+    viewportStore.getSnapshot,
+    viewportStore.getSnapshot,
+  )
+
+  return (
+    <Box position="absolute" inset={0} pointerEvents="none" zIndex={11} overflow="hidden">
+      {cursors.map((cursor) => {
+        const color = cursorColorForUser(cursor.user_id)
+        const left = cursor.x * canvasViewport.zoom + canvasViewport.x
+        const top = cursor.y * canvasViewport.zoom + canvasViewport.y
+        if (!Number.isFinite(left) || !Number.isFinite(top)) return null
+        return (
+          <Box
+            key={cursor.user_id}
+            position="absolute"
+            left={0}
+            top={0}
+            transform={`translate(${left}px, ${top}px)`}
+            transition="transform 80ms linear"
+            willChange="transform"
+          >
+            <svg width="20" height="24" viewBox="0 0 20 24" fill="none" aria-hidden="true">
+              <path
+                d="M2 2.5L17 12.5L10.7 14.1L7.2 22L2 2.5Z"
+                fill={color}
+                stroke="white"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <Text
+              position="absolute"
+              left="16px"
+              top="16px"
+              maxW="180px"
+              px={2}
+              py={0.5}
+              borderRadius="6px"
+              bg={color}
+              color="white"
+              fontSize="11px"
+              fontWeight="600"
+              lineHeight="1.2"
+              whiteSpace="nowrap"
+              overflow="hidden"
+              textOverflow="ellipsis"
+              boxShadow="0 6px 16px rgba(0,0,0,0.25)"
+            >
+              {cursor.username || 'User'}
+            </Text>
+          </Box>
+        )
+      })}
+    </Box>
+  )
+})
 
 function stringArraysEqual(a: string[], b: string[]) {
   if (a.length !== b.length) return false
@@ -511,7 +607,11 @@ function ViewEditorInner({
   const realtimeClockRef = useRef(0)
   const realtimeSelfUserIdRef = useRef<string | null>(null)
   const [remoteCursors, setRemoteCursors] = useState<RemoteCursorState[]>([])
-  const [canvasViewport, setCanvasViewport] = useState({ x: 0, y: 0, zoom: 1 })
+  const canvasViewportStoreRef = useRef<CanvasViewportStore | null>(null)
+  if (canvasViewportStoreRef.current === null) {
+    canvasViewportStoreRef.current = createCanvasViewportStore()
+  }
+  const canvasViewportStore = canvasViewportStoreRef.current
   const [collaboration, setCollaboration] = useState<CollaborationHeaderState>({
     viewers: [],
     collaborators: [],
@@ -1378,6 +1478,7 @@ function ViewEditorInner({
 
   const { hasSignificantOverlaps, dismiss: dismissOverlapSuggestion } = useOverlapDetection(rfNodes, viewId)
   const selectedCanvasElementIds = useMemo(() => selectedElementIds(rfNodes), [rfNodes])
+  const selectedCanvasElementCount = selectedCanvasElementIds.length
   const selectedCanvasElementIdKey = selectedCanvasElementIds.join(',')
   const selectedCanvasElements = useMemo(() => {
     const selectedIds = new Set(selectedCanvasElementIds)
@@ -2438,16 +2539,7 @@ function ViewEditorInner({
       }
       return changed ? next : prev
     })
-    setLiveContextNodes((prev) => {
-      const prevById = new Map(prev.map((p) => [p.id, p]))
-      return contextNodes.map((n) => {
-        const existing = prevById.get(n.id)
-        if (existing?.width != null && existing?.height != null) {
-          return { ...n, width: existing.width, height: existing.height }
-        }
-        return n
-      })
-    })
+    setLiveContextNodes((prev) => reconcileMeasuredContextNodes(prev, contextNodes))
   }, [contextNodes])
 
   const fadedNodeCacheRef = useRef<WeakMap<RFNode, RFNode>>(new WeakMap())
@@ -2573,10 +2665,18 @@ function ViewEditorInner({
     if (!hasNodeSel && !hasEdgeSel) return allNodes
 
     const cache = fadedNodeCacheRef.current
+    const isMultiNodeSelection = selectedCanvasElementCount > 1
+    const withSelectionMeta = (node: RFNode) => {
+      if (!node.selected || node.type !== 'elementNode') return node
+      const data = node.data as { isMultiSelected?: boolean } | undefined
+      if (data?.isMultiSelected === isMultiNodeSelection) return node
+      return { ...node, data: { ...(node.data ?? {}), isMultiSelected: isMultiNodeSelection } }
+    }
+
     return allNodes.map((n) => {
       if (n.id === PENDING_ELEMENT_NODE_ID) return n
       const isHighlighted = selectedNodeIds.has(n.id) || selectedEdgeEndPoints.has(n.id) || neighborNodeIds.has(n.id)
-      if (isHighlighted) return n
+      if (isHighlighted) return withSelectionMeta(n)
       const cached = cache.get(n)
       if (cached) return cached
       const faded: RFNode = {
@@ -2586,7 +2686,7 @@ function ViewEditorInner({
       cache.set(n, faded)
       return faded
     })
-  }, [liveContextNodes, rfNodes, pendingElementNode, contextConnectors, rfEdgesWithProxyBadges])
+  }, [liveContextNodes, rfNodes, pendingElementNode, contextConnectors, rfEdgesWithProxyBadges, selectedCanvasElementCount])
 
   const pendingPreviewEdges = useMemo((): RFEdge[] => {
     const pending = canvas.pendingElement
@@ -2776,9 +2876,9 @@ function ViewEditorInner({
 
   const handleRealtimeMove = useCallback((event: unknown, viewport: { x: number; y: number; zoom: number }) => {
     onMove(event, viewport)
-    setCanvasViewport(viewport)
+    canvasViewportStore.setViewport(viewport)
     realtimeRef.current?.sendViewport(viewport.x, viewport.y, viewport.zoom)
-  }, [onMove])
+  }, [canvasViewportStore, onMove])
 
   // ── FitView ────────────────────────────────────────────────────────────────
   const fitViewRef = useRef(safeFitView)
@@ -2858,9 +2958,9 @@ function ViewEditorInner({
 
   const onRFInit = useCallback(() => {
     rfReadyRef.current = true
-    setCanvasViewport(getViewport())
+    canvasViewportStore.setViewport(getViewport())
     maybeFitView()
-  }, [getViewport, maybeFitView])
+  }, [canvasViewportStore, getViewport, maybeFitView])
 
   useEffect(() => {
     needsFitView.current = true
@@ -3654,55 +3754,7 @@ function ViewEditorInner({
                 <SafeBackground variant={BackgroundVariant.Dots} gap={16} color="#2D3748" size={1} />
               </ReactFlow>
               {remoteCursors.length > 0 && (
-                <Box position="absolute" inset={0} pointerEvents="none" zIndex={11} overflow="hidden">
-                  {remoteCursors.map((cursor) => {
-                    const color = cursorColorForUser(cursor.user_id)
-                    const left = cursor.x * canvasViewport.zoom + canvasViewport.x
-                    const top = cursor.y * canvasViewport.zoom + canvasViewport.y
-                    if (!Number.isFinite(left) || !Number.isFinite(top)) return null
-                    return (
-                      <Box
-                        key={cursor.user_id}
-                        position="absolute"
-                        left={0}
-                        top={0}
-                        transform={`translate(${left}px, ${top}px)`}
-                        transition="transform 80ms linear"
-                        willChange="transform"
-                      >
-                        <svg width="20" height="24" viewBox="0 0 20 24" fill="none" aria-hidden="true">
-                          <path
-                            d="M2 2.5L17 12.5L10.7 14.1L7.2 22L2 2.5Z"
-                            fill={color}
-                            stroke="white"
-                            strokeWidth="1.5"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                        <Text
-                          position="absolute"
-                          left="16px"
-                          top="16px"
-                          maxW="180px"
-                          px={2}
-                          py={0.5}
-                          borderRadius="6px"
-                          bg={color}
-                          color="white"
-                          fontSize="11px"
-                          fontWeight="600"
-                          lineHeight="1.2"
-                          whiteSpace="nowrap"
-                          overflow="hidden"
-                          textOverflow="ellipsis"
-                          boxShadow="0 6px 16px rgba(0,0,0,0.25)"
-                        >
-                          {cursor.username || 'User'}
-                        </Text>
-                      </Box>
-                    )
-                  })}
-                </Box>
+                <RemoteCursorOverlay cursors={remoteCursors} viewportStore={canvasViewportStore} />
               )}
               {canvasOverlaySlot && (
                 <Box position="absolute" inset={0} pointerEvents="none" zIndex={10}>

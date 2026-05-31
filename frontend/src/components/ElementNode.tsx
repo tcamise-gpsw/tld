@@ -169,6 +169,7 @@ interface NodeData extends PlacedElement {
   selectedHandleIds?: readonly string[]
   reconnectCandidates?: readonly { handleId: string; edgeId: string; endpoint: 'source' | 'target'; selected: boolean }[]
   isConnectorHighlighted?: boolean
+  isMultiSelected?: boolean
   versionChangeType?: 'added' | 'updated' | 'deleted' | 'initialized'
   versionLineDelta?: { added: number; removed: number }
   pendingCreate?: PendingElementCreateData
@@ -581,10 +582,7 @@ function ElementNode({ data, selected }: Props) {
     }
     return next
   }, [data.reconnectCandidates])
-  const selectedElementCount = useStore((state) =>
-    Array.from(state.nodeInternals.values()).filter((node) => node.selected && node.type === 'elementNode').length,
-  )
-  const isMultiSelected = selectedElementCount > 1
+  const isMultiSelected = !!data.isMultiSelected
 
   const nodeLogoUrl = resolveElementIconUrl(data.logo_url, data.technology_connectors) ?? undefined
 
@@ -1343,7 +1341,8 @@ function arePropsEqual(prev: Props, next: Props) {
     p.isClickConnectMode === n.isClickConnectMode &&
     p.tagColors === n.tagColors &&
     p.layerHighlightColor === n.layerHighlightColor &&
-    p.forceShowTagPopup === n.forceShowTagPopup
+    p.forceShowTagPopup === n.forceShowTagPopup &&
+    p.isMultiSelected === n.isMultiSelected
   )
 }
 

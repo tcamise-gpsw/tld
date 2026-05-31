@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import type { Node as RFNode } from 'reactflow'
 import type { CrossBranchContextSettings, ProxyConnectorLeaf } from '../../../crossBranch/types'
 import type { VisibleContextSummaryForest, VisibleContextSummaryNode } from './contextSummaryTree'
-import { buildSummaryLayoutById, budgetExternalContextGroups } from './useViewContextNeighbours'
+import { buildSummaryLayoutById, budgetExternalContextGroups, reconcileMeasuredContextNodes } from './useViewContextNeighbours'
 
 function settings(connectorBudget: number): CrossBranchContextSettings {
   return {
@@ -149,5 +150,77 @@ describe('buildSummaryLayoutById', () => {
     expect(expandedLayout.get('ctx:root-a')?.position).toEqual(collapsedLayout.get('ctx:root-a')?.position)
     expect(expandedLayout.get('ctx:root-b')?.position).toEqual(collapsedLayout.get('ctx:root-b')?.position)
     expect((expandedLayout.get('ctx:child-a')?.position.x ?? 0)).toBeGreaterThan(expandedLayout.get('ctx:root-a')?.position.x ?? 0)
+  })
+})
+
+describe('reconcileMeasuredContextNodes', () => {
+  it('keeps measured context node references when recomputed nodes are equivalent', () => {
+    const previousNode: RFNode = {
+      id: 'ctx:service',
+      type: 'contextNeighborNode',
+      position: { x: 10, y: 20 },
+      width: 212,
+      height: 118,
+      data: {
+        name: 'Service',
+        contextElementSignature: ['service', 1],
+        relationshipDetailsSignature: ['connector', 1],
+        onSelectElement: () => {},
+        onOpenRelationshipDetails: () => {},
+      },
+    }
+    const previous = [previousNode]
+    const recomputed: RFNode[] = [{
+      id: 'ctx:service',
+      type: 'contextNeighborNode',
+      position: { x: 10, y: 20 },
+      width: 200,
+      height: 100,
+      data: {
+        name: 'Service',
+        contextElementSignature: ['service', 1],
+        relationshipDetailsSignature: ['connector', 1],
+        onSelectElement: () => {},
+        onOpenRelationshipDetails: () => {},
+      },
+    }]
+
+    const next = reconcileMeasuredContextNodes(previous, recomputed)
+
+    expect(next).toBe(previous)
+    expect(next[0]).toBe(previousNode)
+  })
+
+  it('replaces a measured context node when computed data changes', () => {
+    const previousNode: RFNode = {
+      id: 'ctx:service',
+      type: 'contextNeighborNode',
+      position: { x: 10, y: 20 },
+      width: 212,
+      height: 118,
+      data: {
+        name: 'Service',
+        relationshipDetailsSignature: ['connector', 1],
+        onOpenRelationshipDetails: () => {},
+      },
+    }
+    const recomputed: RFNode[] = [{
+      id: 'ctx:service',
+      type: 'contextNeighborNode',
+      position: { x: 10, y: 20 },
+      width: 200,
+      height: 100,
+      data: {
+        name: 'Service',
+        relationshipDetailsSignature: ['connector', 2],
+        onOpenRelationshipDetails: () => {},
+      },
+    }]
+
+    const next = reconcileMeasuredContextNodes([previousNode], recomputed)
+
+    expect(next[0]).not.toBe(previousNode)
+    expect(next[0]?.width).toBe(212)
+    expect(next[0]?.height).toBe(118)
   })
 })
