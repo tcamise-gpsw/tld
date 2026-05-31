@@ -182,69 +182,75 @@ export function ZUIHoverPopover({
       </PopoverTrigger>
       <Portal>
         <PopoverContent
-          bg="gray.900"
-          borderColor="whiteAlpha.300"
-          boxShadow="2xl"
-          width="280px"
+          bg="glass.bg"
+          border="1px solid"
+          borderColor="glass.border"
+          boxShadow="panel"
+          borderRadius="md"
+          width="232px"
           _focus={{ boxShadow: 'none' }}
           pointerEvents="auto"
           onMouseEnter={() => onHoverLock(true)}
           onMouseLeave={() => onHoverLock(false)}
         >
-          <PopoverArrow bg="gray.900" />
+          <PopoverArrow bg="glass.bg" />
           {hoveredItem?.type === 'node' && (
             <>
-              <PopoverHeader borderBottom="1px solid" borderColor="whiteAlpha.200" px={4} py={3}>
-                <HStack spacing={3}>
+              <PopoverHeader borderBottom="1px solid" borderColor="whiteAlpha.100" px={3} py={2}>
+                <HStack spacing={2} align="center">
                   {hoveredItem.data.logoUrl && (
                     <Box flexShrink={0}>
-                      <ChakraImage src={hoveredItem.data.logoUrl} boxSize="24px" objectFit="contain" />
+                      <ChakraImage src={hoveredItem.data.logoUrl} boxSize="18px" objectFit="contain" />
                     </Box>
                   )}
                   <VStack align="start" spacing={0} flex={1} overflow="hidden">
-                    <Text fontWeight="600" fontSize="sm" isTruncated width="100%" color="white">
+                    <Text fontWeight="700" fontSize="13px" isTruncated width="100%" color="gray.50" lineHeight="1.15">
                       {hoveredItem.data.label}
                     </Text>
-                    <Badge colorScheme={hoveredItem.data.isPortal ? 'purple' : 'blue'} variant="subtle" fontSize="2xs">
-                      {hoveredItem.data.isPortal ? 'Portal' : hoveredItem.data.type}
-                    </Badge>
                   </VStack>
                 </HStack>
               </PopoverHeader>
-              <PopoverBody px={4} py={3}>
-                <VStack align="start" spacing={3}>
+              <PopoverBody px={3} py={2.5}>
+                <VStack align="stretch" spacing={2}>
                   <DiffDetailBlock detail={hoveredDiffDetail} onOpenSource={onOpenSource} />
                   {hoveredItem.data.technology && (
                     <Box>
-                      <Text color="gray.400" fontSize="xs" fontWeight="600" mb={0.5} letterSpacing="wider">TECHNOLOGY</Text>
-                      <Text fontSize="xs" color="gray.200">{hoveredItem.data.technology}</Text>
+                      <Text fontSize="11px" color="gray.300" noOfLines={1}>
+                        {hoveredItem.data.technology}
+                      </Text>
                     </Box>
                   )}
                   {hoveredItem.data.description && (
                     <Box>
-                      <Text color="gray.400" fontSize="xs" fontWeight="600" mb={0.5} letterSpacing="wider">DESCRIPTION</Text>
-                      <Text fontSize="xs" color="gray.200" noOfLines={4}>{hoveredItem.data.description}</Text>
+                      <Text fontSize="11px" color="gray.400" noOfLines={2} lineHeight="1.35">
+                        {hoveredItem.data.description}
+                      </Text>
                     </Box>
                   )}
                   {hoveredItem.data.linkedDiagramId && (
                     <Box>
-                      <Text color="gray.400" fontSize="xs" fontWeight="600" mb={0.5} letterSpacing="wider">LINKS TO</Text>
-                      <Text fontSize="xs" color="teal.300" fontWeight="500">
+                      <Text fontSize="11px" color="var(--accent)" fontWeight="600" noOfLines={1}>
                         {'⊞'} {hoveredItem.data.linkedDiagramLabel}
                       </Text>
                     </Box>
                   )}
-                  <Divider borderColor="whiteAlpha.200" />
+                  <Divider borderColor="whiteAlpha.100" />
                   <Button
                     as={RouterLink}
                     to={hoveredItem.data.isPortal
                       ? `/views/${hoveredItem.data.linkedDiagramId}`
                       : `/views/${hoveredItem.data.diagramId}?element=${hoveredItem.data.elementId}`}
                     size="xs"
-                    colorScheme="teal"
-                    variant="solid"
+                    variant="outline"
+                    h="28px"
                     width="full"
+                    bg="rgba(var(--accent-rgb), 0.08)"
+                    borderColor="rgba(var(--accent-rgb), 0.24)"
+                    color="var(--accent)"
+                    fontWeight="700"
                     rightIcon={<ExternalLinkIcon />}
+                    _hover={{ bg: 'rgba(var(--accent-rgb), 0.14)', borderColor: 'rgba(var(--accent-rgb), 0.36)' }}
+                    _active={{ bg: 'rgba(var(--accent-rgb), 0.18)' }}
                     onClick={(e) => e.stopPropagation()}
                   >
                     {hoveredItem.data.isPortal ? 'Open Diagram' : 'Open in Editor'}
