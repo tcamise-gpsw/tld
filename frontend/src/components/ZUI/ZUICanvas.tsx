@@ -99,6 +99,7 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
     resolveHoveredProxyItem,
     hiddenTags,
     containerSize.w,
+    hoverLocked,
   )
 
   const viewportBounds = useMemo(() => {
@@ -329,10 +330,6 @@ export const ZUICanvas = forwardRef<ZUICanvasHandle, Props>(function ZUICanvas({
     }
     focusDiagram(versionFollowTarget.viewId)
   }, [focusDiagram, focusElement, initialized, versionFollowTarget?.resourceId, versionFollowTarget?.resourceType, versionFollowTarget?.token, versionFollowTarget?.viewId])
-
-  useEffect(() => {
-    setHoverLocked(hoverLocked)
-  }, [hoverLocked, setHoverLocked])
 
   useImperativeHandle(
     ref,

@@ -20,6 +20,7 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon } from '@chakra-ui/icons'
+import { useEffect } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import type { ExploreDiffDetail } from '../../utils/exploreDiffLens'
 import type { HoveredItem } from './types'
@@ -140,7 +141,7 @@ export function ZUIBreadcrumb({
       </Breadcrumb>
       {currentPath[currentPath.length - 1]?.isCircular && (
         <Text mt={1.5} color="var(--accent)" fontSize="2xs" fontWeight="500" letterSpacing="wide">
-          CIRCULAR LINK - CLICK BREADCRUMB TO JUMP BACK
+          Recursive reference.
         </Text>
       )}
     </Box>
@@ -162,9 +163,16 @@ export function ZUIHoverPopover({
   onOpenSource: (detail: ExploreDiffDetail) => void
   onHoverLock: (locked: boolean) => void
 }) {
+  const isOpen = isHoveredItemFullyVisible
+
+  useEffect(() => {
+    if (!isOpen) onHoverLock(false)
+    return () => onHoverLock(false)
+  }, [isOpen, onHoverLock])
+
   return (
     <Popover
-      isOpen={isHoveredItemFullyVisible}
+      isOpen={isOpen}
       placement="right-start"
       closeOnBlur={false}
       gutter={12}

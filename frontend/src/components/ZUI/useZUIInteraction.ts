@@ -176,7 +176,7 @@ export interface ZUIInteraction {
   maxZoom: number
   hoveredItem: HoveredItem | null
   setHoveredItem: (item: HoveredItem | null, force?: boolean) => void
-  /** Set to true to prevent clearing hoveredItem (e.g. when mouse is over a popover). */
+  /** Set to true to prevent clearing hoveredItem while the mouse is over the hover popover. */
   setHoverLocked: (locked: boolean) => void
 }
 
@@ -191,11 +191,16 @@ export function useZUIInteraction(
   resolveHoveredProxyItem?: (worldX: number, worldY: number, view: ZUIViewState, canvasW: number) => HoveredItem | null,
   hiddenTags: string[] = [],
   canvasWidth: number = 0,
+  hoverLocked: boolean = false,
 ): ZUIInteraction {
   const [viewState, setViewStateInternal] = useState<ZUIViewState>(initialView)
   const [hoveredItem, setHoveredItemInternal] = useState<HoveredItem | null>(null)
-  const hoverLockedRef = useRef(false)
+  const popoverHoverLockedRef = useRef(false)
+  const externalHoverLockedRef = useRef(hoverLocked)
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isHoverLocked = useCallback(() => {
+    return externalHoverLockedRef.current || popoverHoverLockedRef.current
+  }, [])
 
   const setHoveredItem = useCallback((item: HoveredItem | null, force = false) => {
     if (hoverTimeoutRef.current) {
@@ -210,17 +215,17 @@ export function useZUIInteraction(
       }
       // Grace period before clearing hover to allow mouse to reach popover
       hoverTimeoutRef.current = setTimeout(() => {
-        if (!hoverLockedRef.current) {
+        if (!isHoverLocked()) {
           setHoveredItemInternal(null)
         }
       }, 100)
     } else {
       setHoveredItemInternal(item)
     }
-  }, [])
+  }, [isHoverLocked])
 
   const setHoverLocked = useCallback((locked: boolean) => {
-    hoverLockedRef.current = locked
+    popoverHoverLockedRef.current = locked
     if (locked && hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current)
       hoverTimeoutRef.current = null
@@ -230,6 +235,14 @@ export function useZUIInteraction(
       // it should ideally clear soon. The next mouse move will handle it.
     }
   }, [])
+
+  useEffect(() => {
+    externalHoverLockedRef.current = hoverLocked
+    if (hoverLocked && hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
+      hoverTimeoutRef.current = null
+    }
+  }, [hoverLocked])
 
   // ── Refs for stable event handlers ──────────────────────────────
   const viewStateRef = useRef<ZUIViewState>(initialView)
@@ -439,8 +452,6 @@ export function useZUIInteraction(
     }
 
     function onMouseMove(e: MouseEvent) {
-      if (hoverLockedRef.current) return
-
       const rect = el!.getBoundingClientRect()
       const screenX = e.clientX - rect.left
       const screenY = e.clientY - rect.top
@@ -454,6 +465,8 @@ export function useZUIInteraction(
         onPanRef.current?.()
         return
       }
+
+      if (isHoverLocked()) return
 
       // Hover detection
       const view = viewStateRef.current
@@ -625,7 +638,7 @@ export function useZUIInteraction(
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchEnd)
     }
-  }, [canvasRef, scheduleViewState, setViewState, setHoveredItem, isMobile, resolveHoveredProxyItem]) // groupsRef handles groups updates without re-binding!
+  }, [canvasRef, scheduleViewState, setViewState, setHoveredItem, isHoverLocked, isMobile, resolveHoveredProxyItem]) // groupsRef handles groups updates without re-binding!
 
   return { viewState, viewStateRef, setViewState, fitView, maxZoom: dynamicMaxZoom, hoveredItem, setHoveredItem, setHoverLocked }
 }
