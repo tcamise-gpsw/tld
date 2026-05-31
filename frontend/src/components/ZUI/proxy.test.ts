@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { collectVisibleNodeAnchors, getProxyBezierBadgeGeometry, type VisibleNodeAnchor } from './proxy'
+import { buildProxyConnectorRenderState, collectVisibleNodeAnchors, getProxyBezierBadgeGeometry, type VisibleNodeAnchor } from './proxy'
 import { DEFAULT_MIN_CONNECTOR_ANCHOR_ALPHA } from '../../crossBranch/settings'
+import type { ZUIResolvedConnector } from '../../crossBranch/resolve'
 import type { LayoutNode } from './types'
 
 function node(id: string, elementId: number, children: LayoutNode[] = []): LayoutNode {
@@ -97,5 +98,39 @@ describe('getProxyBezierBadgeGeometry', () => {
 
     expect(geometry.midX).not.toBe((200 + 300) / 2)
     expect(Math.hypot(geometry.tangentX, geometry.tangentY)).toBeGreaterThan(0)
+  })
+})
+
+function proxyConnector(partial: Partial<ZUIResolvedConnector> & Pick<ZUIResolvedConnector, 'key'>): ZUIResolvedConnector {
+  return {
+    sourceElementId: 1,
+    targetElementId: 2,
+    sourceAnchorElementId: 1,
+    targetAnchorElementId: 2,
+    sourceNodeId: 'source',
+    targetNodeId: 'target',
+    direction: 'outgoing',
+    style: 'dashed',
+    label: '',
+    sourceDepth: 1,
+    targetDepth: 1,
+    maxDepth: 1,
+    details: { count: 1 } as ZUIResolvedConnector['details'],
+    ...partial,
+  }
+}
+
+describe('buildProxyConnectorRenderState', () => {
+  it('precomputes provenance stubs without changing drawable connector order', () => {
+    const renderState = buildProxyConnectorRenderState([
+      proxyConnector({ key: 'deep-provenance-stub', sourceDepth: 3, targetDepth: 3, maxDepth: 3 }),
+      proxyConnector({ key: 'shallow-drawable', sourceDepth: 1, targetDepth: 1, maxDepth: 1 }),
+      proxyConnector({ key: 'unrelated-drawable', sourceElementId: 3, targetElementId: 4 }),
+    ])
+
+    expect(renderState.drawableConnectors.map((connector) => connector.key)).toEqual([
+      'shallow-drawable',
+      'unrelated-drawable',
+    ])
   })
 })

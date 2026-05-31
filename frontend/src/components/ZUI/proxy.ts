@@ -456,7 +456,43 @@ export interface ProxyConnectorSpatialIndex {
   cells: Map<string, IndexedProxyConnector[]>
 }
 
+export interface ZUIProxyConnectorRenderState {
+  drawableConnectors: ZUIResolvedConnector[]
+}
+
 const PROXY_CONNECTOR_INDEX_CELL_SIZE = 360
+
+function proxyActualPairKey(connector: ZUIResolvedConnector): string {
+  return `${Math.min(connector.sourceElementId, connector.targetElementId)}::${Math.max(connector.sourceElementId, connector.targetElementId)}`
+}
+
+export function buildProxyConnectorRenderState(connectors: ZUIResolvedConnector[]): ZUIProxyConnectorRenderState {
+  if (connectors.length < 2) return { drawableConnectors: connectors }
+
+  const connectorsByActualPair = new Map<string, ZUIResolvedConnector[]>()
+  for (const connector of connectors) {
+    const pairKey = proxyActualPairKey(connector)
+    const family = connectorsByActualPair.get(pairKey)
+    if (family) family.push(connector)
+    else connectorsByActualPair.set(pairKey, [connector])
+  }
+
+  const provenanceStubKeys = new Set<string>()
+  for (const family of connectorsByActualPair.values()) {
+    if (family.length < 2) continue
+    const sorted = [...family].sort((left, right) => {
+      if (left.maxDepth !== right.maxDepth) return left.maxDepth - right.maxDepth
+      return (left.sourceDepth + left.targetDepth) - (right.sourceDepth + right.targetDepth)
+    })
+    for (let i = 1; i < sorted.length; i++) provenanceStubKeys.add(sorted[i].key)
+  }
+
+  if (provenanceStubKeys.size === 0) return { drawableConnectors: connectors }
+
+  return {
+    drawableConnectors: connectors.filter((connector) => !provenanceStubKeys.has(connector.key)),
+  }
+}
 
 function proxyCellKey(cx: number, cy: number): string {
   return `${cx},${cy}`
@@ -541,7 +577,7 @@ export function buildVisibleProxyConnectors(
 
 export function drawVisibleProxyConnectors(
   ctx: CanvasRenderingContext2D,
-  connectors: ZUIResolvedConnector[],
+  renderState: ZUIProxyConnectorRenderState,
   visibleAnchorsByNodeId: Map<string, VisibleNodeAnchor>,
   zoom: number,
   labelBg: string,
@@ -592,25 +628,7 @@ export function drawVisibleProxyConnectors(
     return true
   }
 
-  const connectorsByActualPair = new Map<string, ZUIResolvedConnector[]>()
-  for (const connector of connectors) {
-    const pairKey = `${Math.min(connector.sourceElementId, connector.targetElementId)}::${Math.max(connector.sourceElementId, connector.targetElementId)}`
-    const family = connectorsByActualPair.get(pairKey)
-    if (family) family.push(connector)
-    else connectorsByActualPair.set(pairKey, [connector])
-  }
-
-  const provenanceKeys = new Set<string>()
-  for (const family of connectorsByActualPair.values()) {
-    if (family.length < 2) continue
-    const sorted = [...family].sort((left, right) => {
-      if (left.maxDepth !== right.maxDepth) return left.maxDepth - right.maxDepth
-      return (left.sourceDepth + left.targetDepth) - (right.sourceDepth + right.targetDepth)
-    })
-    for (const connector of sorted.slice(1)) provenanceKeys.add(connector.key)
-  }
-
-  for (const connector of connectors) {
+  for (const connector of renderState.drawableConnectors) {
     const source = visibleAnchorsByNodeId.get(connector.sourceNodeId)
     const target = visibleAnchorsByNodeId.get(connector.targetNodeId)
     if (!source || !target) continue
@@ -626,12 +644,6 @@ export function drawVisibleProxyConnectors(
     const label = String(connector.details.count)
 
     ctx.save()
-    const isProvenanceStub = provenanceKeys.has(connector.key)
-    if (isProvenanceStub) {
-      ctx.restore()
-      continue
-    }
-
     ctx.globalAlpha = connectorAlpha(alpha) * 0.8
     ctx.strokeStyle = accent
     ctx.lineWidth = 1 / zoom
