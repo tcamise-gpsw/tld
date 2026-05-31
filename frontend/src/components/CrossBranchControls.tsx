@@ -43,6 +43,7 @@ interface Props {
   onEnabledChange: (enabled: boolean) => void
   onBudgetChange: (budget: number) => void
   onPriorityChange: (priority: CrossBranchConnectorPriority) => void
+  onOpenChange?: (isOpen: boolean) => void
   label?: string
 }
 
@@ -51,6 +52,7 @@ export default function CrossBranchControls({
   onEnabledChange,
   onBudgetChange,
   onPriorityChange,
+  onOpenChange,
   label = '',
 }: Props) {
   const connectorBudget = settings.connectorBudget
@@ -61,6 +63,10 @@ export default function CrossBranchControls({
   useEffect(() => {
     setDraftDensityLevel(densityFromBudget(connectorBudget))
   }, [connectorBudget])
+
+  useEffect(() => {
+    onOpenChange?.(isOpen)
+  }, [isOpen, onOpenChange])
 
   return (
     <Popover isOpen={isOpen} onClose={onClose} placement="top-start" isLazy closeOnBlur>

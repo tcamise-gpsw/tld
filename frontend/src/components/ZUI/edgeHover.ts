@@ -225,7 +225,7 @@ export function buildEdgeSpatialIndex(groups: DiagramGroupLayout[]): EdgeSpatial
         points: route.points,
         sourceLabel: source.label,
         targetLabel: target.label,
-        label: edge.label || 'Connection',
+        label: edge.label || 'Connector',
         id: edge.id,
         diagramId: group.diagramId,
         sourceObjId: source.elementId,

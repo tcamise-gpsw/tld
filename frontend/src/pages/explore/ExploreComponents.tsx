@@ -211,6 +211,7 @@ export function ExploreToolbar({
   onCrossBranchEnabledChange,
   onCrossBranchBudgetChange,
   onCrossBranchPriorityChange,
+  onCrossBranchOpenChange,
   allTags,
   tagColors,
   layers,
@@ -232,6 +233,7 @@ export function ExploreToolbar({
   onCrossBranchEnabledChange: (enabled: boolean) => void
   onCrossBranchBudgetChange: (budget: number) => void
   onCrossBranchPriorityChange: (priority: CrossBranchConnectorPriority) => void
+  onCrossBranchOpenChange: (isOpen: boolean) => void
   allTags: string[]
   tagColors: Record<string, Tag>
   layers: ViewLayer[]
@@ -285,6 +287,7 @@ export function ExploreToolbar({
           onEnabledChange={onCrossBranchEnabledChange}
           onBudgetChange={onCrossBranchBudgetChange}
           onPriorityChange={onCrossBranchPriorityChange}
+          onOpenChange={onCrossBranchOpenChange}
           label="Filters"
         />
 
