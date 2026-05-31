@@ -78,4 +78,56 @@ describe('CrossBranchControls', () => {
 
     expect(onOpenChange.mock.calls.map(([isOpen]) => isOpen)).toEqual([false, true, false])
   })
+
+  it('uses the noise gate icon when cross-branch filters are enabled', () => {
+    const renderer = renderControls({
+      settings: {
+        enabled: true,
+        depth: 3,
+        connectorBudget: 100,
+        connectorPriority: 'external',
+      },
+    })
+    const toggle = renderer.root.findByProps({ 'aria-label': 'Open Filters filters' })
+
+    expect(toggle.findAll((node) => node.type === 'rect')).toHaveLength(5)
+    expect(toggle.findAll((node) => node.type === 'circle')).toHaveLength(0)
+  })
+
+  it('falls back to the focus icon when cross-branch filters are disabled', () => {
+    const renderer = renderControls({
+      settings: {
+        enabled: false,
+        depth: 3,
+        connectorBudget: 10,
+        connectorPriority: 'external',
+      },
+    })
+    const toggle = renderer.root.findByProps({ 'aria-label': 'Open Filters filters' })
+
+    expect(toggle.findAll((node) => node.type === 'circle')).toHaveLength(2)
+    expect(toggle.findAll((node) => node.type === 'rect')).toHaveLength(0)
+  })
+
+  it('inverts the off-view switch semantics against settings.enabled', () => {
+    const onEnabledChange = vi.fn()
+    const renderer = renderControls({
+      settings: {
+        enabled: true,
+        depth: 3,
+        connectorBudget: 10,
+        connectorPriority: 'external',
+      },
+      onEnabledChange,
+    })
+
+    const switchInput = renderer.root.findByProps({ 'aria-label': 'Toggle cross-view context' })
+    expect(switchInput.props.isChecked).toBe(false)
+
+    act(() => {
+      switchInput.props.onChange({ target: { checked: true } })
+    })
+
+    expect(onEnabledChange).toHaveBeenCalledWith(false)
+  })
 })

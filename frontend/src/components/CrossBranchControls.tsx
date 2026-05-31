@@ -17,7 +17,7 @@ import {
   useDisclosure,
   VStack,
 } from '@chakra-ui/react'
-import { FocusIcon, ChevronDownIcon } from './Icons'
+import { FocusIcon, NoiseGateIcon, ChevronDownIcon } from './Icons'
 import {
   CROSS_BRANCH_CONNECTOR_BUDGET_MAX,
   CROSS_BRANCH_CONNECTOR_BUDGET_MIN,
@@ -58,7 +58,9 @@ export default function CrossBranchControls({
   const connectorBudget = settings.connectorBudget
   const { isOpen, onClose, onToggle } = useDisclosure()
   const [draftDensityLevel, setDraftDensityLevel] = useState<number>(() => densityFromBudget(connectorBudget))
+  const committedDensityLevel = densityFromBudget(connectorBudget)
   const activeDensity = DENSITY_STOPS.find((stop) => stop.value === draftDensityLevel) ?? DENSITY_STOPS[2]
+  const offViewSwitchChecked = !settings.enabled
 
   useEffect(() => {
     setDraftDensityLevel(densityFromBudget(connectorBudget))
@@ -82,7 +84,7 @@ export default function CrossBranchControls({
           aria-label={`Open ${label} filters`}
         >
           <HStack spacing={1.5}>
-            <FocusIcon />
+            {settings.enabled ? <NoiseGateIcon size={15} level={committedDensityLevel} /> : <FocusIcon size={15} />}
             <Text fontSize="11px" fontWeight={settings.enabled ? 'semibold' : 'normal'}>{label}</Text>
             <Text fontSize="10px" color={settings.enabled ? 'var(--accent)' : 'gray.400'}>
               {settings.enabled ? activeDensity.label : 'Off'}
@@ -118,7 +120,7 @@ export default function CrossBranchControls({
                     <FocusIcon />
                   </Box>
                   <Box minW={0}>
-                    <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Off-view-branch context</Text>
+                    <Text fontSize="xs" fontWeight="semibold" color="whiteAlpha.900">Off-view connectors</Text>
                     <Text fontSize="10px" color="whiteAlpha.600" noOfLines={1}>
                       {settings.enabled ? 'Show relationships across views' : 'View context is hidden'}
                     </Text>
@@ -126,8 +128,8 @@ export default function CrossBranchControls({
                 </HStack>
                 <Switch
                   size="sm"
-                  isChecked={settings.enabled}
-                  onChange={(event) => onEnabledChange(event.target.checked)}
+                  isChecked={offViewSwitchChecked}
+                  onChange={(event) => onEnabledChange(!event.target.checked)}
                   colorScheme="teal"
                   flexShrink={0}
                   aria-label="Toggle cross-view context"
