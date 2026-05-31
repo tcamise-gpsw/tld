@@ -27,6 +27,14 @@ describe("viewportHeight", () => {
     const setProperty = vi.fn()
     const cancelAnimationFrame = vi.fn()
     let pendingFrame: FrameRequestCallback | null = null
+    const runPendingFrame = () => {
+      if (pendingFrame === null) {
+        throw new Error("Expected a pending animation frame")
+      }
+      const callback = pendingFrame
+      pendingFrame = null
+      callback(0)
+    }
 
     const fakeWindow = {
       innerHeight: 900,
@@ -64,7 +72,7 @@ describe("viewportHeight", () => {
     visualViewportListeners.get("resize")?.(new Event("resize"))
     expect(setProperty).toHaveBeenCalledTimes(1)
 
-    pendingFrame?.(0)
+    runPendingFrame()
     expect(setProperty).toHaveBeenLastCalledWith(APP_VIEWPORT_HEIGHT_CSS_VAR, "700px")
 
     windowListeners.get("orientationchange")?.(new Event("orientationchange"))

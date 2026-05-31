@@ -89,7 +89,7 @@ describe('ViewEditor selection helpers', () => {
       node('3', 60, 80),
       node('2', 20, 20),
       node('1', 320, 20),
-      { ...node('4', 40, 40), style: { pointerEvents: 'none' } },
+      { ...node('4', 40, 40), style: { pointerEvents: 'none' as const } },
       node('context-left', 0, 0, 100, 50, false, 'contextNeighborNode'),
     ]
 
