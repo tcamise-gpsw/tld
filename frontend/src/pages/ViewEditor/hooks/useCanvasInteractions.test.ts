@@ -4,6 +4,7 @@ import type { Connector } from '../../../types'
 import {
   PENDING_ELEMENT_NODE_ID,
   applyPendingElementNodeChanges,
+  getDraggedElementNodes,
   getConnectorDeletionTarget,
   pendingElementPositionFromFlowPoint,
   resolveConnectorDropTarget,
@@ -51,8 +52,8 @@ class FakeElement {
   }
 }
 
-function node(id: string): RFNode {
-  return { id, position: { x: 0, y: 0 }, data: {} } as RFNode
+function node(id: string, options: Partial<RFNode> = {}): RFNode {
+  return { id, type: 'elementNode', position: { x: 0, y: 0 }, data: {}, ...options } as RFNode
 }
 
 function installPointHitTest(elements: FakeElement[]) {
@@ -145,6 +146,39 @@ describe('pending element node state', () => {
       position: { x: 180, y: 260 },
       dragging: false,
     })
+  })
+})
+
+describe('dragged element node resolution', () => {
+  it('uses React Flow drag payload positions before stale selected refs', () => {
+    const primary = node('1', { selected: true, position: { x: 0, y: 0 } })
+    const staleSelection = [
+      primary,
+      node('2', { selected: true, position: { x: 100, y: 0 } }),
+    ]
+    const draggedNodes = [
+      node('1', { selected: true, position: { x: 40, y: 20 } }),
+      node('2', { selected: true, position: { x: 140, y: 20 } }),
+    ]
+
+    expect(getDraggedElementNodes(primary, draggedNodes, staleSelection).map((dragged) => ({
+      id: dragged.id,
+      position: dragged.position,
+    }))).toEqual([
+      { id: '1', position: { x: 40, y: 20 } },
+      { id: '2', position: { x: 140, y: 20 } },
+    ])
+  })
+
+  it('falls back to selected element refs when React Flow gives no drag payload', () => {
+    const primary = node('1', { selected: true })
+    const fallbackNodes = [
+      primary,
+      node('2', { selected: true }),
+      node('ctx:3', { selected: true, type: 'contextNode' }),
+    ]
+
+    expect(getDraggedElementNodes(primary, [], fallbackNodes).map((dragged) => dragged.id)).toEqual(['1', '2'])
   })
 })
 

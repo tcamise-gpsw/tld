@@ -95,7 +95,13 @@ import type { ExtensionToWebviewMessage } from '../../types/vscode-messages'
 import { ViewEditorContext } from './context'
 import { useViewData } from './hooks/useViewData'
 import { useDrawingEngine } from './hooks/useDrawingEngine'
-import { PENDING_ELEMENT_NODE_ID, applyNodeChangesWithStructuralSharing, useCanvasInteractions } from './hooks/useCanvasInteractions'
+import {
+  PENDING_ELEMENT_NODE_ID,
+  applyNodeChangesWithStructuralSharing,
+  useCanvasInteractions,
+  type ClickConnectCursorPosition,
+  type ClickConnectModeState,
+} from './hooks/useCanvasInteractions'
 import { useViewEditHistory } from './hooks/useViewEditHistory'
 import { useOverlapDetection } from './hooks/useOverlapDetection'
 import { removeCollisions } from '../../utils/layout'
@@ -860,6 +866,9 @@ function ViewEditorInner({
   const rfReadyRef = useRef(false)
   const fittedContextForViewRef = useRef<number | null>(null)
   const [initialViewportReady, setInitialViewportReady] = useState(false)
+  const [interactionSourceId, setInteractionSourceId] = useState<number | null>(null)
+  const [clickConnectMode, setClickConnectMode] = useState<ClickConnectModeState | null>(null)
+  const [clickConnectCursorPos, setClickConnectCursorPos] = useState<ClickConnectCursorPosition | null>(null)
   const interactionSourceIdRef = useRef<number | null>(null)
   const multiConnectionSourceIdsRef = useRef<number[] | null>(null)
   const [deletedLibraryElementIds, setDeletedLibraryElementIds] = useState<number[]>([])
@@ -904,8 +913,8 @@ function ViewEditorInner({
 
   const data = useViewData({
     viewId,
-    interactionSourceId: interactionSourceIdRef.current,
-    clickConnectMode: null, // wired after canvasInteractions
+    interactionSourceId,
+    clickConnectMode,
     selectedConnector: selectedEdge,
     activeTags,
     hiddenLayerTags,
@@ -2342,6 +2351,12 @@ function ViewEditorInner({
   // ── Canvas interactions ────────────────────────────────────────────────────
   const canvas = useCanvasInteractions({
     viewId, canEdit,
+    interactionSourceId,
+    setInteractionSourceId,
+    clickConnectMode,
+    setClickConnectMode,
+    clickConnectCursorPos,
+    setClickConnectCursorPos,
     drawingMode, isMobileLayout,
     rfNodesRef, interactionNodesRef, rfEdgesRef, viewElementsRef, viewIdRef,
     incomingLinksRef,
@@ -2837,7 +2852,6 @@ function ViewEditorInner({
   const {
     canvasMenu, setCanvasMenu,
     pendingElement,
-    clickConnectMode, clickConnectCursorPos,
     reconnectPicking, setReconnectPicking, reconnectPickingRef,
     connectorLongPressMenu, setConnectorLongPressMenu,
     lastMousePosRef,
