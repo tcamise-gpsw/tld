@@ -2958,9 +2958,9 @@ function ViewEditorInner({
 
   const onRFInit = useCallback(() => {
     rfReadyRef.current = true
-    setCanvasViewport(getViewport())
+    canvasViewportStore.setViewport(getViewport())
     maybeFitView()
-  }, [getViewport, maybeFitView])
+  }, [canvasViewportStore, getViewport, maybeFitView])
 
   useEffect(() => {
     needsFitView.current = true

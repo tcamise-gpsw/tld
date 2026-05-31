@@ -66,13 +66,13 @@ export function useZUIProxyConnectors(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceSnapshot, visibleElementSig, proxySettingsSig])
 
-  const proxyHoverIndex = useMemo(() => (
-    buildProxyConnectorSpatialIndex(proxyConnectors.connectors, anchors.byNodeId)
-  ), [proxyConnectors.connectors, anchors.byNodeId])
-
   const proxyConnectorRenderState = useMemo(() => (
     buildProxyConnectorRenderState(proxyConnectors.connectors)
   ), [proxyConnectors.connectors])
+
+  const proxyHoverIndex = useMemo(() => (
+    buildProxyConnectorSpatialIndex(proxyConnectorRenderState, anchors.byNodeId)
+  ), [proxyConnectorRenderState, anchors.byNodeId])
 
   const proxyHoverIndexRef = useRef<ProxyConnectorSpatialIndex | null>(null)
   proxyHoverIndexRef.current = proxyHoverIndex

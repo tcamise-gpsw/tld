@@ -522,7 +522,7 @@ function addProxyConnectorToSpatialIndex(index: ProxyConnectorSpatialIndex, conn
 }
 
 export function buildProxyConnectorSpatialIndex(
-  connectors: ZUIResolvedConnector[],
+  renderState: ZUIProxyConnectorRenderState,
   visibleAnchorsByNodeId: Map<string, VisibleNodeAnchor>,
 ): ProxyConnectorSpatialIndex {
   const index: ProxyConnectorSpatialIndex = {
@@ -530,7 +530,7 @@ export function buildProxyConnectorSpatialIndex(
     cells: new Map(),
   }
 
-  for (const connector of connectors) {
+  for (const connector of renderState.drawableConnectors) {
     const source = visibleAnchorsByNodeId.get(connector.sourceNodeId)
     const target = visibleAnchorsByNodeId.get(connector.targetNodeId)
     if (!source || !target) continue
