@@ -63,11 +63,16 @@ Windows
 powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | iex; tld serve --open"
 ```
 
-There are native-desktop builds for macOS and windows. Look for tld-desktop binaries in releases.
+## Documentation
 
-There are also Mobile apps available in both [App Store](https://apps.apple.com/us/app/tldiagram/id6760236883) and [Play Store](https://play.google.com/store/apps/details?id=com.mertcikla.tldiagram) they have been a bit out-dated and are cloud-oriented (requires tldiagram.com account). They are not ideal for diagram authoring but still had some attention to make small adjustments possible. 
+Visit [docs](https://tldiagram.com/docs) for more info.
+
 
 ## Deployment & Self-Hosting
+
+tld has native-desktop builds for macOS and windows. Look for tld-desktop binaries in releases.
+
+
 
 `tld` designed to be run fully offline, behind a reverse-proxy or in your infrastructure or as a local development tool.
 
@@ -85,9 +90,9 @@ tld serve
 
 The PostgreSQL database must have `pgvector` support.
 
-# Documentation
+## Mobile 
 
-Visit [docs](https://tldiagram.com/docs) for more info.
+There are Mobile apps available in both [App Store](https://apps.apple.com/us/app/tldiagram/id6760236883) and [Play Store](https://play.google.com/store/apps/details?id=com.mertcikla.tldiagram) they are mostly cloud-oriented (requires tldiagram.com account). They are good for quickly checking stuff on-the-go, small screens are not diagram authoring but they still received some development effort and attention to make authoring possible on mobile. 
 
 ## Commands Reference 
 `tld --help`
