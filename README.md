@@ -65,6 +65,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://tldiagram.com/install.ps1 | i
 
 There are native-desktop builds for macOS and windows. Look for tld-desktop binaries in releases.
 
+There are also Mobile apps available in both [App Store](https://apps.apple.com/us/app/tldiagram/id6760236883) and [Play Store](https://play.google.com/store/apps/details?id=com.mertcikla.tldiagram) they have been a bit out-dated and are cloud-oriented (requires tldiagram.com account). They are not ideal for diagram authoring but still had some attention to make small adjustments possible. 
 
 ## Deployment & Self-Hosting
 
@@ -90,6 +91,9 @@ Visit [docs](https://tldiagram.com/docs) for more info.
 
 ## Commands Reference 
 `tld --help`
+
+## Mobile a
+
 
 or 
 
