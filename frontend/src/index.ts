@@ -183,6 +183,7 @@ export * from './utils/technologyCatalog'
 export { toast, ToastContainer } from './utils/toast'
 export * from './utils/url'
 export * from './utils/treesitter'
+export * from './utils/viewportHeight'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 export * from './constants/colors'
