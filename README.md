@@ -92,9 +92,6 @@ Visit [docs](https://tldiagram.com/docs) for more info.
 ## Commands Reference 
 `tld --help`
 
-## Mobile a
-
-
 or 
 
-Use "tld [command] --help" for more information about a command
+Use `tld [command] --help` for more information about a command
