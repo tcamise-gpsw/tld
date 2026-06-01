@@ -63,6 +63,42 @@ test('selection bulk bar aligns distributes and removes selected placements', as
   }).toBe(0)
 })
 
+test('dragging selected elements persists every selected placement', async ({ page }) => {
+  const prefix = uniqueName('Bulk Drag')
+  const view = await createApiView(page, `${prefix} Diagram`)
+  await gotoView(page, view.id)
+
+  await pasteMermaid(page, `flowchart LR
+  A[${prefix} A] --> B[${prefix} B]`)
+
+  await expect(page.getByTestId('vieweditor-selection-bulk-bar')).toContainText('2 selected')
+  const beforePlacements = (await listPlacements(page, view.id))
+    .filter((placement) => placement.name.startsWith(prefix))
+  const beforeByName = new Map(beforePlacements.map((placement) => [placement.name, {
+    x: placementX(placement),
+    y: placementY(placement),
+  }]))
+
+  const node = nodeByName(page, `${prefix} A`)
+  const box = await node.boundingBox()
+  expect(box).toBeTruthy()
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box!.x + box!.width / 2 + 180, box!.y + box!.height / 2 + 120, { steps: 12 })
+  await page.mouse.up()
+
+  await expect.poll(async () => {
+    const afterPlacements = (await listPlacements(page, view.id))
+      .filter((placement) => placement.name.startsWith(prefix))
+    if (afterPlacements.length !== 2) return false
+    return afterPlacements.every((placement) => {
+      const before = beforeByName.get(placement.name)
+      if (!before) return false
+      return Math.abs(placementX(placement) - before.x) > 20 || Math.abs(placementY(placement) - before.y) > 20
+    })
+  }).toBe(true)
+})
+
 test('selection bulk tags apply to every selected imported element', async ({ page }) => {
   const prefix = uniqueName('Bulk Tags')
   const tag = uniqueName('selected-tag')

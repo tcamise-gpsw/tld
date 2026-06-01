@@ -669,6 +669,7 @@ function ElementNode({ data, selected }: Props) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressActivated = useRef(false)
   const pointerStart = useRef<{ x: number; y: number } | null>(null)
+  const suppressHandleClickUntil = useRef(0)
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (isPending) return
@@ -679,6 +680,16 @@ function ElementNode({ data, selected }: Props) {
       longPressActivated.current = true
       data.onInteractionStart(data.element_id)
     }, 500)
+  }
+
+  const cancelActiveSourceHandleInteraction = (e: React.PointerEvent | React.MouseEvent) => {
+    if (isPending) return
+    if (data.interactionSourceId !== data.element_id) return
+    if (!(e.target as Element).closest('.react-flow__handle')) return
+    suppressHandleClickUntil.current = Date.now() + 500
+    e.preventDefault()
+    e.stopPropagation()
+    data.onInteractionStart(data.element_id)
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -757,6 +768,8 @@ function ElementNode({ data, selected }: Props) {
       borderTopWidth={data.layerHighlightColor ? '2px' : undefined}
       borderTopColor={data.layerHighlightColor ?? undefined}
       onClick={handleBodyClick}
+      onPointerDownCapture={cancelActiveSourceHandleInteraction}
+      onMouseDownCapture={cancelActiveSourceHandleInteraction}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -791,8 +804,23 @@ function ElementNode({ data, selected }: Props) {
                 id={handleId}
                 className={className}
                 isConnectable={!isPending}
+                onPointerDown={(e: React.PointerEvent) => {
+                  if (isPending) return
+                  if (data.interactionSourceId === data.element_id) {
+                    suppressHandleClickUntil.current = Date.now() + 500
+                    e.preventDefault()
+                    e.stopPropagation()
+                    data.onInteractionStart(data.element_id)
+                  }
+                }}
                 onClick={(e: React.MouseEvent) => {
                   if (isPending) return
+                  if (Date.now() < suppressHandleClickUntil.current) {
+                    suppressHandleClickUntil.current = 0
+                    e.preventDefault()
+                    e.stopPropagation()
+                    return
+                  }
                   e.preventDefault()
                   e.stopPropagation()
                   data.onInteractionStart(data.element_id, {
