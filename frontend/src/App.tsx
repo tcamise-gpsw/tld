@@ -18,7 +18,7 @@ import { WorkspaceVersionProvider } from './context/WorkspaceVersionContext'
 import { initializeTheme, ThemeProvider } from './context/ThemeContext'
 import { platform } from './platform/local'
 import { HomeRedirect } from './components/HomeRedirect'
-import { isWailsApp, isWailsWindows } from './config/runtime'
+import { isWailsApp, isWailsAppStore, isWailsWindows } from './config/runtime'
 
 initializeTheme()
 
@@ -119,7 +119,7 @@ export default function App() {
                 {platform.getSettingsRoutes({ user: null })}
                 <Route path="appearance" element={<AppearanceSettings />} />
                 <Route path="experimental" element={<ExperimentalSettings />} />
-                <Route path="updates" element={isWailsApp ? <UpdateSettings /> : <Navigate to="/settings/appearance" replace />} />
+                <Route path="updates" element={isWailsApp && !isWailsAppStore ? <UpdateSettings /> : <Navigate to="/settings/appearance" replace />} />
               </Route>
             </Route>
 

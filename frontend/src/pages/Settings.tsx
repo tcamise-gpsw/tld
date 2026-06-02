@@ -2,7 +2,7 @@ import { Box, Flex, Text, VStack } from '@chakra-ui/react'
 import { useEffect } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useSetHeader } from '../components/HeaderContext'
-import { isWailsApp, tldVersion } from '../config/runtime'
+import { isWailsApp, isWailsAppStore, tldVersion } from '../config/runtime'
 
 
 
@@ -20,7 +20,7 @@ export interface SettingsProps {
 }
 
 export default function Settings({ extraNavItems = [] }: SettingsProps) {
-  const navItems = [...extraNavItems, ...DEFAULT_NAV_ITEMS, ...(isWailsApp ? DESKTOP_NAV_ITEMS : [])]
+  const navItems = [...extraNavItems, ...DEFAULT_NAV_ITEMS, ...(isWailsApp && !isWailsAppStore ? DESKTOP_NAV_ITEMS : [])]
   const navigate = useNavigate()
   const location = useLocation()
   const setHeader = useSetHeader()
