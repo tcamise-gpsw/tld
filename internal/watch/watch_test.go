@@ -1557,7 +1557,7 @@ func Main() {
 }
 
 func TestRepresentPrioritizesCrossFolderAggregatesOverFilePairs(t *testing.T) {
-	groups := map[string][]filePairReference{
+	groups := map[string][]viewPairReference{
 		"file:cmd/a.go->cmd/b.go": {
 			{Key: "cmd/a.go->cmd/b.go", Count: 500},
 		},
@@ -1575,6 +1575,47 @@ func TestRepresentPrioritizesCrossFolderAggregatesOverFilePairs(t *testing.T) {
 	}
 	if keys[0] != "folder:cmd->internal" {
 		t.Fatalf("expected cross-folder aggregate to be materialized first, got %+v", keys)
+	}
+}
+
+func TestConnectorViewEndpointsUseNearestCommonFolderView(t *testing.T) {
+	folderElements := map[string]int64{
+		"cmd":         10,
+		"cmd/watch":   11,
+		"cmd/analyze": 12,
+		"internal":    13,
+	}
+	folderViews := map[string]int64{
+		"cmd": 100,
+	}
+	fileElements := map[string]int64{
+		"cmd/watch/watch.go":     21,
+		"cmd/analyze/analyze.go": 22,
+	}
+
+	viewID, sourceID, targetID, ownerKey, ok := connectorViewEndpoints("cmd/watch/watch.go", "cmd/analyze/analyze.go", folderElements, folderViews, fileElements, 1)
+	if !ok {
+		t.Fatal("expected connector endpoints in common folder view")
+	}
+	if viewID != 100 || sourceID != 11 || targetID != 12 {
+		t.Fatalf("endpoints = view:%d source:%d target:%d, want view 100 between child folders 11 and 12", viewID, sourceID, targetID)
+	}
+	if ownerKey != "folder:cmd/watch->cmd/analyze" {
+		t.Fatalf("owner key = %q", ownerKey)
+	}
+}
+
+func TestViewPairReferenceDirectionMergesReciprocalReferences(t *testing.T) {
+	var pair viewPairReference
+	pair.SourceElementID = 10
+	pair.TargetElementID = 20
+	pair.addDirection(10, 20)
+	if pair.direction() != "forward" {
+		t.Fatalf("one-way direction = %q, want forward", pair.direction())
+	}
+	pair.addDirection(20, 10)
+	if pair.direction() != "both" {
+		t.Fatalf("reciprocal direction = %q, want both", pair.direction())
 	}
 }
 
