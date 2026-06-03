@@ -102,7 +102,8 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		logError(ctx, req.Logger, "watch.representation.prepare.failed", err, "elapsed", logElapsed(prepareStarted), "repository_id", repositoryID)
 		return RepresentResult{}, err
 	}
-	reuseAllowed := req.AssumeNoRawChanges && len(contextPolicies.Show) == 0 && len(contextPolicies.Hide) == 0 && len(contextExpansions.Tiers) == 0
+	blastRadiusFiles := normalizeBlastRadiusFiles(req.BlastRadiusFiles)
+	reuseAllowed := req.AssumeNoRawChanges && len(blastRadiusFiles) == 0 && len(contextPolicies.Show) == 0 && len(contextPolicies.Hide) == 0 && len(contextExpansions.Tiers) == 0
 	if reuseAllowed {
 		cached, reused, err := r.reuseRepresentation(ctx, repositoryID, rawGraphHash, settingsHash, modelIDPtr, prepareStarted, req)
 		if err != nil {
@@ -129,7 +130,7 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		return RepresentResult{}, err
 	}
 	progressAdvance(req.Progress, "Changed resources loaded")
-	if len(changedRaw.Files) == 0 && len(changedRaw.Symbols) == 0 && len(contextPolicies.Show) == 0 && len(contextPolicies.Hide) == 0 && len(contextExpansions.Tiers) == 0 {
+	if len(changedRaw.Files) == 0 && len(changedRaw.Symbols) == 0 && len(blastRadiusFiles) == 0 && len(contextPolicies.Show) == 0 && len(contextPolicies.Hide) == 0 && len(contextExpansions.Tiers) == 0 {
 		cached, reused, err := r.reuseRepresentation(ctx, repositoryID, rawGraphHash, settingsHash, modelIDPtr, prepareStarted, req)
 		if err != nil {
 			progressFinish(req.Progress)
@@ -141,7 +142,7 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 			return cached, nil
 		}
 	}
-	filtered, err := runFilter(ctx, r.Store, repositoryID, req.Thresholds, req.Visibility, rawGraphHash, settingsHash, nil, changedRaw.Symbols, contextPolicies, identityKeys)
+	filtered, err := runFilter(ctx, r.Store, repositoryID, req.Thresholds, req.Visibility, rawGraphHash, settingsHash, nil, changedRaw.Symbols, blastRadiusFiles, contextPolicies, identityKeys)
 	if err != nil {
 		progressFinish(req.Progress)
 		logError(ctx, req.Logger, "watch.representation.prepare.failed", err, "elapsed", logElapsed(prepareStarted), "repository_id", repositoryID)
@@ -167,7 +168,7 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		result.EmbeddingsCreated = stats.Created
 		if len(embeddingSymbols) == len(filtered.VisibleSymbols) {
 			progressStart(req.Progress, "Refreshing semantic filter", 1)
-			filtered, err = runFilter(ctx, r.Store, repositoryID, req.Thresholds, req.Visibility, rawGraphHash, settingsHash, vectors, changedRaw.Symbols, contextPolicies, identityKeys)
+			filtered, err = runFilter(ctx, r.Store, repositoryID, req.Thresholds, req.Visibility, rawGraphHash, settingsHash, vectors, changedRaw.Symbols, blastRadiusFiles, contextPolicies, identityKeys)
 			if err != nil {
 				progressFinish(req.Progress)
 				logError(ctx, req.Logger, "watch.representation.semantic_filter.failed", err, "repository_id", repositoryID)
@@ -278,6 +279,19 @@ func (r *Representer) reuseRepresentation(ctx context.Context, repositoryID int6
 	cached.ViewsCreated = 0
 	logInfo(ctx, req.Logger, "watch.representation.reused", "elapsed", logElapsed(started), "repository_id", repositoryID, "representation_run_id", cached.RepresentationRun, "raw_graph_hash", rawGraphHash, "representation_hash", cached.RepresentationHash, "assume_no_raw_changes", req.AssumeNoRawChanges)
 	return cached, true, nil
+}
+
+func normalizeBlastRadiusFiles(files []string) map[string]string {
+	out := map[string]string{}
+	for _, file := range files {
+		file = strings.TrimSpace(filepathToSlash(file))
+		file = strings.TrimPrefix(file, "file:")
+		if file == "" || file == "." || strings.HasPrefix(file, "../") || filepath.IsAbs(file) {
+			continue
+		}
+		out[file] = "blast radius of changed file"
+	}
+	return out
 }
 
 func (r *Representer) RepresentArchitecture(ctx context.Context, repo Repository, architecture architectureModel, thresholds Thresholds, progress ProgressSink) (RepresentResult, error) {
@@ -1046,6 +1060,9 @@ func buildSemanticTagPlan(repo Repository, filtered filterResult, thresholds Thr
 	add("repository", fmt.Sprintf("repository:%d", repo.ID), semanticLanguageTag(repoLanguage))
 
 	visibleFiles := filesForSymbols(filtered.VisibleSymbols)
+	for file := range filtered.VisibleFiles {
+		visibleFiles[file] = struct{}{}
+	}
 	for _, folder := range folderSet(visibleFiles) {
 		add("folder", "folder:"+folder, append(semanticPathTags(folder, repoLanguage), ownerMatcher.TagsForPath(folder)...)...)
 	}
@@ -1446,6 +1463,9 @@ func (r *Representer) materialize(ctx context.Context, repo Repository, filtered
 		visibleFiles[file] = struct{}{}
 	}
 	for file := range filtered.ChangedFiles {
+		visibleFiles[file] = struct{}{}
+	}
+	for file := range filtered.BlastRadiusFiles {
 		visibleFiles[file] = struct{}{}
 	}
 	folders := folderSet(visibleFiles)
@@ -3804,6 +3824,9 @@ func representationHash(filtered filterResult, req RepresentRequest) string {
 	parts := []string{filtered.RawGraphHash, filtered.SettingsHash, stableHash(req)}
 	for _, file := range sortedKeys(filtered.ChangedFiles) {
 		parts = append(parts, "f:"+file)
+	}
+	for _, file := range sortedKeys(filtered.VisibleFiles) {
+		parts = append(parts, "vf:"+file)
 	}
 	for _, sym := range sortedSymbols(filtered.VisibleSymbols) {
 		parts = append(parts, "s:"+sym.StableKey)

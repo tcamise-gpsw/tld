@@ -156,6 +156,12 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 	}
 	events.Publish(Event{Type: "representation.updated", RepositoryID: repo.ID, At: nowString(), Data: rep, Phase: "represent", WatcherMode: watcherMode, Languages: settings.Languages, Warnings: warnings})
 	_, _ = r.Store.ApplyGitTags(ctx, repo.ID, gitStatus)
+	if blastResult, err := r.Store.ApplyBlastRadiusTags(ctx, repo.ID, scan.BlastRadiusFiles, scan.BlastRadiusRoots, gitStatus); err != nil {
+		logError(ctx, opts.Logger, "watch.blast_radius_tags.failed", err, "repository_id", repo.ID)
+		events.Publish(Event{Type: "watch.error", RepositoryID: repo.ID, At: nowString(), Message: err.Error()})
+	} else {
+		logInfo(ctx, opts.Logger, "watch.blast_radius_tags.applied", "repository_id", repo.ID, "tags_added", blastResult.TagsAdded, "tags_removed", blastResult.TagsRemoved, "files", len(scan.BlastRadiusFiles))
+	}
 	if gitStatus.HeadCommit != "" {
 		if err := r.createVersionForHead(ctx, repo.ID, gitStatus, rep.RepresentationHash, false, opts.Logger); err != nil {
 			logError(ctx, opts.Logger, "watch.version.create.failed", err, "repository_id", repo.ID, "head", gitStatus.HeadCommit)
@@ -302,7 +308,7 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			logInfo(ctx, opts.Logger, "watch.change.pipeline.started", "repository_id", repo.ID, "source_changed", change.SourceChanged, "changed_files", len(change.SourceChanges), "head", change.Git.HeadCommit)
 			events.Publish(Event{Type: "scan.started", RepositoryID: repo.ID, At: nowString(), Phase: "scan", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(change.SourceChanges), Warnings: warnings})
 
-			once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Files: change.TargetedFiles, Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger, Rules: r.Scanner.Rules})
+			once, err := r.RunOnce(ctx, OneShotOptions{Path: repoRoot, Files: change.TargetedFiles, FocusFiles: sourceChangeFocusFiles(change.SourceChanges), Embedding: opts.Embedding, Settings: settings, DataDir: opts.DataDir, Progress: opts.Progress, Logger: opts.Logger, Rules: r.Scanner.Rules})
 			if err != nil {
 				logError(ctx, opts.Logger, "watch.change.pipeline.failed", err, "elapsed", logElapsed(pipelineStarted), "repository_id", repo.ID)
 				events.Publish(Event{Type: "watch.error", RepositoryID: repo.ID, At: nowString(), Message: err.Error()})
@@ -323,6 +329,12 @@ func (r *Runner) Run(ctx context.Context, opts RunnerOptions) (RunnerResult, err
 			events.Publish(Event{Type: "representation.updated", RepositoryID: repo.ID, At: nowString(), Data: rep, Phase: "represent", WatcherMode: watcherMode, Languages: settings.Languages, ChangedFiles: len(change.SourceChanges), Warnings: eventWarnings})
 			tagResult, _ := r.Store.ApplyGitTags(ctx, repo.ID, change.Git)
 			logInfo(ctx, opts.Logger, "watch.git_tags.applied", "repository_id", repo.ID, "tags_added", tagResult.TagsAdded, "tags_removed", tagResult.TagsRemoved)
+			if blastResult, err := r.Store.ApplyBlastRadiusTags(ctx, repo.ID, scan.BlastRadiusFiles, scan.BlastRadiusRoots, change.Git); err != nil {
+				logError(ctx, opts.Logger, "watch.blast_radius_tags.failed", err, "repository_id", repo.ID)
+				events.Publish(Event{Type: "watch.error", RepositoryID: repo.ID, At: nowString(), Message: err.Error()})
+			} else {
+				logInfo(ctx, opts.Logger, "watch.blast_radius_tags.applied", "repository_id", repo.ID, "tags_added", blastResult.TagsAdded, "tags_removed", blastResult.TagsRemoved, "files", len(scan.BlastRadiusFiles))
+			}
 			diffs := rep.Diffs
 			var diffErr error
 			if diffs == nil {
@@ -450,6 +462,27 @@ func sourceChangeRepresentationChanged(change SourceFileChange, diffs []Represen
 		}
 	}
 	return false
+}
+
+func sourceChangeFocusFiles(changes []SourceFileChange) []string {
+	seen := map[string]struct{}{}
+	var files []string
+	for _, change := range changes {
+		if change.ChangeType == string(tldgit.WorktreeDeleted) || change.ChangeType == "deleted" {
+			continue
+		}
+		path := strings.TrimSpace(filepathToSlash(change.Path))
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		files = append(files, path)
+	}
+	sort.Strings(files)
+	return files
 }
 
 func representationDiffSourcePaths(diff RepresentationDiff) []string {

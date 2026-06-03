@@ -13,6 +13,7 @@ import (
 type OneShotOptions struct {
 	Path             string
 	Files            []string
+	FocusFiles       []string
 	Rescan           bool
 	Embedding        EmbeddingConfig
 	Settings         Settings
@@ -133,13 +134,13 @@ func (p *WatchPipeline) Execute(ctx context.Context, opts OneShotOptions) (OneSh
 		if err != nil {
 			return OneShotResult{}, err
 		}
-		scan, err = p.Scanner.ScanFilesWithOptions(ctx, repo, opts.Files, ScanOptions{Force: opts.Rescan, DataDir: opts.DataDir})
+		scan, err = p.Scanner.ScanFilesWithOptions(ctx, repo, opts.Files, ScanOptions{Force: opts.Rescan, DataDir: opts.DataDir, FocusFiles: opts.FocusFiles})
 		if err != nil {
 			logError(ctx, opts.Logger, "watch.scan.failed", err, "elapsed", logElapsed(scanStarted), "repo_root", repoRoot)
 			return OneShotResult{}, err
 		}
 	} else {
-		scan, err = p.Scanner.ScanWithOptions(ctx, repoRoot, ScanOptions{Force: opts.Rescan, DataDir: opts.DataDir})
+		scan, err = p.Scanner.ScanWithOptions(ctx, repoRoot, ScanOptions{Force: opts.Rescan, DataDir: opts.DataDir, FocusFiles: opts.FocusFiles})
 		if err != nil {
 			logError(ctx, opts.Logger, "watch.scan.failed", err, "elapsed", logElapsed(scanStarted), "repo_root", repoRoot)
 			return OneShotResult{}, err
@@ -164,6 +165,7 @@ func (p *WatchPipeline) Execute(ctx context.Context, opts OneShotOptions) (OneSh
 		Thresholds:         settings.Thresholds,
 		Visibility:         settings.Visibility,
 		AssumeNoRawChanges: !opts.Rescan && scan.FilesSeen > 0 && scan.FilesParsed == 0,
+		BlastRadiusFiles:   scan.BlastRadiusFiles,
 		Progress:           opts.Progress,
 		Logger:             opts.Logger,
 	})

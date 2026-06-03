@@ -272,6 +272,7 @@ func TestGlobalConfigScaleRecentAndCallerEnvOverrides(t *testing.T) {
 	t.Setenv("TLD_CONFIG_DIR", configDir)
 	t.Setenv("TLD_WATCH_SCALE_MAX_RECENT_FILES", "123")
 	t.Setenv("TLD_WATCH_SCALE_MAX_CALLER_DEPTH", "7")
+	t.Setenv("TLD_WATCH_SCALE_MAX_BLAST_RADIUS_HOPS", "0")
 
 	cfg, err := workspace.LoadGlobalConfig()
 	if err != nil {
@@ -282,6 +283,9 @@ func TestGlobalConfigScaleRecentAndCallerEnvOverrides(t *testing.T) {
 	}
 	if cfg.Watch.Scale.MaxCallerDepth != 7 {
 		t.Fatalf("MaxCallerDepth = %d, want 7", cfg.Watch.Scale.MaxCallerDepth)
+	}
+	if cfg.Watch.Scale.MaxBlastRadiusHops != 0 {
+		t.Fatalf("MaxBlastRadiusHops = %d, want 0", cfg.Watch.Scale.MaxBlastRadiusHops)
 	}
 }
 

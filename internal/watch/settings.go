@@ -22,6 +22,7 @@ const (
 	defaultMaxLimitedFiles = 2000
 	defaultMaxRecentFiles  = 1000
 	defaultMaxCallerDepth  = 10
+	defaultBlastRadiusHops = 1
 	defaultLSPMemoryLimit  = 4294967296
 )
 
@@ -39,11 +40,12 @@ func DefaultSettings() Settings {
 		Thresholds:   defaultThresholds(Thresholds{}),
 		Visibility:   defaultVisibilityConfig(VisibilityConfig{}),
 		Scale: ScaleConfig{
-			Strategy:        ScanStrategyAuto,
-			MaxTrackedFiles: defaultMaxTrackedFiles,
-			MaxLimitedFiles: defaultMaxLimitedFiles,
-			MaxRecentFiles:  defaultMaxRecentFiles,
-			MaxCallerDepth:  defaultMaxCallerDepth,
+			Strategy:           ScanStrategyAuto,
+			MaxTrackedFiles:    defaultMaxTrackedFiles,
+			MaxLimitedFiles:    defaultMaxLimitedFiles,
+			MaxRecentFiles:     defaultMaxRecentFiles,
+			MaxCallerDepth:     defaultMaxCallerDepth,
+			MaxBlastRadiusHops: defaultBlastRadiusHops,
 		},
 		LSP: LSPConfig{
 			Enabled:          true,
@@ -133,6 +135,9 @@ func defaultScaleConfig(cfg ScaleConfig) ScaleConfig {
 	}
 	if cfg.MaxCallerDepth <= 0 {
 		cfg.MaxCallerDepth = defaultMaxCallerDepth
+	}
+	if cfg.MaxBlastRadiusHops < 0 {
+		cfg.MaxBlastRadiusHops = defaultBlastRadiusHops
 	}
 	return cfg
 }

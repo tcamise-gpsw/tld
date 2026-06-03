@@ -4067,6 +4067,102 @@ func TestWatchElementHashIgnoresManagedGitTags(t *testing.T) {
 	}
 }
 
+func TestRepresenterMaterializesBlastRadiusLowSignalSymbols(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "helper.go", "package main\nfunc helper() {}\n")
+
+	store := NewStore(db)
+	scan, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	sym, err := symbolsByName(context.Background(), store, scan.RepositoryID, "helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityKeys, err := store.SymbolIdentityKeys(context.Background(), scan.RepositoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerKey := symbolOwnerKey(sym, identityKeys)
+	if _, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+		t.Fatalf("Represent without blast radius: %v", err)
+	}
+	if _, ok, err := store.MappingResourceID(context.Background(), scan.RepositoryID, "symbol", ownerKey, "element"); err != nil || ok {
+		t.Fatalf("low-signal helper should be hidden without blast radius, ok=%v err=%v", ok, err)
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}, BlastRadiusFiles: []string{"helper.go"}}); err != nil {
+		t.Fatalf("Represent with blast radius: %v", err)
+	}
+	if _, ok, err := store.MappingResourceID(context.Background(), scan.RepositoryID, "symbol", ownerKey, "element"); err != nil || !ok {
+		t.Fatalf("blast-radius helper symbol was not materialized, ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := store.MappingResourceID(context.Background(), scan.RepositoryID, "file", "file:helper.go", "element"); err != nil || !ok {
+		t.Fatalf("blast-radius helper file was not materialized, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestApplyBlastRadiusTagsAddsRemovesAndDoesNotAffectHash(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", "package main\nfunc Main() {}\n")
+
+	store := NewStore(db)
+	scan, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}, BlastRadiusFiles: []string{"main.go"}}); err != nil {
+		t.Fatalf("Represent: %v", err)
+	}
+	elementID, ok, err := store.MappingResourceID(context.Background(), scan.RepositoryID, "file", "file:main.go", "element")
+	if err != nil || !ok {
+		t.Fatalf("expected file element mapping, ok=%v err=%v", ok, err)
+	}
+	before, ok, err := store.WatchResourceHash(context.Background(), "element", elementID)
+	if err != nil || !ok {
+		t.Fatalf("expected element hash before blast tag, ok=%v err=%v", ok, err)
+	}
+	roots := map[string][]string{"main.go": {"main.go"}}
+	first, err := store.ApplyBlastRadiusTags(context.Background(), scan.RepositoryID, []string{"main.go"}, roots, GitStatus{Unstaged: []string{"main.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.TagsAdded == 0 || first.TagsRemoved != 0 {
+		t.Fatalf("expected blast tags to be added only, got %+v", first)
+	}
+	second, err := store.ApplyBlastRadiusTags(context.Background(), scan.RepositoryID, []string{"main.go"}, roots, GitStatus{Unstaged: []string{"main.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.TagsAdded != 0 || second.TagsRemoved != 0 {
+		t.Fatalf("expected repeated blast tags to be a no-op, got %+v", second)
+	}
+	if tagged := countElementTag(t, db, blastRadiusTag); tagged == 0 {
+		t.Fatalf("expected blast-radius tag on materialized elements")
+	}
+	afterManaged, ok, err := store.WatchResourceHash(context.Background(), "element", elementID)
+	if err != nil || !ok {
+		t.Fatalf("expected element hash after blast tag, ok=%v err=%v", ok, err)
+	}
+	if afterManaged != before {
+		t.Fatalf("blast-radius tag should not affect element hash: before=%s after=%s", before, afterManaged)
+	}
+	clean, err := store.ApplyBlastRadiusTags(context.Background(), scan.RepositoryID, []string{"main.go"}, roots, GitStatus{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.TagsAdded != 0 || clean.TagsRemoved != first.TagsAdded {
+		t.Fatalf("expected clean status to remove blast tags, first=%+v clean=%+v", first, clean)
+	}
+	if tagged := countElementTag(t, db, blastRadiusTag); tagged != 0 {
+		t.Fatalf("expected blast-radius tag to be removed, found %d tagged elements", tagged)
+	}
+}
+
 func TestEmbeddingCacheAvoidsProviderCalls(t *testing.T) {
 	db := openTestDB(t)
 	defer func() { _ = db.Close() }()
@@ -5500,10 +5596,13 @@ func symbolsByName(ctx context.Context, store *Store, repositoryID int64, name s
 }
 
 type fakeDefinitionResolver struct {
-	locationsByName map[string][]analyzerlsp.DefinitionLocation
-	incomingByKey   map[string][]analyzerlsp.CallLocation
-	calls           int
-	refs            []analyzer.Ref
+	locationsByName      map[string][]analyzerlsp.DefinitionLocation
+	referencesByKey      map[string][]analyzerlsp.DefinitionLocation
+	implementationsByKey map[string][]analyzerlsp.DefinitionLocation
+	incomingByKey        map[string][]analyzerlsp.CallLocation
+	outgoingByKey        map[string][]analyzerlsp.CallLocation
+	calls                int
+	refs                 []analyzer.Ref
 }
 
 func (r *fakeDefinitionResolver) ResolveDefinitions(_ context.Context, ref analyzer.Ref) ([]analyzerlsp.DefinitionLocation, error) {
@@ -5513,6 +5612,32 @@ func (r *fakeDefinitionResolver) ResolveDefinitions(_ context.Context, ref analy
 		return append([]analyzerlsp.DefinitionLocation(nil), locations...), nil
 	}
 	return append([]analyzerlsp.DefinitionLocation(nil), r.locationsByName["*"]...), nil
+}
+
+func (r *fakeDefinitionResolver) References(_ context.Context, filePath string, line, _ int) ([]analyzerlsp.DefinitionLocation, error) {
+	if r == nil {
+		return nil, nil
+	}
+	if locations, ok := r.referencesByKey[callerLocationKey(filePath, line, "")]; ok {
+		return append([]analyzerlsp.DefinitionLocation(nil), locations...), nil
+	}
+	if locations, ok := r.referencesByKey[callerLocationKey(filePath, line, "*")]; ok {
+		return append([]analyzerlsp.DefinitionLocation(nil), locations...), nil
+	}
+	return append([]analyzerlsp.DefinitionLocation(nil), r.referencesByKey["*"]...), nil
+}
+
+func (r *fakeDefinitionResolver) Implementations(_ context.Context, filePath string, line, _ int) ([]analyzerlsp.DefinitionLocation, error) {
+	if r == nil {
+		return nil, nil
+	}
+	if locations, ok := r.implementationsByKey[callerLocationKey(filePath, line, "")]; ok {
+		return append([]analyzerlsp.DefinitionLocation(nil), locations...), nil
+	}
+	if locations, ok := r.implementationsByKey[callerLocationKey(filePath, line, "*")]; ok {
+		return append([]analyzerlsp.DefinitionLocation(nil), locations...), nil
+	}
+	return append([]analyzerlsp.DefinitionLocation(nil), r.implementationsByKey["*"]...), nil
 }
 
 func (r *fakeDefinitionResolver) IncomingCalls(_ context.Context, filePath string, line, _ int) ([]analyzerlsp.CallLocation, error) {
@@ -5526,6 +5651,19 @@ func (r *fakeDefinitionResolver) IncomingCalls(_ context.Context, filePath strin
 		return append([]analyzerlsp.CallLocation(nil), calls...), nil
 	}
 	return append([]analyzerlsp.CallLocation(nil), r.incomingByKey["*"]...), nil
+}
+
+func (r *fakeDefinitionResolver) OutgoingCalls(_ context.Context, filePath string, line, _ int) ([]analyzerlsp.CallLocation, error) {
+	if r == nil {
+		return nil, nil
+	}
+	if calls, ok := r.outgoingByKey[callerLocationKey(filePath, line, "")]; ok {
+		return append([]analyzerlsp.CallLocation(nil), calls...), nil
+	}
+	if calls, ok := r.outgoingByKey[callerLocationKey(filePath, line, "*")]; ok {
+		return append([]analyzerlsp.CallLocation(nil), calls...), nil
+	}
+	return append([]analyzerlsp.CallLocation(nil), r.outgoingByKey["*"]...), nil
 }
 
 func (r *fakeDefinitionResolver) Close() error {
@@ -5650,6 +5788,28 @@ func countElementTag(t *testing.T, db *sql.DB, tag string) int {
 		t.Fatal(err)
 	}
 	return count
+}
+
+func assertRawSymbolFiles(t *testing.T, store *Store, repositoryID int64, want []string) {
+	t.Helper()
+	symbols, err := store.SymbolsForRepository(context.Background(), repositoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSet := map[string]struct{}{}
+	for _, symbol := range symbols {
+		gotSet[symbol.FilePath] = struct{}{}
+	}
+	got := make([]string, 0, len(gotSet))
+	for file := range gotSet {
+		got = append(got, file)
+	}
+	sort.Strings(got)
+	want = append([]string(nil), want...)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("raw symbol files = %+v, want %+v", got, want)
+	}
 }
 
 func elementTagsByName(t *testing.T, db *sql.DB, name string) []string {
@@ -6314,7 +6474,7 @@ func TestScannerLimitedModeExpandsImmediateDefinitionNeighbors(t *testing.T) {
 		}}
 	}
 
-	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "a.go")}, nil, settings, &ignore.Rules{})
+	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, nil, []string{filepath.Join(repo, "a.go")}, nil, settings, &ignore.Rules{})
 	if err != nil {
 		t.Fatalf("expandLimitedFiles: %v", err)
 	}
@@ -6344,7 +6504,7 @@ func TestScannerLimitedModeStopsAtSharedCallerAncestor(t *testing.T) {
 		}}
 	}
 
-	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "leaf_one.go"), filepath.Join(repo, "leaf_two.go")}, nil, settings, &ignore.Rules{})
+	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, nil, []string{filepath.Join(repo, "leaf_one.go"), filepath.Join(repo, "leaf_two.go")}, nil, settings, &ignore.Rules{})
 	if err != nil {
 		t.Fatalf("expandLimitedFiles: %v", err)
 	}
@@ -6353,6 +6513,251 @@ func TestScannerLimitedModeStopsAtSharedCallerAncestor(t *testing.T) {
 	}
 	if len(result.Files) != 3 {
 		t.Fatalf("files = %d, want 3", len(result.Files))
+	}
+}
+
+func TestScannerLimitedModePrioritizesFocusedChangedFiles(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "old.go", "package main\nfunc Old() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "old")
+	writeFile(t, repo, "recent.go", "package main\nfunc Recent() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "recent")
+
+	store := NewStore(db)
+	scanner := NewScanner(store)
+	settings := DefaultSettings()
+	settings.Scale.Strategy = ScanStrategyLimited
+	settings.Scale.MaxLimitedFiles = 1
+	scanner.Settings = settings
+	result, err := scanner.ScanWithOptions(context.Background(), repo, ScanOptions{FocusFiles: []string{"old.go"}})
+	if err != nil {
+		t.Fatalf("ScanWithOptions: %v", err)
+	}
+	if result.FilesSeen != 1 || result.FilesParsed != 1 {
+		t.Fatalf("focused scan counts = %+v, want one parsed file", result)
+	}
+	if !reflect.DeepEqual(result.BlastRadiusFiles, []string{"old.go"}) {
+		t.Fatalf("BlastRadiusFiles = %+v, want old.go", result.BlastRadiusFiles)
+	}
+	if _, err := symbolsByName(context.Background(), store, result.RepositoryID, "Old"); err != nil {
+		t.Fatalf("focused changed file was not parsed into raw graph: %v", err)
+	}
+	if _, err := symbolsByName(context.Background(), store, result.RepositoryID, "Recent"); err == nil {
+		t.Fatalf("recent file should not displace focused file when limited cap is reached")
+	}
+}
+
+func TestScannerLimitedModeBlastRadiusUsesLSPRelationshipTypes(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := t.TempDir()
+	writeFile(t, repo, "seed.go", "package main\nfunc Seed() { Def() }\n")
+	writeFile(t, repo, "def.go", "package main\nfunc Def() {}\n")
+	writeFile(t, repo, "refs.go", "package main\nfunc Refs() { Seed() }\n")
+	writeFile(t, repo, "impl.go", "package main\nfunc Impl() {}\n")
+	writeFile(t, repo, "incoming.go", "package main\nfunc Incoming() { Seed() }\n")
+	writeFile(t, repo, "outgoing.go", "package main\nfunc Outgoing() {}\n")
+
+	store := NewStore(db)
+	scanner := NewScanner(store)
+	settings := DefaultSettings()
+	settings.Scale.MaxLimitedFiles = 10
+	settings.Scale.MaxBlastRadiusHops = 1
+	settings.LSP.Enabled = true
+	scanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{
+			locationsByName: map[string][]analyzerlsp.DefinitionLocation{
+				"Def": {{FilePath: filepath.Join(repo, "def.go"), Line: 2}},
+			},
+			referencesByKey: map[string][]analyzerlsp.DefinitionLocation{
+				"*": {{FilePath: filepath.Join(repo, "refs.go"), Line: 2}},
+			},
+			implementationsByKey: map[string][]analyzerlsp.DefinitionLocation{
+				"*": {{FilePath: filepath.Join(repo, "impl.go"), Line: 2}},
+			},
+			incomingByKey: map[string][]analyzerlsp.CallLocation{
+				"*": {{FilePath: filepath.Join(repo, "incoming.go"), Line: 2, Name: "Incoming"}},
+			},
+			outgoingByKey: map[string][]analyzerlsp.CallLocation{
+				"*": {{FilePath: filepath.Join(repo, "outgoing.go"), Line: 2, Name: "Outgoing"}},
+			},
+		}
+	}
+
+	result, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "seed.go")}, nil, nil, settings, &ignore.Rules{})
+	if err != nil {
+		t.Fatalf("expandLimitedFiles: %v", err)
+	}
+	got := relTestFiles(t, repo, result.Files)
+	want := []string{"def.go", "impl.go", "incoming.go", "outgoing.go", "refs.go", "seed.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("blast radius files = %+v, want %+v", got, want)
+	}
+	blast := result.blastRadiusFiles(repo)
+	if !reflect.DeepEqual(blast, want) {
+		t.Fatalf("blast metadata files = %+v, want %+v", blast, want)
+	}
+}
+
+func TestScannerLimitedModeBlastRadiusHonorsHopDepth(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := t.TempDir()
+	writeFile(t, repo, "seed.go", "package main\nfunc Seed() { Mid() }\n")
+	writeFile(t, repo, "mid.go", "package main\nfunc Mid() { Far() }\n")
+	writeFile(t, repo, "far.go", "package main\nfunc Far() {}\n")
+
+	store := NewStore(db)
+	scanner := NewScanner(store)
+	settings := DefaultSettings()
+	settings.Scale.MaxLimitedFiles = 10
+	settings.Scale.MaxBlastRadiusHops = 1
+	scanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{locationsByName: map[string][]analyzerlsp.DefinitionLocation{
+			"Mid": {{FilePath: filepath.Join(repo, "mid.go"), Line: 2}},
+			"Far": {{FilePath: filepath.Join(repo, "far.go"), Line: 2}},
+		}}
+	}
+
+	oneHop, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "seed.go")}, nil, nil, settings, &ignore.Rules{})
+	if err != nil {
+		t.Fatalf("expandLimitedFiles one hop: %v", err)
+	}
+	if got := relTestFiles(t, repo, oneHop.Files); !reflect.DeepEqual(got, []string{"mid.go", "seed.go"}) {
+		t.Fatalf("one-hop files = %+v, want seed and mid", got)
+	}
+	settings.Scale.MaxBlastRadiusHops = 2
+	twoHop, err := scanner.expandLimitedFiles(context.Background(), 1, repo, []string{filepath.Join(repo, "seed.go")}, nil, nil, settings, &ignore.Rules{})
+	if err != nil {
+		t.Fatalf("expandLimitedFiles two hop: %v", err)
+	}
+	if got := relTestFiles(t, repo, twoHop.Files); !reflect.DeepEqual(got, []string{"far.go", "mid.go", "seed.go"}) {
+		t.Fatalf("two-hop files = %+v, want seed, mid, and far", got)
+	}
+}
+
+func TestScannerLimitedModeCommitFlowAccumulatesRawGraphLikeFullScan(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	repo, err := tldgit.RepoRoot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, repo, "a.go", "package main\n\nfunc A() {\n\tB()\n}\n")
+	writeFile(t, repo, "b.go", "package main\n\nfunc B() {}\n")
+	writeFile(t, repo, "c.go", "package main\n\nfunc C() {}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "init")
+
+	ctx := context.Background()
+	store := NewStore(db)
+	settings := DefaultSettings()
+	settings.Scale.Strategy = ScanStrategyLimited
+	settings.Scale.MaxTrackedFiles = 1
+	settings.Scale.MaxLimitedFiles = 2
+	settings.Scale.MaxRecentFiles = 1
+	settings.Scale.MaxBlastRadiusHops = 1
+	settings.LSP.Enabled = true
+	scanner := NewScanner(store)
+	scanner.Settings = settings
+	scanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{locationsByName: map[string][]analyzerlsp.DefinitionLocation{
+			"B": {{FilePath: filepath.Join(repo, "b.go"), Line: 3}},
+		}}
+	}
+	representer := NewRepresenter(store)
+	recorder := NewVersionRecorder(store)
+	var repositoryID int64
+
+	runLimited := func(label string, focus []string) {
+		t.Helper()
+		scan, err := scanner.ScanWithOptions(ctx, repo, ScanOptions{FocusFiles: focus})
+		if err != nil {
+			t.Fatalf("%s limited scan: %v", label, err)
+		}
+		repositoryID = scan.RepositoryID
+		rep, err := representer.Represent(ctx, scan.RepositoryID, RepresentRequest{
+			Embedding:        EmbeddingConfig{Provider: "none"},
+			BlastRadiusFiles: scan.BlastRadiusFiles,
+		})
+		if err != nil {
+			t.Fatalf("%s represent: %v", label, err)
+		}
+		status, err := gitStatusSnapshot(repo)
+		if err != nil {
+			t.Fatalf("%s status: %v", label, err)
+		}
+		if _, err := store.ApplyBlastRadiusTags(ctx, scan.RepositoryID, scan.BlastRadiusFiles, scan.BlastRadiusRoots, status); err != nil {
+			t.Fatalf("%s blast tags: %v", label, err)
+		}
+		if _, err := recorder.RecordHead(ctx, VersionRecordRequest{
+			RepositoryID:       scan.RepositoryID,
+			Status:             status,
+			RepresentationHash: rep.RepresentationHash,
+		}); err != nil {
+			t.Fatalf("%s record head: %v", label, err)
+		}
+	}
+
+	runLimited("init", []string{"a.go"})
+	assertRawSymbolFiles(t, store, repositoryID, []string{"a.go", "b.go"})
+
+	writeFile(t, repo, "c.go", "package main\n\nfunc C() {\n\tB()\n}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "A")
+	runLimited("A", nil)
+	assertRawSymbolFiles(t, store, repositoryID, []string{"a.go", "b.go", "c.go"})
+
+	writeFile(t, repo, "b.go", "package main\n\nfunc B() {\n\tprintln(\"B\")\n}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "B")
+	runLimited("B", nil)
+	assertRawSymbolFiles(t, store, repositoryID, []string{"a.go", "b.go", "c.go"})
+
+	writeFile(t, repo, "a.go", "package main\n\nfunc A() {\n\tB()\n\tB()\n}\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "C")
+	runLimited("C", nil)
+	assertRawSymbolFiles(t, store, repositoryID, []string{"a.go", "b.go", "c.go"})
+	if tagged := countElementTag(t, db, blastRadiusTag); tagged != 0 {
+		t.Fatalf("committed clean limited runs should not retain blast-radius tags, found %d", tagged)
+	}
+
+	fullDB := openTestDB(t)
+	defer func() { _ = fullDB.Close() }()
+	fullStore := NewStore(fullDB)
+	fullScanner := NewScanner(fullStore)
+	fullSettings := DefaultSettings()
+	fullSettings.Scale.Strategy = ScanStrategyFull
+	fullSettings.LSP.Enabled = true
+	fullScanner.Settings = fullSettings
+	fullScanner.resolverFactory = func(string) definitionResolver {
+		return &fakeDefinitionResolver{locationsByName: map[string][]analyzerlsp.DefinitionLocation{
+			"B": {{FilePath: filepath.Join(repo, "b.go"), Line: 3}},
+		}}
+	}
+	fullScan, err := fullScanner.Scan(ctx, repo)
+	if err != nil {
+		t.Fatalf("full scan at C: %v", err)
+	}
+	if _, err := NewRepresenter(fullStore).Represent(ctx, fullScan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+		t.Fatalf("full represent at C: %v", err)
+	}
+	limitedHash, err := store.RawGraphHash(ctx, repositoryID)
+	if err != nil {
+		t.Fatalf("limited raw graph hash: %v", err)
+	}
+	fullHash, err := fullStore.RawGraphHash(ctx, fullScan.RepositoryID)
+	if err != nil {
+		t.Fatalf("full raw graph hash: %v", err)
+	}
+	if limitedHash != fullHash {
+		t.Fatalf("limited raw graph hash %s != full raw graph hash %s", limitedHash, fullHash)
 	}
 }
 
