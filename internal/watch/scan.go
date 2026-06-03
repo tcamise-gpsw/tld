@@ -103,10 +103,9 @@ func (p *synchronizedProgress) Finish() {
 
 func NewScanner(store *Store) *Scanner {
 	return &Scanner{
-		Store:     store,
-		Analyzer:  analyzer.NewService(),
-		Enrichers: defaults.NewRegistry(),
-		Rules:     &ignore.Rules{},
+		Store:    store,
+		Analyzer: analyzer.NewService(),
+		Rules:    &ignore.Rules{},
 	}
 }
 
@@ -131,9 +130,6 @@ func (s *Scanner) ScanFilesWithOptions(ctx context.Context, repo Repository, rel
 	if s.Analyzer == nil {
 		s.Analyzer = analyzer.NewService()
 	}
-	if s.Enrichers == nil {
-		s.Enrichers = defaults.NewRegistry()
-	}
 	repoRoot := filepath.Clean(repo.RepoRoot)
 	gitignoreRules, err := ignore.LoadGitIgnore(repoRoot)
 	if err != nil {
@@ -145,6 +141,7 @@ func (s *Scanner) ScanFilesWithOptions(ctx context.Context, repo Repository, rel
 	}
 	s.EffectiveRules = effectiveRules
 	settings := NormalizeSettings(s.Settings)
+	s.ensureDefaultEnrichers(settings)
 	allowed := map[string]struct{}{}
 	for _, language := range settings.Languages {
 		allowed[language] = struct{}{}
@@ -267,9 +264,6 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	if s.Analyzer == nil {
 		s.Analyzer = analyzer.NewService()
 	}
-	if s.Enrichers == nil {
-		s.Enrichers = defaults.NewRegistry()
-	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return ScanResult{}, err
@@ -289,6 +283,7 @@ func (s *Scanner) ScanWithOptions(ctx context.Context, path string, opts ScanOpt
 	}
 	s.EffectiveRules = effectiveRules
 	settings := NormalizeSettings(s.Settings)
+	s.ensureDefaultEnrichers(settings)
 
 	repoInput := RepositoryInput{
 		RemoteURL:    detectString(func() (string, error) { return tldgit.DetectRemoteURL(repoRoot) }),
@@ -1597,9 +1592,7 @@ func (s *Scanner) backfillFactsForCachedFile(ctx context.Context, workerAnalyzer
 }
 
 func (s *Scanner) enrichFile(ctx context.Context, repositoryID, fileID int64, repoRoot, rel, absFile, language string, data []byte, extracted *analyzer.Result, repoSignals []enrich.ActivationSignal, result *scanFileResult) error {
-	if s.Enrichers == nil {
-		s.Enrichers = defaults.NewRegistry()
-	}
+	s.ensureDefaultEnrichers(NormalizeSettings(s.Settings))
 	signals := append([]enrich.ActivationSignal{}, repoSignals...)
 	if extracted != nil {
 		signals = append(signals, enrich.ImportSignals(extracted.Refs)...)
@@ -1624,6 +1617,13 @@ func (s *Scanner) enrichFile(ctx context.Context, repositoryID, fileID int64, re
 	watchFacts := watchFactsFromEnrich(repositoryID, fileID, rel, facts)
 	watchFacts = append(watchFacts, enrichmentVersionFact(repositoryID, fileID, rel))
 	return s.Store.ReplaceFactsForFile(ctx, repositoryID, fileID, watchFacts)
+}
+
+func (s *Scanner) ensureDefaultEnrichers(settings Settings) {
+	if s.Enrichers != nil {
+		return
+	}
+	s.Enrichers = defaults.NewRegistryWithDependencyInventory(settings.Dependencies.Enabled)
 }
 
 func watchedFileLanguage(path string) (language string, parseable bool, ok bool) {

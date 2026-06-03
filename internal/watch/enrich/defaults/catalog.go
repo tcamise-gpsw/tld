@@ -48,14 +48,28 @@ func NewRegistry() *enrich.Registry {
 	return enrich.NewRegistry(DefaultEnrichers()...)
 }
 
+// NewRegistryWithDependencyInventory returns the built-in registry with optional
+// dependency/import inventory facts.
+func NewRegistryWithDependencyInventory(enabled bool) *enrich.Registry {
+	return enrich.NewRegistry(DefaultEnrichersWithDependencyInventory(enabled)...)
+}
+
 // DefaultEnrichers returns the complete built-in catalog.
 //
 // Keep this function as composition only. Add new enrichers to the narrowest
 // domain/language package so the default registry does not become an unreadable
 // list of framework constructors.
 func DefaultEnrichers() []enrich.Enricher {
+	return DefaultEnrichersWithDependencyInventory(true)
+}
+
+func DefaultEnrichersWithDependencyInventory(dependencyInventory bool) []enrich.Enricher {
+	inventoryEnrichers := []enrich.Enricher{}
+	if dependencyInventory {
+		inventoryEnrichers = InventoryEnrichers()
+	}
 	return appendGroups(
-		InventoryEnrichers(),
+		inventoryEnrichers,
 		ConfigEnrichers(),
 		HTTPClientEnrichers(),
 		RouteEnrichers(),

@@ -164,6 +164,7 @@ func (p *WatchPipeline) Execute(ctx context.Context, opts OneShotOptions) (OneSh
 		Embedding:          opts.Embedding,
 		Thresholds:         settings.Thresholds,
 		Visibility:         settings.Visibility,
+		Dependencies:       settings.Dependencies,
 		AssumeNoRawChanges: !opts.Rescan && scan.FilesSeen > 0 && scan.FilesParsed == 0,
 		BlastRadiusFiles:   scan.BlastRadiusFiles,
 		Progress:           opts.Progress,

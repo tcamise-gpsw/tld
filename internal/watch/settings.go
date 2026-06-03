@@ -37,8 +37,11 @@ func DefaultSettings() Settings {
 		Watcher:      WatcherAuto,
 		PollInterval: 10 * time.Second,
 		Debounce:     500 * time.Millisecond,
-		Thresholds:   defaultThresholds(Thresholds{}),
-		Visibility:   defaultVisibilityConfig(VisibilityConfig{}),
+		Dependencies: DependencyConfig{
+			Enabled: false,
+		},
+		Thresholds: defaultThresholds(Thresholds{}),
+		Visibility: defaultVisibilityConfig(VisibilityConfig{}),
 		Scale: ScaleConfig{
 			Strategy:           ScanStrategyAuto,
 			MaxTrackedFiles:    defaultMaxTrackedFiles,

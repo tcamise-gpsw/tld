@@ -231,10 +231,15 @@ type Settings struct {
 	Watcher      string           `json:"watcher"`
 	PollInterval time.Duration    `json:"poll_interval"`
 	Debounce     time.Duration    `json:"debounce"`
+	Dependencies DependencyConfig `json:"dependencies"`
 	Thresholds   Thresholds       `json:"thresholds"`
 	Visibility   VisibilityConfig `json:"visibility"`
 	Scale        ScaleConfig      `json:"scale"`
 	LSP          LSPConfig        `json:"lsp"`
+}
+
+type DependencyConfig struct {
+	Enabled bool `json:"enabled" yaml:"enabled"`
 }
 
 type ScaleConfig struct {
@@ -257,6 +262,7 @@ type RepresentRequest struct {
 	Embedding          EmbeddingConfig  `json:"embedding"`
 	Thresholds         Thresholds       `json:"thresholds"`
 	Visibility         VisibilityConfig `json:"visibility"`
+	Dependencies       DependencyConfig `json:"dependencies"`
 	AssumeNoRawChanges bool             `json:"-"`
 	BlastRadiusFiles   []string         `json:"-"`
 	Progress           ProgressSink     `json:"-"`

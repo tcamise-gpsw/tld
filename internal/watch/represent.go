@@ -148,6 +148,7 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 		logError(ctx, req.Logger, "watch.representation.prepare.failed", err, "elapsed", logElapsed(prepareStarted), "repository_id", repositoryID)
 		return RepresentResult{}, err
 	}
+	filtered.Dependencies = req.Dependencies
 	filtered.ChangedFiles = changedRaw.Files
 	progressAdvance(req.Progress, "Architecture view filtered")
 	progressFinish(req.Progress)
@@ -174,6 +175,7 @@ func (r *Representer) Represent(ctx context.Context, repositoryID int64, req Rep
 				logError(ctx, req.Logger, "watch.representation.semantic_filter.failed", err, "repository_id", repositoryID)
 				return RepresentResult{}, err
 			}
+			filtered.Dependencies = req.Dependencies
 			filtered.ChangedFiles = changedRaw.Files
 			progressAdvance(req.Progress, "Semantic filter refreshed")
 			progressFinish(req.Progress)
@@ -2269,8 +2271,10 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 			}
 		}
 	}
-	if err := m.materializeDependencyImports(ctx, dependencyImportFactsByFile, structuralView, fileElements, occupied, filtered, changedFactLines); err != nil {
-		return err
+	if filtered.Dependencies.Enabled {
+		if err := m.materializeDependencyImports(ctx, dependencyImportFactsByFile, structuralView, fileElements, occupied, filtered, changedFactLines); err != nil {
+			return err
+		}
 	}
 	if err := m.applyTechnologyMetadataFacts(ctx, metadataFactsByFile, fileElements, symbolElements, symbolIDByStable); err != nil {
 		return err

@@ -46,6 +46,9 @@ func ResolveSettings(cfg *workspace.Config, languages []string, watcherMode, pol
 		settings.Watcher = cfg.Watch.Watcher
 		settings.PollInterval = parseDurationOrZero(cfg.Watch.PollInterval)
 		settings.Debounce = parseDurationOrZero(cfg.Watch.Debounce)
+		settings.Dependencies = DependencyConfig{
+			Enabled: cfg.Watch.Dependencies.Enabled,
+		}
 		settings.Thresholds = Thresholds{
 			MaxElementsPerView:            cfg.Watch.Thresholds.MaxElementsPerView,
 			MaxConnectorsPerView:          cfg.Watch.Thresholds.MaxConnectorsPerView,

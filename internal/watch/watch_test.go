@@ -29,6 +29,30 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func dependencyInventorySettings() Settings {
+	settings := DefaultSettings()
+	settings.Dependencies.Enabled = true
+	return settings
+}
+
+func scanWithDependencyInventory(t *testing.T, store *Store, repo string) ScanResult {
+	t.Helper()
+	scanner := NewScanner(store)
+	scanner.Settings = dependencyInventorySettings()
+	result, err := scanner.Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func representRequestWithDependencyInventory() RepresentRequest {
+	return RepresentRequest{
+		Embedding:    EmbeddingConfig{Provider: "none"},
+		Dependencies: DependencyConfig{Enabled: true},
+	}
+}
+
 func TestMigrationCreatesWatchTablesAndIndexes(t *testing.T) {
 	db := openTestDB(t)
 	defer func() { _ = db.Close() }()
@@ -177,7 +201,7 @@ func quietHelper() string {
 	return "quiet"
 }
 
-`)
+	`)
 
 	store := NewStore(db)
 	scanResult, err := NewScanner(store).Scan(context.Background(), repo)
@@ -338,10 +362,7 @@ export async function Users() {
 `)
 
 	store := NewStore(db)
-	scanResult, err := NewScanner(store).Scan(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scanResult := scanWithDependencyInventory(t, store, repo)
 	facts, err := store.FactsForRepository(context.Background(), scanResult.RepositoryID)
 	if err != nil {
 		t.Fatal(err)
@@ -360,7 +381,7 @@ export async function Users() {
 			t.Fatalf("missing fact %s/%s in %+v", want.factType, want.tag, facts)
 		}
 	}
-	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, representRequestWithDependencyInventory()); err != nil {
 		t.Fatal(err)
 	}
 	for _, tag := range []string{"http:route", "framework:chi", "frontend:route", "framework:nextjs", "orm:prisma"} {
@@ -382,6 +403,41 @@ export async function Users() {
 	}
 	if !connectorExistsBetween(t, db, "main.go", "External packages") {
 		t.Fatal("expected importing file to connect to grouped external dependencies")
+	}
+}
+
+func TestDependencyInventoryDisabledByDefault(t *testing.T) {
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	repo := initGitRepoNoCommit(t)
+	writeFile(t, repo, "main.go", `package main
+
+import "fmt"
+
+func Main() {
+	fmt.Println("hello")
+}
+`)
+
+	store := NewStore(db)
+	scanResult, err := NewScanner(store).Scan(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts, err := store.FactsForRepository(context.Background(), scanResult.RepositoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range facts {
+		if fact.Type == "dependency.import" || fact.Type == "dependency.module" {
+			t.Fatalf("dependency inventory should be disabled by default, got %+v", facts)
+		}
+	}
+	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}}); err != nil {
+		t.Fatal(err)
+	}
+	if groups := elementKindCount(t, db, "dependency-group"); groups != 0 {
+		t.Fatalf("dependency groups should not materialize by default, found %d", groups)
 	}
 }
 
@@ -407,13 +463,11 @@ func main() {
 `)
 
 	store := NewStore(db)
-	scanResult, err := NewScanner(store).Scan(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scanResult := scanWithDependencyInventory(t, store, repo)
 	req := RepresentRequest{
-		Embedding:  EmbeddingConfig{Provider: "none"},
-		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+		Embedding:    EmbeddingConfig{Provider: "none"},
+		Dependencies: DependencyConfig{Enabled: true},
+		Visibility:   VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
 	}
 	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, req); err != nil {
 		t.Fatal(err)
@@ -2108,11 +2162,8 @@ type Item struct{}
 	runGit(t, repo, "commit", "-m", "initial")
 
 	store := NewStore(db)
-	scan, err := NewScanner(store).Scan(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}})
+	scan := scanWithDependencyInventory(t, store, repo)
+	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, representRequestWithDependencyInventory())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2142,10 +2193,8 @@ func TestOrder(t *testing.T) {
 	}
 }
 `)
-	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
-		t.Fatal(err)
-	}
-	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, RepresentRequest{Embedding: EmbeddingConfig{Provider: "none"}})
+	scanWithDependencyInventory(t, store, repo)
+	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, representRequestWithDependencyInventory())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2208,13 +2257,11 @@ func main() {
 	runGit(t, repo, "commit", "-m", "initial imports")
 
 	store := NewStore(db)
-	scan, err := NewScanner(store).Scan(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scan := scanWithDependencyInventory(t, store, repo)
 	req := RepresentRequest{
-		Embedding:  EmbeddingConfig{Provider: "none"},
-		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+		Embedding:    EmbeddingConfig{Provider: "none"},
+		Dependencies: DependencyConfig{Enabled: true},
+		Visibility:   VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
 	}
 	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
 	if err != nil {
@@ -2257,9 +2304,7 @@ func main() {
 	fmt.Println(catalog.DefaultCurrency)
 }
 `)
-	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
-		t.Fatal(err)
-	}
+	scanWithDependencyInventory(t, store, repo)
 	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -2290,9 +2335,7 @@ func main() {
 	if _, err := store.CreateWatchVersion(context.Background(), scan.RepositoryID, "commit2", "remove pricing import", "commit1", "main", next.RepresentationHash, nil, diffs); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
-		t.Fatal(err)
-	}
+	scanWithDependencyInventory(t, store, repo)
 	clean, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -2337,13 +2380,11 @@ func main() {
 	runGit(t, repo, "commit", "-m", "initial grouped imports")
 
 	store := NewStore(db)
-	scan, err := NewScanner(store).Scan(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scan := scanWithDependencyInventory(t, store, repo)
 	req := RepresentRequest{
-		Embedding:  EmbeddingConfig{Provider: "none"},
-		Visibility: VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
+		Embedding:    EmbeddingConfig{Provider: "none"},
+		Dependencies: DependencyConfig{Enabled: true},
+		Visibility:   VisibilityConfig{CoreThresholdEnabled: false, CoreThresholdSet: true},
 	}
 	rep, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
 	if err != nil {
@@ -2368,9 +2409,7 @@ func main() {
 	fmt.Println(catalog.DefaultCurrency)
 }
 `)
-	if _, err := NewScanner(store).Scan(context.Background(), repo); err != nil {
-		t.Fatal(err)
-	}
+	scanWithDependencyInventory(t, store, repo)
 	next, err := NewRepresenter(store).Represent(context.Background(), scan.RepositoryID, req)
 	if err != nil {
 		t.Fatal(err)

@@ -25,6 +25,7 @@ type filterResult struct {
 	ContextPolicies   contextPolicySet
 	ContextExpansions contextExpansionSet
 	Visibility        VisibilityConfig
+	Dependencies      DependencyConfig
 }
 
 type visibilitySignal struct {

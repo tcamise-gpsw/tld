@@ -100,6 +100,37 @@ func TestSetGlobalConfigValueSupportsEmbeddingMaxTokens(t *testing.T) {
 	}
 }
 
+func TestWatchDependenciesEnabledConfigDefaultsAndOverrides(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("TLD_CONFIG_DIR", configDir)
+
+	cfg, err := workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if cfg.Watch.Dependencies.Enabled {
+		t.Fatal("watch.dependencies.enabled should default to false")
+	}
+	if err := workspace.SetGlobalConfigValue("watch.dependencies.enabled", "true"); err != nil {
+		t.Fatalf("SetGlobalConfigValue: %v", err)
+	}
+	cfg, err = workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	if !cfg.Watch.Dependencies.Enabled {
+		t.Fatal("watch.dependencies.enabled should be true after config set")
+	}
+	t.Setenv("TLD_WATCH_DEPENDENCIES_ENABLED", "false")
+	cfg, err = workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig with env: %v", err)
+	}
+	if cfg.Watch.Dependencies.Enabled {
+		t.Fatal("TLD_WATCH_DEPENDENCIES_ENABLED=false should override file config")
+	}
+}
+
 func TestWatchEmbeddingEndpointSupportsMultipleValues(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("TLD_CONFIG_DIR", configDir)
