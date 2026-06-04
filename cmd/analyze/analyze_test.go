@@ -130,7 +130,7 @@ func TestAnalyzeCmd_GroupsDependencyImportsWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestAnalyzeCmd_TechnologyMetadataFactsDoNotMaterializeStandaloneElements(t *testing.T) {
+func TestAnalyzeCmd_RemovedWeakORMEnrichersDoNotMaterializeMetadata(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := t.TempDir()
 	cmd.MustInitWorkspace(t, dir)
@@ -146,10 +146,10 @@ func TestAnalyzeCmd_TechnologyMetadataFactsDoNotMaterializeStandaloneElements(t 
 		t.Fatal(err)
 	}
 	if countElementName(ws, "Python SQLAlchemy") != 0 {
-		t.Fatalf("expected orm.query fact not to materialize as standalone element: %+v", ws.Elements)
+		t.Fatalf("expected removed SQLAlchemy enricher not to materialize a standalone element: %+v", ws.Elements)
 	}
-	if !anyElementTechnologyContains(ws, "sqlalchemy") {
-		t.Fatalf("expected SQLAlchemy metadata to be attached as element technology: %+v", ws.Elements)
+	if anyElementTechnologyContains(ws, "sqlalchemy") {
+		t.Fatalf("expected removed SQLAlchemy enricher not to attach element technology: %+v", ws.Elements)
 	}
 }
 

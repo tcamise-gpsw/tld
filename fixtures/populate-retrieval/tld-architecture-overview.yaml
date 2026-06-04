@@ -172,7 +172,7 @@ fixtures:
     reject_examples:
       - { path: frontend/src/store/useStore.ts, rationale: Frontend Zustand state, not SQLite. }
       - { path: internal/workspace, rationale: YAML file persistence, not SQLite storage. }
-      - { path: internal/watch/enrich/enrichers/storage, rationale: Storage tech detector, not app storage implementation. }
+      - { path: internal/watch/enrich/enrichers/datastore, rationale: Datastore enrichment detector, not app storage implementation. }
 
   - element: Watch, Scan, and Enrichment Pipeline
     aliases: [watcher, scanner, analyzer, code intelligence, auto-discovery, enrichment, materialize code-derived diagram data, symbol extraction, reference resolution]
@@ -245,5 +245,5 @@ fixtures:
       - { symbol: mcp.ensureServeRunning, file: cmd/mcp/mcp.go, rank: 5, rationale: Ensures local tld serve exists before MCP starts. }
     reject_examples:
       - { path: frontend/src/components/ViewFloatingMenu.tsx, rationale: UI toolbar tools, not MCP tools. }
-      - { path: internal/watch/enrich/enrichers/ai, rationale: AI enrichment detector, not MCP interface. }
+      - { path: internal/watch/enrich/enrichers/runtime, rationale: Runtime manifest enrichment detector, not MCP interface. }
       - { path: pkg/api, rationale: ConnectRPC app API, not stdio MCP automation interface. }

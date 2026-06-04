@@ -344,20 +344,18 @@ func Routes(r chi.Router) {
 func GetUser() {}
 `)
 	writeFile(t, repo, "package.json", `{
-  "dependencies": {
-    "next": "14.0.0",
-    "@prisma/client": "5.0.0"
+ "dependencies": {
+	"next": "14.0.0",
+    "lodash": "4.17.21"
   }
 }`)
 	writeFile(t, repo, "src/app/users/[id]/page.tsx", `export default function Page() {
   return null
 }`)
-	writeFile(t, repo, "db.ts", `import { PrismaClient } from "@prisma/client"
+	writeFile(t, repo, "db.ts", `import lodash from "lodash"
 
-const prisma = new PrismaClient()
-
-export async function Users() {
-  return prisma.user.findMany()
+export function Users() {
+  return lodash.compact([1, 2, undefined])
 }
 `)
 
@@ -375,7 +373,6 @@ export async function Users() {
 		{"dependency.import", "dependency:import"},
 		{"http.route", "framework:chi"},
 		{"frontend.route", "framework:nextjs"},
-		{"orm.query", "orm:prisma"},
 	} {
 		if !factsContain(facts, want.factType, want.tag) {
 			t.Fatalf("missing fact %s/%s in %+v", want.factType, want.tag, facts)
@@ -384,7 +381,7 @@ export async function Users() {
 	if _, err := NewRepresenter(store).Represent(context.Background(), scanResult.RepositoryID, representRequestWithDependencyInventory()); err != nil {
 		t.Fatal(err)
 	}
-	for _, tag := range []string{"http:route", "framework:chi", "frontend:route", "framework:nextjs", "orm:prisma"} {
+	for _, tag := range []string{"http:route", "framework:chi", "frontend:route", "framework:nextjs"} {
 		if count := countElementTag(t, db, tag); count != 0 {
 			t.Fatalf("expected representation to omit noisy generated tag %q, found on %d elements", tag, count)
 		}
