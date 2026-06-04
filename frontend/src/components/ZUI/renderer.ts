@@ -20,6 +20,7 @@ const BADGE_THRESHOLD = 100
 const CONNECTOR_MIN_ALPHA = 0.32
 const CONNECTOR_MAX_ALPHA = 0.95
 const CONNECTOR_LINE_PX = 2
+const CONNECTOR_ENDPOINT_MIN_ALPHA = 0.35
 
 const MIN_FONT_HINT = 12
 const MAX_FONT_HINT = 24
@@ -940,6 +941,12 @@ function nodeSelfAlphaFromState(node: SceneNode): number {
   return 1 - node.state.t
 }
 
+export function nodeConnectorEndpointAlphaFromState(node: SceneNode): number {
+  const selfAlpha = nodeSelfAlphaFromState(node)
+  if (node.layout.children.length === 0 || node.state.inheritedAlpha <= 0.01) return selfAlpha
+  return Math.max(selfAlpha, Math.min(node.state.inheritedAlpha, CONNECTOR_ENDPOINT_MIN_ALPHA))
+}
+
 function getHandlePos(
   nodeX: number, nodeY: number, nodeW: number, nodeH: number,
   handleId: string | null, isSource: boolean, slotScale = 1,
@@ -999,8 +1006,8 @@ function drawEdges(
       }
 
       const endpointAlphaFactor = Math.min(
-        nodeSelfAlphaFromState(sn),
-        targetSn ? nodeSelfAlphaFromState(targetSn) : 1,
+        nodeConnectorEndpointAlphaFromState(sn),
+        targetSn ? nodeConnectorEndpointAlphaFromState(targetSn) : 1,
       )
       const edgeAlpha = alpha * endpointAlphaFactor
       if (edgeAlpha < 0.05) continue
