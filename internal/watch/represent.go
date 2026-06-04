@@ -2162,9 +2162,10 @@ func (m *materializer) materializeFacts(ctx context.Context, facts []Fact, symbo
 			connectionFactsByFile[fact.FilePath] = append(connectionFactsByFile[fact.FilePath], fact)
 			continue
 		}
-		if highSignalFact(fact) {
+		highSignal := highSignalFact(fact)
+		if highSignal && standaloneFactNode(fact) {
 			nodeFactsByFile[fact.FilePath] = append(nodeFactsByFile[fact.FilePath], fact)
-		} else {
+		} else if !highSignal {
 			summaryFactsByFile[fact.FilePath] = append(summaryFactsByFile[fact.FilePath], fact)
 		}
 	}
@@ -2972,6 +2973,19 @@ func technologyMetadataFact(fact Fact) bool {
 
 func runtimeEndpointFact(fact Fact) bool {
 	return fact.Type == "runtime.endpoint"
+}
+
+func standaloneFactNode(fact Fact) bool {
+	switch fact.Type {
+	case "http.route", "frontend.route", "runtime.endpoint", "storage.volume":
+		return concreteFactObject(fact)
+	default:
+		return false
+	}
+}
+
+func concreteFactObject(fact Fact) bool {
+	return strings.TrimSpace(firstNonEmpty(fact.ObjectStableKey, fact.ObjectName, fact.Name)) != ""
 }
 
 func componentSourceForFact(fact Fact, attrs map[string]string) string {
