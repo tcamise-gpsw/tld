@@ -365,7 +365,7 @@ describe('resolveZUIProxyConnectors', () => {
     expect(resolved.connectors).toHaveLength(0)
   })
 
-  it('keeps native connectors as proxy lines when an endpoint is only a dashed border anchor', () => {
+  it('does not emit proxy lines for native connectors when endpoints are boundary anchors', () => {
     const snapshot = buildWorkspaceGraphSnapshot(baseData([
       connector(1, 1, 1, 2, 'A-B'),
     ]))
@@ -377,15 +377,11 @@ describe('resolveZUIProxyConnectors', () => {
         [2, 'd1-o2'],
       ]),
       zuiSettings(),
-      { nativeRenderedElementIds: new Set([2]) },
+      { nativeRenderedElementIds: new Set([1, 2]) },
     )
 
-    expect(resolved.connectors).toHaveLength(1)
-    expect(resolved.connectors[0]).toMatchObject({
-      sourceAnchorElementId: 1,
-      targetAnchorElementId: 2,
-    })
-    expect(resolved.connectors[0].details.connectors.map((leaf) => leaf.connector.id)).toEqual([1])
+    expect(resolved.connectors).toHaveLength(0)
+    expect(resolved.hiddenBadges).toHaveLength(0)
   })
 
   it('budgets visible connector groups and reports the omitted leaf count', () => {

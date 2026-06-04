@@ -169,7 +169,8 @@ function collectVisibleAnchorForNode(
       worldH: visualRect.worldH,
       pathDepth: node.pathElementIds.length,
       renderAlpha: zoomableNodeConnectorAlpha(inheritedAlpha, inheritedAlpha * 0.28),
-      nativeRendered: false,
+      // The body is gone, but the dashed boundary is still a native connector endpoint.
+      nativeRendered: true,
     })
   }
 
