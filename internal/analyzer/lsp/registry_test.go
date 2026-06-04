@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,61 @@ func TestResolveServerCommandWithLookPath(t *testing.T) {
 	}
 	if resolved.CommandSource != CommandSourceDefault {
 		t.Fatalf("CommandSource = %q, want default", resolved.CommandSource)
+	}
+}
+
+func TestResolveServerCommandWithLookPath_KotlinPrefersKMPLSP(t *testing.T) {
+	resolved, err := ResolveServerCommandWithLookPath(analyzer.LanguageKotlin, func(file string) (string, error) {
+		switch file {
+		case "kmp-lsp", "kotlin-lsp":
+			return filepath.Join("/tmp", file), nil
+		default:
+			return "", errors.New("missing")
+		}
+	})
+	if err != nil {
+		t.Fatalf("ResolveServerCommandWithLookPath kotlin: %v", err)
+	}
+	if resolved.Path != filepath.Join("/tmp", "kmp-lsp") {
+		t.Fatalf("resolved path = %q", resolved.Path)
+	}
+	if len(resolved.Args) != 0 {
+		t.Fatalf("Args = %#v, want none", resolved.Args)
+	}
+	if resolved.CommandSource != CommandSourceDefault {
+		t.Fatalf("CommandSource = %q, want default", resolved.CommandSource)
+	}
+}
+
+func TestDecodeDefinitionLocationsAcceptsSingleLocation(t *testing.T) {
+	locations, err := decodeDefinitionLocations(json.RawMessage(`{"uri":"file:///tmp/Foo.kt","range":{"start":{"line":4,"character":2},"end":{"line":4,"character":5}}}`))
+	if err != nil {
+		t.Fatalf("decodeDefinitionLocations: %v", err)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("locations = %d, want 1", len(locations))
+	}
+	if got := locations[0].URI.Filename(); got != "/tmp/Foo.kt" {
+		t.Fatalf("location uri = %q", got)
+	}
+	if locations[0].Range.Start.Line != 4 {
+		t.Fatalf("line = %d, want 4", locations[0].Range.Start.Line)
+	}
+}
+
+func TestDecodeDefinitionLocationsAcceptsLocationLinks(t *testing.T) {
+	locations, err := decodeDefinitionLocations(json.RawMessage(`[{"targetUri":"file:///tmp/Bar.kt","targetRange":{"start":{"line":7,"character":0},"end":{"line":9,"character":1}},"targetSelectionRange":{"start":{"line":8,"character":4},"end":{"line":8,"character":7}}}]`))
+	if err != nil {
+		t.Fatalf("decodeDefinitionLocations: %v", err)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("locations = %d, want 1", len(locations))
+	}
+	if got := locations[0].URI.Filename(); got != "/tmp/Bar.kt" {
+		t.Fatalf("location uri = %q", got)
+	}
+	if locations[0].Range.Start.Line != 8 {
+		t.Fatalf("line = %d, want 8", locations[0].Range.Start.Line)
 	}
 }
 

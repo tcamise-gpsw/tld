@@ -261,6 +261,16 @@ func TestGlobalConfigLSPCommandOverrides(t *testing.T) {
 	if got := cfg.Watch.LSP.Commands["python"]; got != "pyright-langserver --stdio" {
 		t.Fatalf("Python command = %q", got)
 	}
+	if err := workspace.SetGlobalConfigValue("watch.lsp.commands.kotlin", "kotlin-language-server"); err != nil {
+		t.Fatalf("SetGlobalConfigValue kotlin command: %v", err)
+	}
+	cfg, err = workspace.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig after kotlin set: %v", err)
+	}
+	if got := cfg.Watch.LSP.Commands["kotlin"]; got != "kotlin-language-server" {
+		t.Fatalf("Kotlin command = %q", got)
+	}
 
 	if err := workspace.SetGlobalConfigValue("watch.lsp.commands.typescript", "typescript-language-server --stdio"); err != nil {
 		t.Fatalf("SetGlobalConfigValue command: %v", err)

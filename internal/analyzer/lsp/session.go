@@ -3,6 +3,7 @@ package lsp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +20,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const closeTimeout = 3 * time.Second
+const (
+	closeTimeout      = 3 * time.Second
+	initializeTimeout = 15 * time.Second
+)
 
 type SessionConfig struct {
 	Language              analyzer.Language
@@ -131,12 +135,14 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 			Name: filepath.Base(rootDir),
 		}},
 	}
-	result, err := session.server.Initialize(ctx, initializeParams)
+	initializeCtx, cancelInitialize := context.WithTimeout(ctx, initializeTimeout)
+	defer cancelInitialize()
+	result, err := session.server.Initialize(initializeCtx, initializeParams)
 	if err != nil {
 		_ = session.Close()
 		return nil, fmt.Errorf("initialize %s: %w%s", command.Path, err, formatStderrSuffix(session.stderr.String()))
 	}
-	if err := session.server.Initialized(ctx, &protocol.InitializedParams{}); err != nil {
+	if err := session.server.Initialized(initializeCtx, &protocol.InitializedParams{}); err != nil {
 		_ = session.Close()
 		return nil, fmt.Errorf("initialized %s: %w%s", command.Path, err, formatStderrSuffix(session.stderr.String()))
 	}
@@ -218,7 +224,64 @@ func (s *Session) Definition(ctx context.Context, params *protocol.DefinitionPar
 	if s.server == nil {
 		return nil, fmt.Errorf("LSP session is not initialized")
 	}
-	return s.server.Definition(ctx, params)
+	var result json.RawMessage
+	if _, err := s.conn.Call(ctx, protocol.MethodTextDocumentDefinition, params, &result); err != nil {
+		return nil, err
+	}
+	return decodeDefinitionLocations(result)
+}
+
+func decodeDefinitionLocations(data json.RawMessage) ([]protocol.Location, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	if trimmed[0] == '[' {
+		var locations []protocol.Location
+		if err := json.Unmarshal(trimmed, &locations); err == nil && locationsHaveURIs(locations) {
+			return locations, nil
+		}
+		var links []protocol.LocationLink
+		if err := json.Unmarshal(trimmed, &links); err != nil {
+			return nil, fmt.Errorf("decode definition locations: %w", err)
+		}
+		return locationsFromLinks(links), nil
+	}
+	var location protocol.Location
+	if err := json.Unmarshal(trimmed, &location); err == nil && location.URI != "" {
+		return []protocol.Location{location}, nil
+	}
+	var link protocol.LocationLink
+	if err := json.Unmarshal(trimmed, &link); err != nil {
+		return nil, fmt.Errorf("decode definition location: %w", err)
+	}
+	if link.TargetURI == "" {
+		return nil, nil
+	}
+	return locationsFromLinks([]protocol.LocationLink{link}), nil
+}
+
+func locationsHaveURIs(locations []protocol.Location) bool {
+	for _, location := range locations {
+		if location.URI == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func locationsFromLinks(links []protocol.LocationLink) []protocol.Location {
+	locations := make([]protocol.Location, 0, len(links))
+	for _, link := range links {
+		if link.TargetURI == "" {
+			continue
+		}
+		locations = append(locations, protocol.Location{
+			URI:   link.TargetURI,
+			Range: link.TargetSelectionRange,
+		})
+	}
+	return locations
 }
 
 func (s *Session) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error) {

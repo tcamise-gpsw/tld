@@ -20,6 +20,7 @@ func newDefaultParserRegistry() *parserRegistry {
 			LanguageCPP:        &cppParser{},
 			LanguageGo:         &goParser{},
 			LanguageJava:       &javaParser{},
+			LanguageKotlin:     &kotlinParser{},
 			LanguagePython:     &pythonParser{},
 			LanguageRust:       &rustParser{},
 			LanguageTypeScript: &tsParser{},

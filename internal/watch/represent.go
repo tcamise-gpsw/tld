@@ -29,7 +29,7 @@ const (
 
 var (
 	maxEmbeddingSymbolsPerRun = 5000
-	maxDetailedSymbolElements = 5000
+	maxDetailedSymbolElements = 10000
 )
 
 type Representer struct {

@@ -247,7 +247,7 @@ func DefaultConfig() *Config {
 			Port: "8060",
 		},
 		Watch: WatchConfig{
-			Languages:    []string{"go", "python", "typescript", "javascript", "java", "c", "cpp", "rust"},
+			Languages:    []string{"go", "python", "typescript", "javascript", "java", "kotlin", "c", "cpp", "rust"},
 			Watcher:      "auto",
 			PollInterval: "10s",
 			Debounce:     "500ms",
@@ -308,6 +308,7 @@ func DefaultConfig() *Config {
 					"go":         "",
 					"java":       "",
 					"javascript": "",
+					"kotlin":     "",
 					"python":     "",
 					"rust":       "",
 					"typescript": "",

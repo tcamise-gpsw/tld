@@ -207,6 +207,11 @@ var defaultCommands = map[analyzer.Language][]ServerCommand{
 	analyzer.LanguageJava: {
 		{Executable: "jdtls"},
 	},
+	analyzer.LanguageKotlin: {
+		{Executable: "kmp-lsp"},
+		{Executable: "kotlin-lsp", Args: []string{"--stdio"}},
+		{Executable: "kotlin-language-server"},
+	},
 	analyzer.LanguageTypeScript: {
 		{Executable: "typescript-language-server", Args: []string{"--stdio"}},
 	},

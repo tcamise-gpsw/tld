@@ -14,6 +14,7 @@ const (
 	LanguageGo         Language = "go"
 	LanguageJava       Language = "java"
 	LanguageJavaScript Language = "javascript"
+	LanguageKotlin     Language = "kotlin"
 	LanguagePython     Language = "python"
 	LanguageRust       Language = "rust"
 	LanguageTypeScript Language = "typescript"
@@ -29,6 +30,7 @@ var languageSpecs = []LanguageSpec{
 	{Language: LanguagePython, Extensions: []string{".py"}},
 	{Language: LanguageRust, Extensions: []string{".rs"}},
 	{Language: LanguageJava, Extensions: []string{".java"}},
+	{Language: LanguageKotlin, Extensions: []string{".kt", ".kts"}},
 	{Language: LanguageTypeScript, Extensions: []string{".ts", ".tsx", ".mts", ".cts"}},
 	{Language: LanguageJavaScript, Extensions: []string{".js", ".jsx", ".mjs", ".cjs"}},
 	{Language: LanguageCPP, Extensions: []string{".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx"}},

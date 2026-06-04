@@ -391,6 +391,7 @@ var configDefinitions = []ConfigDefinition{
 	{Key: "watch.lsp.commands.go", Env: []string{"TLD_WATCH_LSP_GO_COMMAND"}, Description: "Override command for the Go language server."},
 	{Key: "watch.lsp.commands.java", Env: []string{"TLD_WATCH_LSP_JAVA_COMMAND"}, Description: "Override command for the Java language server."},
 	{Key: "watch.lsp.commands.javascript", Env: []string{"TLD_WATCH_LSP_JAVASCRIPT_COMMAND"}, Description: "Override command for the JavaScript language server."},
+	{Key: "watch.lsp.commands.kotlin", Env: []string{"TLD_WATCH_LSP_KOTLIN_COMMAND"}, Description: "Override command for the Kotlin language server."},
 	{Key: "watch.lsp.commands.python", Env: []string{"TLD_WATCH_LSP_PYTHON_COMMAND"}, Description: "Override command for the Python language server."},
 	{Key: "watch.lsp.commands.rust", Env: []string{"TLD_WATCH_LSP_RUST_COMMAND"}, Description: "Override command for the Rust language server."},
 	{Key: "watch.lsp.commands.typescript", Env: []string{"TLD_WATCH_LSP_TYPESCRIPT_COMMAND"}, Description: "Override command for the TypeScript language server."},
@@ -535,6 +536,7 @@ func applyEnvOverridesDetailed(cfg *Config, root *yaml.Node) ([]ConfigValue, err
 		{"watch.lsp.commands.go", "TLD_WATCH_LSP_GO_COMMAND"},
 		{"watch.lsp.commands.java", "TLD_WATCH_LSP_JAVA_COMMAND"},
 		{"watch.lsp.commands.javascript", "TLD_WATCH_LSP_JAVASCRIPT_COMMAND"},
+		{"watch.lsp.commands.kotlin", "TLD_WATCH_LSP_KOTLIN_COMMAND"},
 		{"watch.lsp.commands.python", "TLD_WATCH_LSP_PYTHON_COMMAND"},
 		{"watch.lsp.commands.rust", "TLD_WATCH_LSP_RUST_COMMAND"},
 		{"watch.lsp.commands.typescript", "TLD_WATCH_LSP_TYPESCRIPT_COMMAND"},
@@ -989,6 +991,8 @@ func getConfigValue(cfg *Config, key string) any {
 		return cfg.Watch.LSP.Commands["java"]
 	case "watch.lsp.commands.javascript":
 		return cfg.Watch.LSP.Commands["javascript"]
+	case "watch.lsp.commands.kotlin":
+		return cfg.Watch.LSP.Commands["kotlin"]
 	case "watch.lsp.commands.python":
 		return cfg.Watch.LSP.Commands["python"]
 	case "watch.lsp.commands.rust":
@@ -1130,10 +1134,10 @@ func configToYAMLNode(cfg *Config, existingRoot *yaml.Node) *yaml.Node {
 	addScalar(lsp, "health_interval", cfg.Watch.LSP.HealthInterval, desc("watch.lsp.health_interval"))
 	addScalar(lsp, "memory_limit_bytes", cfg.Watch.LSP.MemoryLimitBytes, desc("watch.lsp.memory_limit_bytes"))
 	commands := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	for _, language := range []string{"c", "cpp", "go", "java", "javascript", "python", "rust", "typescript"} {
+	for _, language := range []string{"c", "cpp", "go", "java", "javascript", "kotlin", "python", "rust", "typescript"} {
 		addScalar(commands, language, cfg.Watch.LSP.Commands[language], desc("watch.lsp.commands."+language))
 	}
-	appendUnknownEntries(commands, mappingValueNode(mappingValueNode(mappingValueNode(existing, "watch"), "lsp"), "commands"), setOf("c", "cpp", "go", "java", "javascript", "python", "rust", "typescript"))
+	appendUnknownEntries(commands, mappingValueNode(mappingValueNode(mappingValueNode(existing, "watch"), "lsp"), "commands"), setOf("c", "cpp", "go", "java", "javascript", "kotlin", "python", "rust", "typescript"))
 	addMap(lsp, "commands", commands, "Per-language language-server command overrides.")
 	appendUnknownEntries(lsp, mappingValueNode(mappingValueNode(existing, "watch"), "lsp"), setOf("enabled", "health_interval", "memory_limit_bytes", "commands"))
 	addMap(watchNode, "lsp", lsp, "Language-server integration settings.")

@@ -11,6 +11,8 @@ func TestDetectLanguage(t *testing.T) {
 		"worker.py":  LanguagePython,
 		"main.rs":    LanguageRust,
 		"app.java":   LanguageJava,
+		"model.kt":   LanguageKotlin,
+		"script.kts": LanguageKotlin,
 		"index.ts":   LanguageTypeScript,
 		"widget.tsx": LanguageTypeScript,
 		"server.js":  LanguageJavaScript,
@@ -40,6 +42,8 @@ func TestGroupFilesByLanguage(t *testing.T) {
 		"README.md",
 		"pkg/service.go",
 		"pkg/handler.go",
+		"src/Camera.kt",
+		"scripts/setup.kts",
 		"src/index.ts",
 		"src/util.tsx",
 		"scripts/tool.py",
@@ -54,10 +58,13 @@ func TestGroupFilesByLanguage(t *testing.T) {
 	if !reflect.DeepEqual(grouped[LanguagePython], []string{"scripts/tool.py"}) {
 		t.Fatalf("unexpected python grouping: %#v", grouped[LanguagePython])
 	}
+	if !reflect.DeepEqual(grouped[LanguageKotlin], []string{"scripts/setup.kts", "src/Camera.kt"}) {
+		t.Fatalf("unexpected kotlin grouping: %#v", grouped[LanguageKotlin])
+	}
 	if _, ok := grouped[LanguageJavaScript]; ok {
 		t.Fatalf("unexpected javascript grouping: %#v", grouped[LanguageJavaScript])
 	}
-	if len(grouped) != 3 {
-		t.Fatalf("expected 3 supported language groups, got %d", len(grouped))
+	if len(grouped) != 4 {
+		t.Fatalf("expected 4 supported language groups, got %d", len(grouped))
 	}
 }
