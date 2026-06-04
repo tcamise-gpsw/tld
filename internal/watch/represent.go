@@ -3290,11 +3290,24 @@ func factNodeDescription(fact Fact) string {
 
 func (m *materializer) materializeConnectors(ctx context.Context, refs []Reference, symbols map[int64]Symbol, folderElements map[string]int64, folderViews map[string]int64, fileElements map[string]int64, symbolElements map[int64]int64, symbolViews map[int64]int64, repoView int64) error {
 	filePairs := map[string]viewPairReference{}
+	provenanceFilePairs := map[string]viewPairReference{}
 	symbolPairs := map[string]viewPairReference{}
 	for _, ref := range refs {
 		source := symbols[ref.SourceSymbolID]
 		target := symbols[ref.TargetSymbolID]
 		if source.FilePath != "" && target.FilePath != "" && source.FilePath != target.FilePath {
+			sourceFileElementID := fileElements[source.FilePath]
+			targetFileElementID := fileElements[target.FilePath]
+			if sourceFileElementID != 0 && targetFileElementID != 0 {
+				provenanceKey := canonicalViewPairKey(repoView, sourceFileElementID, targetFileElementID, "file")
+				provenancePair := provenanceFilePairs[provenanceKey]
+				if provenancePair.Count == 0 {
+					provenancePair = viewPairReference{Key: provenanceKey, OwnerKey: "file:" + source.FilePath + "->" + target.FilePath, ViewID: repoView, SourceElementID: sourceFileElementID, TargetElementID: targetFileElementID, Ref: ref}
+				}
+				provenancePair.addDirection(sourceFileElementID, targetFileElementID)
+				provenancePair.Count++
+				provenanceFilePairs[provenanceKey] = provenancePair
+			}
 			viewID, sourceElementID, targetElementID, ownerKey, ok := connectorViewEndpoints(source.FilePath, target.FilePath, folderElements, folderViews, fileElements, repoView)
 			if !ok {
 				continue
@@ -3341,15 +3354,15 @@ func (m *materializer) materializeConnectors(ctx context.Context, refs []Referen
 		symbolConnectorCount[pair.ViewID]++
 	}
 
-	fileGroups := map[string][]viewPairReference{}
-	for _, key := range sortedKeys(filePairs) {
-		pair := filePairs[key]
-		fileGroups[pair.OwnerKey] = append(fileGroups[pair.OwnerKey], pair)
+	provenanceGroups := map[string][]viewPairReference{}
+	for _, key := range sortedKeys(provenanceFilePairs) {
+		pair := provenanceFilePairs[key]
+		provenanceGroups[pair.OwnerKey] = append(provenanceGroups[pair.OwnerKey], pair)
 	}
 
 	fileConnectorCountByView := map[int64]int{}
-	for _, groupKey := range sortedFileGroupKeys(fileGroups) {
-		group := fileGroups[groupKey]
+	for _, groupKey := range sortedFileGroupKeys(provenanceGroups) {
+		group := provenanceGroups[groupKey]
 		if len(group) == 0 {
 			continue
 		}
@@ -3380,6 +3393,48 @@ func (m *materializer) materializeConnectors(ctx context.Context, refs []Referen
 				return err
 			}
 			fileConnectorCountByView[item.ViewID]++
+		}
+	}
+
+	localFileGroups := map[string][]viewPairReference{}
+	for _, key := range sortedKeys(filePairs) {
+		pair := filePairs[key]
+		localFileGroups[pair.OwnerKey] = append(localFileGroups[pair.OwnerKey], pair)
+	}
+
+	localConnectorCountByView := map[int64]int{}
+	for _, groupKey := range sortedFileGroupKeys(localFileGroups) {
+		group := localFileGroups[groupKey]
+		if len(group) == 0 {
+			continue
+		}
+		viewID := group[0].ViewID
+		if localConnectorCountByView[viewID] >= m.thresholds.MaxConnectorsPerView {
+			continue
+		}
+		rawReferenceCount := filePairReferenceCount(group)
+		if strings.HasPrefix(groupKey, "folder:") && rawReferenceCount > m.thresholds.MaxExpandedConnectorsPerGroup {
+			if m.contextPolicyHidden("view-folder-reference", groupKey) {
+				continue
+			}
+			first := group[0]
+			if err := m.upsertConnectorDetailedWithDirection(ctx, "view-folder-reference", groupKey, first.ViewID, first.SourceElementID, first.TargetElementID, fmt.Sprintf("%d references", rawReferenceCount), fmt.Sprintf("%d references", rawReferenceCount), viewPairDirection(group), ""); err != nil {
+				return err
+			}
+			localConnectorCountByView[viewID]++
+			continue
+		}
+		for _, item := range group {
+			if localConnectorCountByView[item.ViewID] >= m.thresholds.MaxConnectorsPerView {
+				break
+			}
+			if m.contextPolicyHidden("view-file-reference", item.OwnerKey) {
+				continue
+			}
+			if err := m.upsertConnectorDetailedWithDirection(ctx, "view-file-reference", item.OwnerKey, item.ViewID, item.SourceElementID, item.TargetElementID, "", "", viewPairDirection([]viewPairReference{item}), ""); err != nil {
+				return err
+			}
+			localConnectorCountByView[item.ViewID]++
 		}
 	}
 	return nil

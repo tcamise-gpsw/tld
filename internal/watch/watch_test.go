@@ -1554,6 +1554,26 @@ func Main() {
 	if label != "10 references" {
 		t.Fatalf("expected raw reference count label, got %q", label)
 	}
+	var localSummaryCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM watch_materialization
+		WHERE repository_id = ? AND owner_type = 'view-folder-reference'`, scanResult.RepositoryID).Scan(&localSummaryCount); err != nil {
+		t.Fatal(err)
+	}
+	if localSummaryCount == 0 {
+		t.Fatal("expected local folder summary connector to be materialized")
+	}
+	var provenanceCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM watch_materialization
+		WHERE repository_id = ? AND owner_type = 'file-reference'`, scanResult.RepositoryID).Scan(&provenanceCount); err != nil {
+		t.Fatal(err)
+	}
+	if provenanceCount == 0 {
+		t.Fatal("expected file provenance connector to remain available for off-view")
+	}
 }
 
 func TestRepresentPrioritizesCrossFolderAggregatesOverFilePairs(t *testing.T) {
