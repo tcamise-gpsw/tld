@@ -93,6 +93,7 @@ function anchor(partial: Partial<VisibleNodeAnchor>): VisibleNodeAnchor {
     worldH: partial.worldH ?? 100,
     pathDepth: partial.pathDepth ?? 1,
     renderAlpha: partial.renderAlpha ?? 1,
+    nativeRendered: partial.nativeRendered ?? true,
   }
 }
 

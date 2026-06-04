@@ -28,6 +28,7 @@ export interface VisibleNodeAnchor {
   worldH: number
   pathDepth: number
   renderAlpha: number
+  nativeRendered: boolean
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -132,6 +133,7 @@ function collectVisibleAnchorForNode(
       worldH: visualRect.worldH,
       pathDepth: node.pathElementIds.length,
       renderAlpha: hasChildren ? zoomableNodeConnectorAlpha(inheritedAlpha, parentAlpha) : inheritedAlpha,
+      nativeRendered: true,
     })
   }
 
@@ -167,6 +169,7 @@ function collectVisibleAnchorForNode(
       worldH: visualRect.worldH,
       pathDepth: node.pathElementIds.length,
       renderAlpha: zoomableNodeConnectorAlpha(inheritedAlpha, inheritedAlpha * 0.28),
+      nativeRendered: false,
     })
   }
 
@@ -560,6 +563,11 @@ export function buildVisibleProxyConnectors(
   const eligibleAnchors = Array.from(visibleAnchors.entries())
     .filter(([, anchor]) => anchor.renderAlpha >= minAlpha)
   const connectorAnchors = new Map(eligibleAnchors.map(([elementId, anchor]) => [elementId, anchor.nodeId]))
+  const nativeRenderedElementIds = new Set(
+    eligibleAnchors
+      .filter(([, anchor]) => anchor.nativeRendered)
+      .map(([elementId]) => elementId),
+  )
   const anchorsByElementId = new Map(eligibleAnchors.map(([elementId, anchor]) => [elementId, {
     nodeId: anchor.nodeId,
     worldX: anchor.worldX,
@@ -571,7 +579,7 @@ export function buildVisibleProxyConnectors(
     snapshot,
     connectorAnchors,
     settings,
-    { viewport, anchorsByElementId },
+    { viewport, anchorsByElementId, nativeRenderedElementIds },
   )
 }
 

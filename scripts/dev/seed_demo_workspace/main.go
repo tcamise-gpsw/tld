@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -66,7 +65,7 @@ func run() error {
 
 	target := strings.TrimSpace(*outDir)
 	if target == "" {
-		return errors.New("-out is required")
+		target = "."
 	}
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
