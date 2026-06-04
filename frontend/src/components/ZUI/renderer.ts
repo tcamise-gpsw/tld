@@ -21,6 +21,7 @@ const CONNECTOR_MIN_ALPHA = 0.32
 const CONNECTOR_MAX_ALPHA = 0.95
 const CONNECTOR_LINE_PX = 2
 const CONNECTOR_ENDPOINT_MIN_ALPHA = 0.35
+const MIN_NODE_W_FOR_CONNECTOR_DETAIL = 120
 
 const MIN_FONT_HINT = 12
 const MAX_FONT_HINT = 24
@@ -399,6 +400,18 @@ function drawArrowHead(ctx: CanvasRenderingContext2D, x: number, y: number, angl
   ctx.fillStyle = color
   ctx.fill()
   ctx.restore()
+}
+
+export function shouldDrawConnectorDetailLabel(direction: string | null | undefined, visualSourceScreenW: number, visualTargetScreenW: number): boolean {
+  const dir = direction ?? 'forward'
+  const sourceVisible = visualSourceScreenW > MIN_NODE_W_FOR_CONNECTOR_DETAIL
+  const targetVisible = visualTargetScreenW > MIN_NODE_W_FOR_CONNECTOR_DETAIL
+
+  if (dir === 'forward') return targetVisible
+  if (dir === 'backward') return sourceVisible
+  if (dir === 'both' || dir === 'bidirectional') return sourceVisible || targetVisible
+
+  return sourceVisible || targetVisible
 }
 
 function drawGroupLabel(
@@ -1204,22 +1217,23 @@ function drawEdges(
       const visualSourceScreenW = effWSource * zoom
 
       const ARROW_SIZE_BASE = 10
-      const MIN_NODE_W_FOR_ARROW = 120
+      const sourceConnectorDetailVisible = visualSourceScreenW > MIN_NODE_W_FOR_CONNECTOR_DETAIL
+      const targetConnectorDetailVisible = visualTargetScreenW > MIN_NODE_W_FOR_CONNECTOR_DETAIL
 
       if (dir === 'forward' || dir === 'both' || dir === 'bidirectional') {
-        if (visualTargetScreenW > MIN_NODE_W_FOR_ARROW) {
+        if (targetConnectorDetailVisible) {
           const arrowScreenSize = Math.min(ARROW_SIZE_BASE, visualTargetScreenW * 0.2)
           drawArrowHead(ctx, tH.x, tH.y, finalAngleT, arrowScreenSize / zoom, accent)
         }
       }
       if (dir === 'backward' || dir === 'both' || dir === 'bidirectional') {
-        if (visualSourceScreenW > MIN_NODE_W_FOR_ARROW) {
+        if (sourceConnectorDetailVisible) {
           const arrowScreenSize = Math.min(ARROW_SIZE_BASE, visualSourceScreenW * 0.2)
           drawArrowHead(ctx, sH.x, sH.y, finalAngleS, arrowScreenSize / zoom, accent)
         }
       }
 
-      if (!lowDetail && edge.label) {
+      if (!lowDetail && edge.label && shouldDrawConnectorDetailLabel(dir, visualSourceScreenW, visualTargetScreenW)) {
         const screenFontSize = 12
         const worldFontSize = screenFontSize / zoom
         ctx.font = `${worldFontSize}px Inter, system-ui, sans-serif`

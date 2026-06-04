@@ -87,7 +87,10 @@ test('dragging tags and layers onto a canvas node updates element tags', async (
   await page.reload()
 
   const otherTags = page.getByRole('button', { name: /Other tags/ })
-  if (await otherTags.count()) await otherTags.click()
+  await expect(otherTags).toBeVisible()
+  await otherTags.click()
+  const tagItem = page.getByTestId('tag-manager-tag').filter({ hasText: tag })
+  await expect(tagItem).toBeVisible()
 
   const target = nodeByName(page, elements[0].name)
   const targetBox = await target.boundingBox()
@@ -98,7 +101,7 @@ test('dragging tags and layers onto a canvas node updates element tags', async (
   }
 
   const tagTransfer = await page.evaluateHandle(() => new DataTransfer())
-  await page.getByTestId('tag-manager-tag').filter({ hasText: tag }).dispatchEvent('dragstart', { dataTransfer: tagTransfer })
+  await tagItem.dispatchEvent('dragstart', { dataTransfer: tagTransfer })
   await target.dispatchEvent('dragover', { dataTransfer: tagTransfer, ...dropPoint })
   await target.dispatchEvent('drop', { dataTransfer: tagTransfer, ...dropPoint })
 

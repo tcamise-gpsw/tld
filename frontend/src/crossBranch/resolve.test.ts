@@ -384,6 +384,31 @@ describe('resolveZUIProxyConnectors', () => {
     expect(resolved.hiddenBadges).toHaveLength(0)
   })
 
+  it('does not collapse sibling leaf connectors to their common ancestor boundary', () => {
+    const snapshot = buildWorkspaceGraphSnapshot(nestedZuiData({
+      '4': [
+        connector(16, 4, 2, 14, 'Cross-view'),
+      ],
+    }))
+
+    const resolved = resolveZUIProxyConnectors(
+      snapshot,
+      new Map([
+        [29, 'd1-o29'],
+        [3, 'd3-o3'],
+        [31, 'd3-o31'],
+      ]),
+      zuiSettings(),
+      {
+        nativeRenderedElementIds: new Set([29, 3, 31]),
+      },
+    )
+
+    const keys = resolved.connectors.map((item) => item.key)
+    expect(keys).toContain('3::31')
+    expect(keys.some((key) => key.split('::').includes('29'))).toBe(false)
+  })
+
   it('budgets visible connector groups and reports the omitted leaf count', () => {
     const data = baseData([
       connector(1, 1, 3, 2, 'one'),

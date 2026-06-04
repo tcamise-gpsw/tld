@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createNodeScreenState, type SceneNode } from './sceneGraph'
-import { nodeConnectorEndpointAlphaFromState } from './renderer'
+import { nodeConnectorEndpointAlphaFromState, shouldDrawConnectorDetailLabel } from './renderer'
 import type { LayoutNode } from './types'
 
 function layoutNode(id: string, elementId: number, children: LayoutNode[] = []): LayoutNode {
@@ -48,5 +48,24 @@ describe('nodeConnectorEndpointAlphaFromState', () => {
     })
 
     expect(nodeConnectorEndpointAlphaFromState(node)).toBeGreaterThan(0)
+  })
+})
+
+describe('shouldDrawConnectorDetailLabel', () => {
+  it('follows the visible arrowhead endpoint for forward connectors', () => {
+    expect(shouldDrawConnectorDetailLabel('forward', 240, 120)).toBe(false)
+    expect(shouldDrawConnectorDetailLabel('forward', 80, 121)).toBe(true)
+  })
+
+  it('follows the visible arrowhead endpoint for backward connectors', () => {
+    expect(shouldDrawConnectorDetailLabel('backward', 120, 240)).toBe(false)
+    expect(shouldDrawConnectorDetailLabel('backward', 121, 80)).toBe(true)
+  })
+
+  it('allows bidirectional and nondirectional labels once either endpoint has connector detail', () => {
+    expect(shouldDrawConnectorDetailLabel('both', 80, 121)).toBe(true)
+    expect(shouldDrawConnectorDetailLabel('bidirectional', 121, 80)).toBe(true)
+    expect(shouldDrawConnectorDetailLabel('none', 80, 120)).toBe(false)
+    expect(shouldDrawConnectorDetailLabel('none', 121, 80)).toBe(true)
   })
 })
