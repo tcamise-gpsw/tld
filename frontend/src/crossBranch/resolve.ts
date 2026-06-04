@@ -674,7 +674,13 @@ function visibleEndpointCandidates(
   const deepestVisibleIndex = visibleIndexes[visibleIndexes.length - 1]
   const deepestVisibleAnchorElementId = path[deepestVisibleIndex]
   const candidateIndexes = [deepestVisibleIndex]
-  if (visibleIndexes.length >= 2) candidateIndexes.push(visibleIndexes[visibleIndexes.length - 2])
+  if (visibleIndexes.length >= 2) {
+    const previousVisibleIndex = visibleIndexes[visibleIndexes.length - 2]
+    const actualElementVisible = deepestVisibleAnchorElementId === actualElementId
+    if (actualElementVisible && previousVisibleIndex === deepestVisibleIndex - 1) {
+      candidateIndexes.push(previousVisibleIndex)
+    }
+  }
 
   return candidateIndexes.map((pathIndex) => {
     const anchorElementId = path[pathIndex]
