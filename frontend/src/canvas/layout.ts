@@ -87,7 +87,7 @@ export function computeLayout(elements: Element[], connectors: Connector[]): Vie
     edges.push({
       source: conn?.source ?? edge.w,
       target: conn?.target ?? edge.v,
-      points: edgeData.points || [],
+      points: (edgeData.points || []).reverse(),
       label: rawLabel ? (RELATIONSHIP_VERBS[rawLabel] ?? rawLabel) : undefined,
     });
   });
