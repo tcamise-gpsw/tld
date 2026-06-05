@@ -304,7 +304,13 @@ export function drawExternalStubs(
 ): void {
   for (const stub of stubs) {
     const isHighlighted = state.selectedNode === stub.nodeRef;
-    const color = isHighlighted ? theme.CONNECTOR_EXTERNAL : theme.CONNECTOR_STUB;
+    // When selected, color by direction: red for outbound (depends on), green for inbound (required by)
+    let color: string;
+    if (isHighlighted) {
+      color = stub.direction === 'outbound' ? '#f85149' : '#3fb950';
+    } else {
+      color = theme.CONNECTOR_STUB;
+    }
     const lineWidth = isHighlighted ? STUB_HIGHLIGHTED_WIDTH : STUB_DEFAULT_WIDTH;
 
     const cosA = Math.cos(stub.angle);
@@ -342,9 +348,15 @@ export function drawExternalStubs(
 
     ctx.setLineDash([]);
 
-    // Label: → GroupName (N)  or  ← GroupName (N)
-    const arrow = stub.direction === 'outbound' ? '→' : '←';
-    const label = `${arrow} ${stub.targetGroup} (${stub.count})`;
+    // Arrowhead: outbound points away from node (at end), inbound points toward node (at start)
+    if (stub.direction === 'outbound') {
+      drawArrowhead(ctx, startX, startY, endX, endY, color);
+    } else {
+      drawArrowhead(ctx, endX, endY, startX, startY, color);
+    }
+
+    // Label: GroupName (N)
+    const label = `${stub.targetGroup} (${stub.count})`;
 
     // Align text away from node so it doesn't overlap the line
     const labelX = endX + cosA * 4;

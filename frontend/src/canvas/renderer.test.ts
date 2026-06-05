@@ -428,27 +428,27 @@ describe('renderer — drawExternalStubs', () => {
     ];
     drawExternalStubs(ctx as never, stubs, emptyState());
     expect(ctx.stroke).toHaveBeenCalled();
-    expect(ctx.fillText).toHaveBeenCalledWith('→ NetworkLayer (3)', expect.anything(), expect.anything());
+    expect(ctx.fillText).toHaveBeenCalledWith('NetworkLayer (3)', expect.anything(), expect.anything());
   });
 
-  it('draws ← label for inbound stubs', () => {
+  it('draws label for inbound stubs', () => {
     const ctx = createMockCtx();
     const stubs: ExternalStub[] = [
       { nodeRef: 'a', targetGroup: 'AuthService', count: 2, direction: 'inbound', angle: Math.PI,
         nodeX: 0, nodeY: 100, nodeWidth: 220, nodeHeight: 80 },
     ];
     drawExternalStubs(ctx as never, stubs, emptyState());
-    expect(ctx.fillText).toHaveBeenCalledWith('← AuthService (2)', expect.anything(), expect.anything());
+    expect(ctx.fillText).toHaveBeenCalledWith('AuthService (2)', expect.anything(), expect.anything());
   });
 
-  it('uses CONNECTOR_EXTERNAL color when the stub node is selected', () => {
+  it('uses red/green color when the stub node is selected', () => {
     const ctx = createMockCtx();
     const stubs: ExternalStub[] = [
       { nodeRef: 'a', targetGroup: 'G', count: 1, direction: 'outbound', angle: 0,
         nodeX: 0, nodeY: 100, nodeWidth: 220, nodeHeight: 80 },
     ];
     drawExternalStubs(ctx as never, stubs, { ...emptyState(), selectedNode: 'a' });
-    expect(ctx._sets['strokeStyle']).toContain(theme.CONNECTOR_EXTERNAL);
+    expect(ctx._sets['strokeStyle']).toContain('#f85149');
     expect(ctx._sets['strokeStyle']).not.toContain(theme.CONNECTOR_STUB);
   });
 
