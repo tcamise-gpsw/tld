@@ -80,7 +80,7 @@ export function computeLayout(elements: Element[], connectors: Connector[]): Vie
       source: edge.v,
       target: edge.w,
       points: edgeData.points || [],
-      label: conn?.relationship || undefined,
+      label: conn?.relationship || conn?.label || undefined,
     });
   });
 
