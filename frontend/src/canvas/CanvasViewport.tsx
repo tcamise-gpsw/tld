@@ -47,6 +47,7 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
   }, [transitionState]);
 
   // Handle resize
+  const needsFitRef = useRef(true);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -55,12 +56,17 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
       const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
+      // Refit on initial resize (first time canvas gets real dimensions)
+      if (needsFitRef.current && layout.nodes.length > 0) {
+        cameraRef.current = fitToContent(layout.nodes, rect.width, rect.height, 40);
+        needsFitRef.current = false;
+      }
       dirtyRef.current = true;
     });
 
     resizeObserver.observe(canvas);
     return () => resizeObserver.disconnect();
-  }, [dpr]);
+  }, [dpr, layout.nodes]);
 
   // Render loop
   useEffect(() => {
@@ -107,11 +113,15 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
   useEffect(() => {
     if (lastLayoutRef.current !== layout) {
       lastLayoutRef.current = layout;
+      needsFitRef.current = true;
       if (!currentTransitionRef.current?.active && layout.nodes.length > 0) {
         const canvas = canvasRef.current;
         if (canvas) {
-          // Use CSS dimensions (not physical pixels) since camera x/y are in CSS space
-          cameraRef.current = fitToContent(layout.nodes, canvas.width / dpr, canvas.height / dpr, 40);
+          const rect = canvas.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            cameraRef.current = fitToContent(layout.nodes, rect.width, rect.height, 40);
+            needsFitRef.current = false;
+          }
           dirtyRef.current = true;
         }
       }
