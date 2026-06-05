@@ -54,7 +54,8 @@ export function renderFrame(
   ctx.setTransform(dpr * camera.zoom, 0, 0, dpr * camera.zoom, dpr * camera.x, dpr * camera.y);
 
   // Draw connectors first (behind nodes)
-  drawConnectors(ctx, layout.edges, state);
+  const layoutNodeRefs = new Set(layout.nodes.map(n => n.ref));
+  drawConnectors(ctx, layout.edges, state, layoutNodeRefs);
 
   // Draw nodes on top
   drawNodes(ctx, layout.nodes, state, camera, elements, dpr);
@@ -92,11 +93,25 @@ export function isNodeVisible(
   );
 }
 
-function drawConnectors(ctx: CanvasRenderingContext2D, edges: LayoutEdge[], state: RenderState): void {
+function drawConnectors(ctx: CanvasRenderingContext2D, edges: LayoutEdge[], state: RenderState, layoutNodeRefs: Set<string>): void {
   for (const edge of edges) {
     const isHighlighted = state.highlightedExternalEdges.has(`${edge.source}-${edge.target}`);
-    const strokeWidth = isHighlighted ? CONNECTOR_HIGHLIGHTED_WIDTH : CONNECTOR_WIDTH;
-    const strokeColor = isHighlighted ? theme.CONNECTOR_EXTERNAL : theme.CONNECTOR_COLOR;
+    const isInternal = layoutNodeRefs.has(edge.source) && layoutNodeRefs.has(edge.target);
+
+    let strokeWidth: number;
+    let strokeColor: string;
+
+    if (isHighlighted) {
+      strokeWidth = CONNECTOR_HIGHLIGHTED_WIDTH;
+      strokeColor = theme.CONNECTOR_EXTERNAL;
+    } else if (isInternal) {
+      strokeWidth = CONNECTOR_WIDTH;
+      strokeColor = theme.CONNECTOR_COLOR;
+    } else {
+      // External edge (one endpoint is outside this view)
+      strokeWidth = CONNECTOR_WIDTH;
+      strokeColor = theme.CONNECTOR_STUB;
+    }
 
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = strokeWidth;

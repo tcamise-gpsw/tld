@@ -503,7 +503,12 @@ describe('renderer — highlighted external edges', () => {
   it('draws highlighted edges with CONNECTOR_EXTERNAL color and thicker width', () => {
     const ctx = createMockCtx();
     const layout: ViewLayout = {
-      nodes: [],
+      nodes: [
+        { ref: 'a', x: 50, y: 50, width: 220, height: 80, isGroup: false },
+        { ref: 'b', x: 150, y: 150, width: 220, height: 80, isGroup: false },
+        { ref: 'c', x: 250, y: 50, width: 220, height: 80, isGroup: false },
+        { ref: 'd', x: 350, y: 150, width: 220, height: 80, isGroup: false },
+      ],
       edges: [
         { source: 'a', target: 'b', points: [{ x: 0, y: 0 }, { x: 100, y: 100 }] },
         { source: 'c', target: 'd', points: [{ x: 100, y: 100 }, { x: 200, y: 50 }] },
@@ -515,7 +520,11 @@ describe('renderer — highlighted external edges', () => {
       ...emptyState(),
       highlightedExternalEdges: new Set(['a-b'])
     };
-    renderFrame(ctx as never, layout, defaultCamera, state, new Map(), 1);
+    const elements = new Map([
+      ['a', makeElement('a')], ['b', makeElement('b')],
+      ['c', makeElement('c')], ['d', makeElement('d')],
+    ]);
+    renderFrame(ctx as never, layout, defaultCamera, state, elements, 1);
     
     expect(ctx._sets['strokeStyle']).toContain(theme.CONNECTOR_EXTERNAL);
     expect(ctx._sets['strokeStyle']).toContain(theme.CONNECTOR_COLOR);
