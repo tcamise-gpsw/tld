@@ -64,6 +64,7 @@ export const App: React.FC = () => {
         setNavigationStack((prev) => [...prev, ref]);
         setSelectedNode(null);
         invalidateLayout(ref);
+        window.history.pushState({ depth: navigationStack.length + 1 }, '');
       };
 
       if (targetNode) {
@@ -130,8 +131,15 @@ export const App: React.FC = () => {
         handleGoUp();
       }
     };
+    const handlePopState = () => {
+      handleGoUp();
+    };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, [handleGoUp]);
 
   const handleHover = useCallback((ref: string | null, x: number, y: number) => {
