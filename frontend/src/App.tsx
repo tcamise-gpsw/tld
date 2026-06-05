@@ -17,7 +17,7 @@ export const App: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [showExternalStubs, setShowExternalStubs] = useState(false);
+  const [showExternalStubs, setShowExternalStubs] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -189,6 +189,7 @@ export const App: React.FC = () => {
         <Toolbar
           showExternalStubs={showExternalStubs}
           onToggleExternalStubs={() => setShowExternalStubs(!showExternalStubs)}
+          onFitToContent={() => invalidateLayout(currentView)}
         />
 
         <CanvasViewport

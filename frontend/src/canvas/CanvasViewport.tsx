@@ -14,6 +14,7 @@ interface CanvasViewportProps {
   onSelect: (ref: string | null) => void;
   onEnterGroup: (ref: string) => void;
   onHover: (ref: string | null, x: number, y: number) => void;
+  onFitToContent?: () => void;
   transitionState?: TransitionState | null;
   onTransitionComplete?: () => void;
 }
@@ -26,6 +27,7 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
   onSelect,
   onEnterGroup,
   onHover,
+  onFitToContent: onFitToContentProp,
   transitionState,
   onTransitionComplete,
 }) => {
