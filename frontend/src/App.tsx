@@ -69,7 +69,8 @@ export const App: React.FC = () => {
       if (targetNode) {
         const canvas = document.querySelector('canvas');
         if (canvas) {
-          const tState = startTransition(targetNode, canvas.width, canvas.height);
+          const dpr = window.devicePixelRatio || 1;
+          const tState = startTransition(targetNode, canvas.width / dpr, canvas.height / dpr);
           setPendingNavigation({ transitionState: tState, action });
           return;
         }
@@ -101,7 +102,8 @@ export const App: React.FC = () => {
           const canvas = document.querySelector('canvas');
           if (canvas) {
             action();
-            const tState = startExitTransition(parentLayout, exitingNode, canvas.width, canvas.height);
+            const dpr = window.devicePixelRatio || 1;
+            const tState = startExitTransition(parentLayout, exitingNode, canvas.width / dpr, canvas.height / dpr);
             setPendingNavigation({ transitionState: tState, action: () => {} });
             return;
           }

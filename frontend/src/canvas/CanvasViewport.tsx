@@ -110,12 +110,13 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
       if (!currentTransitionRef.current?.active && layout.nodes.length > 0) {
         const canvas = canvasRef.current;
         if (canvas) {
-          cameraRef.current = fitToContent(layout.nodes, canvas.width, canvas.height, 40);
+          // Use CSS dimensions (not physical pixels) since camera x/y are in CSS space
+          cameraRef.current = fitToContent(layout.nodes, canvas.width / dpr, canvas.height / dpr, 40);
           dirtyRef.current = true;
         }
       }
     }
-  }, [layout]);
+  }, [layout, dpr]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
