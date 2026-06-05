@@ -223,9 +223,9 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {selectedNode && (
+      {(selectedNode || currentView !== 'root') && (
         <SidePanel
-          selectedNode={selectedNode}
+          selectedNode={selectedNode || currentView}
           currentView={currentView}
           data={data}
           showExternalStubs={showExternalStubs}
