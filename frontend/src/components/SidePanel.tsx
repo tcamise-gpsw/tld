@@ -91,7 +91,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       <div className="panel-section table-section">
         <h4>Connectors</h4>
         <div className="connector-summary">
-          <span>{connectors.length} connectors ({outboundCount} outbound, {inboundCount} inbound)</span>
+          <span>{connectors.length} connectors ({outboundCount} dependencies, {inboundCount} dependents)</span>
         </div>
 
         {connectors.length > 0 ? (
@@ -124,7 +124,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     title={isNavigable ? `Navigate to ${conn.target}` : undefined}
                   >
                     <td className="connector-direction">
-                      {conn.direction === 'Inbound' ? '← Inbound' : '→ Outbound'}
+                      {conn.direction === 'Inbound' ? '← Required by' : '→ Depends on'}
                     </td>
                     <td className="connector-target-cell" title={conn.target}>{conn.target}</td>
                     <td className="connector-type">{conn.type}</td>
