@@ -40,9 +40,12 @@ export function computeLayout(elements: Element[], connectors: Connector[]): Vie
     g.setNode(elem.ref, { width: NODE_WIDTH, height: NODE_HEIGHT });
   }
 
-  // Add edges
+  // Add edges (only between nodes that are both in this layout)
+  const nodeRefSet = new Set(elements.map(e => e.ref));
   for (const conn of connectors) {
-    g.setEdge(conn.source, conn.target);
+    if (nodeRefSet.has(conn.source) && nodeRefSet.has(conn.target)) {
+      g.setEdge(conn.source, conn.target);
+    }
   }
 
   // Run layout
