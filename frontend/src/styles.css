@@ -375,6 +375,29 @@ body {
   border-left: 2px solid #f0883e;
 }
 
+.connector-table tr.navigable {
+  cursor: pointer;
+}
+
+.connector-table tr.navigable:hover {
+  background-color: #1c2128;
+}
+
+.connector-table tr.navigable.external:hover {
+  background-color: rgba(240, 136, 62, 0.15);
+}
+
+.connector-table tr.navigable td.connector-target-cell {
+  color: #58a6ff;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.15s;
+}
+
+.connector-table tr.navigable:hover td.connector-target-cell {
+  text-decoration-color: #58a6ff;
+}
+
 .connector-target {
   max-width: 120px;
   overflow: hidden;

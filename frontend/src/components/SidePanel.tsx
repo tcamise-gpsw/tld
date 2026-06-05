@@ -8,6 +8,7 @@ interface SidePanelProps {
   data: DiagramData;
   showExternalStubs: boolean;
   onToggleExternalStubs: () => void;
+  onNavigateToElement?: (ref: string) => void;
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({
@@ -16,6 +17,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   data,
   showExternalStubs,
   onToggleExternalStubs,
+  onNavigateToElement,
 }) => {
   const element = useMemo(() => selectedNode ? data.elements.get(selectedNode) : undefined, [data, selectedNode]);
   
@@ -112,8 +114,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {sortedConnectors.map((conn, idx) => (
-                  <tr key={`${conn.id}-${idx}`} className={conn.isExternal ? 'external' : ''}>
+                {sortedConnectors.map((conn, idx) => {
+                  const isNavigable = !!onNavigateToElement;
+                  return (
+                  <tr
+                    key={`${conn.id}-${idx}`}
+                    className={`${conn.isExternal ? 'external' : ''} ${isNavigable ? 'navigable' : ''}`}
+                    onClick={isNavigable ? () => onNavigateToElement(conn.targetRef) : undefined}
+                    title={isNavigable ? `Navigate to ${conn.target}` : undefined}
+                  >
                     <td className="connector-direction">
                       {conn.direction === 'Inbound' ? '← Inbound' : '→ Outbound'}
                     </td>
@@ -121,7 +130,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     <td className="connector-type">{conn.type}</td>
                     <td className="connector-view">{conn.view}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

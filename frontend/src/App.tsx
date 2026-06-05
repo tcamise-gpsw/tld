@@ -125,6 +125,41 @@ export const App: React.FC = () => {
     handleGoToLevel(navigationStack.length - 2);
   }, [data, navigationStack, handleGoToLevel]);
 
+  const handleNavigateToElement = useCallback((targetRef: string) => {
+    if (!data) return;
+
+    const targetElement = data.elements.get(targetRef);
+    if (!targetElement) return;
+
+    const targetParent = targetElement.placements[0]?.parent || 'root';
+
+    // Target is in the current view — drill in or select
+    if (targetParent === currentView) {
+      if (targetElement.has_view) {
+        handleEnterGroup(targetRef);
+      } else {
+        setSelectedNode(targetRef);
+      }
+      return;
+    }
+
+    // Target is in a different view — navigate to its parent view, then select it
+    const path: string[] = [];
+    let cur = targetParent;
+    while (cur !== 'root') {
+      path.unshift(cur);
+      const node = data.viewTree.nodes.get(cur);
+      if (!node || node.parent === cur) break;
+      cur = node.parent;
+    }
+    path.unshift('root');
+
+    setNavigationStack(path);
+    setSelectedNode(targetRef);
+    invalidateLayout(targetParent);
+    window.history.pushState({ depth: path.length }, '');
+  }, [data, currentView, handleEnterGroup]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -159,11 +194,15 @@ export const App: React.FC = () => {
   const viewConnectors = getViewConnectors(data, currentView);
   const layout = getOrComputeLayout(currentView, viewElements, viewConnectors);
 
-  // Only compute stubs when the toggle is ON — avoids O(n*m) work on every render
-  // when stubs are hidden. layout.nodes carries world-space positions for stub placement.
+  // Compute external stubs:
+  // - Toggle ON: show all stubs
+  // - Toggle OFF + node selected: show only the selected node's stubs
+  // - Toggle OFF + no selection: hide all stubs
   const externalStubs = showExternalStubs
     ? computeExternalStubs(data, currentView, layout)
-    : [];
+    : selectedNode
+      ? computeExternalStubs(data, currentView, layout).filter(s => s.nodeRef === selectedNode)
+      : [];
 
   return (
     <div className="app">
@@ -231,6 +270,7 @@ export const App: React.FC = () => {
           data={data}
           showExternalStubs={showExternalStubs}
           onToggleExternalStubs={() => setShowExternalStubs(!showExternalStubs)}
+          onNavigateToElement={handleNavigateToElement}
         />
       )}
     </div>

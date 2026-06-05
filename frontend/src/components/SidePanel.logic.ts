@@ -1,10 +1,12 @@
-import { DiagramData, Connector } from '../data/types';
+import { DiagramData } from '../data/types';
 import { getNodeConnectors, isExternalToView } from '../data/loader';
 
 export interface ConnectorRow {
   id: string;
   direction: 'Inbound' | 'Outbound';
   target: string;
+  targetRef: string;
+  targetHasView: boolean;
   type: string;
   view: string;
   isExternal: boolean;
@@ -35,6 +37,8 @@ export function resolveConnectors(
       id: conn.id || `${conn.source}-${conn.target}`,
       direction: isOutgoing ? 'Outbound' : 'Inbound',
       target: otherElem?.name || otherRef,
+      targetRef: otherRef,
+      targetHasView: otherElem?.has_view ?? false,
       type: conn.relationship || conn.label || '',
       view: conn.view,
       isExternal,

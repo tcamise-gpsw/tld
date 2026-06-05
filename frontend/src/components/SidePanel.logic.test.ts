@@ -13,17 +13,17 @@ describe('SidePanel Logic', () => {
     it('should correctly classify inbound and outbound connectors and resolve names', () => {
       const mockData = {
         elements: new Map([
-          ['nodeA', { name: 'Node A', kind: 'component', placements: [] }],
-          ['nodeB', { name: 'Node B', kind: 'component', placements: [] }],
-          ['nodeC', { name: 'Node C', kind: 'component', placements: [] }],
+          ['nodeA', { name: 'Node A', kind: 'component', has_view: false, placements: [] }],
+          ['nodeB', { name: 'Node B', kind: 'component', has_view: true, placements: [] }],
+          ['nodeC', { name: 'Node C', kind: 'component', has_view: false, placements: [] }],
         ]),
         connectors: [],
         viewTree: {},
       } as unknown as DiagramData;
 
       const mockConnectors: Connector[] = [
-        { id: '1', source: 'nodeA', target: 'nodeB', view: 'view1', style: 'sync', direction: 'forward' },
-        { id: '2', source: 'nodeC', target: 'nodeA', view: 'view1', style: 'async', direction: 'forward' },
+        { id: '1', source: 'nodeA', target: 'nodeB', view: 'view1', style: 'smoothstep', direction: 'forward', relationship: 'sync' },
+        { id: '2', source: 'nodeC', target: 'nodeA', view: 'view1', style: 'smoothstep', direction: 'forward', relationship: 'async' },
       ];
 
       vi.mocked(loader.getNodeConnectors).mockReturnValue(mockConnectors);
@@ -37,19 +37,23 @@ describe('SidePanel Logic', () => {
 
       const outbound = result.connectors.find(c => c.direction === 'Outbound');
       expect(outbound?.target).toBe('Node B');
+      expect(outbound?.targetRef).toBe('nodeB');
+      expect(outbound?.targetHasView).toBe(true);
       expect(outbound?.type).toBe('sync');
 
       const inbound = result.connectors.find(c => c.direction === 'Inbound');
       expect(inbound?.target).toBe('Node C');
+      expect(inbound?.targetRef).toBe('nodeC');
+      expect(inbound?.targetHasView).toBe(false);
       expect(inbound?.type).toBe('async');
     });
   });
 
   describe('sortConnectors', () => {
     const mockRows: ConnectorRow[] = [
-      { id: '1', direction: 'Outbound', target: 'Zebra', type: 'Async', view: 'B', isExternal: false },
-      { id: '2', direction: 'Inbound', target: 'Apple', type: 'Sync', view: 'A', isExternal: false },
-      { id: '3', direction: 'Outbound', target: 'Mango', type: 'Event', view: 'C', isExternal: false },
+      { id: '1', direction: 'Outbound', target: 'Zebra', targetRef: 'zebra-ref', targetHasView: false, type: 'Async', view: 'B', isExternal: false },
+      { id: '2', direction: 'Inbound', target: 'Apple', targetRef: 'apple-ref', targetHasView: true, type: 'Sync', view: 'A', isExternal: false },
+      { id: '3', direction: 'Outbound', target: 'Mango', targetRef: 'mango-ref', targetHasView: false, type: 'Event', view: 'C', isExternal: false },
     ];
 
     it('should sort by Target ascending', () => {
