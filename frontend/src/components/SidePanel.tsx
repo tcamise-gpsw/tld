@@ -104,7 +104,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     Target {sortState.column === 'Target' && (sortState.direction === 'desc' ? '▼' : '▲')}
                   </th>
                   <th onClick={() => handleSort('Type')}>
-                    Type {sortState.column === 'Type' && (sortState.direction === 'desc' ? '▼' : '▲')}
+                    Relationship {sortState.column === 'Type' && (sortState.direction === 'desc' ? '▼' : '▲')}
                   </th>
                   <th onClick={() => handleSort('View')}>
                     View {sortState.column === 'View' && (sortState.direction === 'desc' ? '▼' : '▲')}

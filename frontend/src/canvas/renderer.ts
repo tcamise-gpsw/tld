@@ -152,10 +152,10 @@ function drawConnectors(ctx: CanvasRenderingContext2D, edges: LayoutEdge[], stat
       const midIdx = Math.floor(edge.points.length / 2);
       const midPoint = edge.points[midIdx];
       ctx.fillStyle = theme.NODE_TEXT_SECONDARY;
-      ctx.font = theme.FONT_BADGE;
+      ctx.font = '12px Inter, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(edge.label, midPoint.x, midPoint.y - 4);
+      ctx.fillText(edge.label, midPoint.x, midPoint.y - 6);
     }
   }
 }
