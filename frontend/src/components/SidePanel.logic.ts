@@ -44,7 +44,7 @@ export function resolveConnectors(
       target: otherElem?.name || otherRef,
       targetRef: otherRef,
       targetHasView: otherElem?.has_view ?? false,
-      type: RELATIONSHIP_VERBS[conn.relationship || ''] || conn.relationship || conn.label || '',
+      type: conn.relationship || conn.label || '',
       view: conn.view,
       isExternal,
     });
