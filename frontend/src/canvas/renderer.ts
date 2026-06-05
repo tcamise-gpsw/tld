@@ -355,8 +355,10 @@ export function drawExternalStubs(
       drawArrowhead(ctx, endX, endY, startX, startY, color);
     }
 
-    // Label: GroupName (N)
-    const label = `${stub.targetGroup} (${stub.count})`;
+    // Label: show actual target name when count is 1, otherwise GroupName (N)
+    const label = stub.count === 1 && stub.targetName
+      ? stub.targetName
+      : `${stub.targetGroup} (${stub.count})`;
 
     // Align text away from node so it doesn't overlap the line
     const labelX = endX + cosA * 4;

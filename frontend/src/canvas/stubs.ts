@@ -11,6 +11,8 @@ export interface ExternalStub {
   nodeRef: string;
   /** Human-readable name of the external group being connected to/from. */
   targetGroup: string;
+  /** When count === 1, the actual target element name. */
+  targetName?: string;
   /** Whether this stub represents connections going out or coming in. */
   direction: 'outbound' | 'inbound';
   /** Number of connectors aggregated into this stub. */
@@ -133,10 +135,12 @@ export function computeExternalStubs(
 
     if (existing) {
       existing.count++;
+      existing.targetName = undefined; // multiple connectors, don't show individual name
     } else {
       groups.set(key, {
         nodeRef,
         targetGroup,
+        targetName: otherElem?.name ?? otherEndpointRef,
         direction,
         count: 1,
         nodeX: layoutNode.x,
