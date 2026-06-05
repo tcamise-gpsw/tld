@@ -1,132 +1,227 @@
-import { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Outlet, useSearchParams } from 'react-router-dom'
-import { Box, Spinner, Center } from '@chakra-ui/react'
-import { api } from './api/client'
-import ViewEditor from './pages/ViewEditor'
-import ViewsPage from './pages/Views'
-import Inventory from './pages/Inventory'
-import { SharedInfiniteZoom } from './pages/InfiniteZoom'
-import Settings from './pages/Settings'
-import AppearanceSettings from './pages/AppearanceSettings'
-import ExperimentalSettings from './pages/ExperimentalSettings'
-import UpdateSettings from './pages/UpdateSettings'
-import { HeaderProvider, useHeader } from './components/HeaderContext'
-import TopMenuBar from './components/TopMenuBar'
-import WorkspacePanel from './components/WorkspacePanel'
-import { ExperimentalProvider, useExperimental } from './context/ExperimentalContext'
-import { WorkspaceVersionProvider } from './context/WorkspaceVersionContext'
-import { initializeTheme, ThemeProvider } from './context/ThemeContext'
-import { platform } from './platform/local'
-import { HomeRedirect } from './components/HomeRedirect'
-import { isWailsApp, isWailsWindows } from './config/runtime'
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { loadDiagramData, getViewElements, getViewConnectors, getNodeConnectors, isExternalToView } from './data/loader';
+import { DiagramData } from './data/types';
+import { computeExternalStubs } from './canvas/stubs';
+import { getOrComputeLayout, invalidateLayout } from './canvas/layout';
+import { CanvasViewport } from './canvas/CanvasViewport';
+import { Toolbar } from './components/Toolbar';
+import { Tooltip } from './components/Tooltip';
+import { SidePanel } from './components/SidePanel';
+import { startTransition, startExitTransition, TransitionState } from './canvas/animation';
+import './styles.css';
 
-initializeTheme()
+export const App: React.FC = () => {
+  const [data, setData] = useState<DiagramData | null>(null);
+  const [navigationStack, setNavigationStack] = useState<string[]>(['root']);
+  const currentView = navigationStack[navigationStack.length - 1];
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [showExternalStubs, setShowExternalStubs] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-function AppLayout() {
-  const header = useHeader()
-  const node = header && typeof header === 'object' && 'node' in header ? (header as { node: React.ReactNode }).node : header
-  const hideMobileBar = header && typeof header === 'object' && 'hideMobileBar' in header ? !!(header as { hideMobileBar?: boolean }).hideMobileBar : false
-  const hideTopBar = typeof window !== 'undefined' && !!window.__TLD_VSCODE__
-  const { experimental } = useExperimental()
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    transitionState: TransitionState;
+    action: () => void;
+  } | null>(null);
 
-  return (
-    <Box
-      h="var(--app-viewport-height)"
-      display="flex"
-      flexDirection="column"
-      bg="var(--bg-canvas)"
-      overflow="hidden"
-      style={isWailsApp ? {
-        "--topbar-h": "52px",
-        "--topbar-h-total": "52px",
-        "--wails-window-controls-w": isWailsWindows ? "138px" : "0px",
-      } as React.CSSProperties : undefined}
-    >
-      {!hideTopBar && (
-        <>
-          <TopMenuBar hideMobileBar={hideMobileBar} rightSlot={experimental.watchEnabled ? <WorkspacePanel /> : undefined}>
-            {node}
-          </TopMenuBar>
-          <Box
-            h={{ base: 'var(--topbar-h-mobile-total)', sm: 'var(--topbar-h-total)' }}
-            mb={{ base: 'var(--topbar-content-gap)', sm: '0px' }}
-            flexShrink={0}
-          />
-        </>
-      )}
-      <Box
-        flex="1"
-        minH={0}
-        overflow="hidden"
-        position="relative"
-        pb={{ base: hideTopBar ? 0 : 'calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px))', sm: 0 }}
-      >
-        <Outlet />
-      </Box>
-    </Box>
-  )
-}
+  // Load diagram data on mount
+  useEffect(() => {
+    loadDiagramData()
+      .then((loadedData) => {
+        setData(loadedData);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, []);
 
-function DependenciesRedirect() {
-  const [searchParams] = useSearchParams()
-  const elementId = searchParams.get('element')
-  const target = elementId ? `/inventory?object=element:${elementId}` : '/inventory'
-  return <Navigate to={target} replace />
-}
+  const highlightedExternalEdges = useMemo(() => {
+    if (!data || !selectedNode) return new Set<string>();
+    const externalConnectors = getNodeConnectors(data, selectedNode).filter((conn) =>
+      isExternalToView(conn, currentView, data)
+    );
+    return new Set(externalConnectors.map((conn) => `${conn.source}-${conn.target}`));
+  }, [data, selectedNode, currentView]);
 
-export default function App() {
-  const [ready, setReady] = useState(false)
+  const handleSelect = useCallback((ref: string | null) => {
+    setSelectedNode(ref);
+  }, []);
+
+  const handleEnterGroup = useCallback(
+    (ref: string) => {
+      if (!data) return;
+
+      const viewElements = getViewElements(data, currentView);
+      const viewConnectors = getViewConnectors(data, currentView);
+      const currentLayout = getOrComputeLayout(currentView, viewElements, viewConnectors);
+      const targetNode = currentLayout.nodes.find(n => n.ref === ref);
+
+      const action = () => {
+        setNavigationStack((prev) => [...prev, ref]);
+        setSelectedNode(null);
+        invalidateLayout(ref);
+      };
+
+      if (targetNode) {
+        const canvas = document.querySelector('canvas');
+        if (canvas) {
+          const tState = startTransition(targetNode, canvas.width, canvas.height);
+          setPendingNavigation({ transitionState: tState, action });
+          return;
+        }
+      }
+
+      action(); // fallback if no canvas or node
+    },
+    [data, currentView]
+  );
+
+  const handleGoToLevel = useCallback(
+    (index: number) => {
+      if (!data) return;
+      const targetViewRef = navigationStack[index];
+      
+      const action = () => {
+        setNavigationStack((prev) => prev.slice(0, index + 1));
+        setSelectedNode(null);
+        invalidateLayout(targetViewRef);
+      };
+
+      if (index === navigationStack.length - 2) {
+        const parentElements = getViewElements(data, targetViewRef);
+        const parentConnectors = getViewConnectors(data, targetViewRef);
+        const parentLayout = getOrComputeLayout(targetViewRef, parentElements, parentConnectors);
+        const exitingNode = parentLayout.nodes.find(n => n.ref === currentView);
+
+        if (exitingNode) {
+          const canvas = document.querySelector('canvas');
+          if (canvas) {
+            action();
+            const tState = startExitTransition(parentLayout, exitingNode, canvas.width, canvas.height);
+            setPendingNavigation({ transitionState: tState, action: () => {} });
+            return;
+          }
+        }
+      }
+
+      action();
+    },
+    [data, navigationStack, currentView]
+  );
+
+  const handleGoUp = useCallback(() => {
+    if (!data) return;
+    if (navigationStack.length <= 1) {
+      setSelectedNode(null);
+      return;
+    }
+    handleGoToLevel(navigationStack.length - 2);
+  }, [data, navigationStack, handleGoToLevel]);
 
   useEffect(() => {
-    api.system.ready()
-      .then(() => platform.initPlatform())
-      .finally(() => setReady(true))
-  }, [])
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleGoUp();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleGoUp]);
 
-  if (!ready) {
-    return (
-      <Center h="var(--app-viewport-height)">
-        <Spinner size="xl" />
-      </Center>
-    )
+  const handleHover = useCallback((ref: string | null, x: number, y: number) => {
+    setHoveredNode(ref);
+    setMousePos({ x, y });
+  }, []);
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>Loading...</div>;
   }
 
+  if (error || !data) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>Error: {error}</div>;
+  }
+
+  const viewElements = getViewElements(data, currentView);
+  const viewConnectors = getViewConnectors(data, currentView);
+  const layout = getOrComputeLayout(currentView, viewElements, viewConnectors);
+
+  // Only compute stubs when the toggle is ON — avoids O(n*m) work on every render
+  // when stubs are hidden. layout.nodes carries world-space positions for stub placement.
+  const externalStubs = showExternalStubs
+    ? computeExternalStubs(data, currentView, layout)
+    : [];
+
   return (
-    <ExperimentalProvider>
-      <ThemeProvider>
-        <Box h="var(--app-viewport-height)" bg="var(--bg-canvas)" overflow="hidden">
-          <Routes>
-            {platform.getRoutes({ user: null })}
+    <div className="app">
+      <div className="canvas-container">
+        <div className="breadcrumb">
+          {navigationStack.map((item, idx) => {
+            const isLast = idx === navigationStack.length - 1;
+            return (
+              <React.Fragment key={item}>
+                {idx > 0 && <span className="breadcrumb-separator">/</span>}
+                <span
+                  className={`breadcrumb-item ${isLast ? 'active' : ''}`}
+                  onClick={() => !isLast && handleGoToLevel(idx)}
+                  style={{ cursor: isLast ? 'default' : 'pointer', fontWeight: isLast ? 'bold' : 'normal' }}
+                >
+                  {item}
+                </span>
+              </React.Fragment>
+            );
+          })}
+        </div>
 
-            <Route path="/explore/shared/:token" element={<Box h="var(--app-viewport-height)" overflow="hidden"><HeaderProvider><WorkspaceVersionProvider><SharedInfiniteZoom /></WorkspaceVersionProvider></HeaderProvider></Box>} />
-            <Route
-              element={
-                <HeaderProvider>
-                  <WorkspaceVersionProvider>
-                    <AppLayout />
-                  </WorkspaceVersionProvider>
-                </HeaderProvider>
-              }
-            >
-              <Route index element={<HomeRedirect />} />
-              <Route path="views" element={<ViewsPage />} />
-              <Route path="views/:id" element={<ViewEditor />} />
-              <Route path="inventory" element={<Inventory />} />
-              <Route path="dependencies" element={<DependenciesRedirect />} />
-              <Route path="explore" element={<Navigate to="/views" replace />} />
-              <Route path="settings" element={<Settings />}>
-                <Route index element={<Navigate to="appearance" replace />} />
-                {platform.getSettingsRoutes({ user: null })}
-                <Route path="appearance" element={<AppearanceSettings />} />
-                <Route path="experimental" element={<ExperimentalSettings />} />
-                <Route path="updates" element={isWailsApp ? <UpdateSettings /> : <Navigate to="/settings/appearance" replace />} />
-              </Route>
-            </Route>
+        <Toolbar
+          showExternalStubs={showExternalStubs}
+          onToggleExternalStubs={() => setShowExternalStubs(!showExternalStubs)}
+        />
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Box>
-      </ThemeProvider>
-    </ExperimentalProvider>
-  )
-}
+        <CanvasViewport
+          layout={layout}
+          renderState={{
+            hoveredNode,
+            selectedNode,
+            showExternalStubs,
+            highlightedExternalEdges,
+          }}
+          elements={data.elements}
+          externalStubs={externalStubs}
+          onSelect={handleSelect}
+          onEnterGroup={handleEnterGroup}
+          onHover={handleHover}
+          transitionState={pendingNavigation?.transitionState}
+          onTransitionComplete={() => {
+            if (pendingNavigation?.action) {
+              pendingNavigation.action();
+            }
+            setPendingNavigation(null);
+          }}
+        />
+
+        {hoveredNode && (
+          <Tooltip
+            nodeRef={hoveredNode}
+            data={data}
+            x={mousePos.x}
+            y={mousePos.y}
+          />
+        )}
+      </div>
+
+      {selectedNode && (
+        <SidePanel
+          selectedNode={selectedNode}
+          currentView={currentView}
+          data={data}
+          showExternalStubs={showExternalStubs}
+          onToggleExternalStubs={() => setShowExternalStubs(!showExternalStubs)}
+        />
+      )}
+    </div>
+  );
+};
