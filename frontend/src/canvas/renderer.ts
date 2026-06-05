@@ -35,7 +35,8 @@ export function renderFrame(
   dpr: number = 1,
   externalStubs: ExternalStub[] = []
 ): void {
-  // Clear canvas
+  // Reset transform and clear canvas
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = theme.BG_COLOR;
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 

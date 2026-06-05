@@ -126,7 +126,7 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
 
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-    cameraRef.current = zoomAtPoint(cameraRef.current, screenX, screenY, e.deltaY);
+    cameraRef.current = zoomAtPoint(cameraRef.current, screenX, screenY, -e.deltaY);
     dirtyRef.current = true;
   }, []);
 
