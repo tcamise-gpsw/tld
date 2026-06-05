@@ -15,6 +15,7 @@ export interface LayoutEdge {
   source: string;
   target: string;
   points: { x: number; y: number }[];
+  label?: string;
 }
 
 export interface ViewLayout {
@@ -42,9 +43,11 @@ export function computeLayout(elements: Element[], connectors: Connector[]): Vie
 
   // Add edges (only between nodes that are both in this layout)
   const nodeRefSet = new Set(elements.map(e => e.ref));
+  const connectorByEdge = new Map<string, Connector>();
   for (const conn of connectors) {
     if (nodeRefSet.has(conn.source) && nodeRefSet.has(conn.target)) {
       g.setEdge(conn.source, conn.target);
+      connectorByEdge.set(`${conn.source}|${conn.target}`, conn);
     }
   }
 
@@ -72,10 +75,12 @@ export function computeLayout(elements: Element[], connectors: Connector[]): Vie
   const edges: LayoutEdge[] = [];
   g.edges().forEach((edge) => {
     const edgeData = g.edge(edge);
+    const conn = connectorByEdge.get(`${edge.v}|${edge.w}`);
     edges.push({
       source: edge.v,
       target: edge.w,
       points: edgeData.points || [],
+      label: conn?.relationship || undefined,
     });
   });
 

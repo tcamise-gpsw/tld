@@ -35,7 +35,7 @@ export function resolveConnectors(
       id: conn.id || `${conn.source}-${conn.target}`,
       direction: isOutgoing ? 'Outbound' : 'Inbound',
       target: otherElem?.name || otherRef,
-      type: conn.relationship || conn.style || '',
+      type: conn.relationship || '',
       view: conn.view,
       isExternal,
     });

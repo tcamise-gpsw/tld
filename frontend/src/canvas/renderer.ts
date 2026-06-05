@@ -146,6 +146,17 @@ function drawConnectors(ctx: CanvasRenderingContext2D, edges: LayoutEdge[], stat
       const prevPoint = edge.points[edge.points.length - 2];
       drawArrowhead(ctx, prevPoint.x, prevPoint.y, lastPoint.x, lastPoint.y, strokeColor);
     }
+
+    // Draw relationship label at edge midpoint
+    if (edge.label && edge.points.length >= 2) {
+      const midIdx = Math.floor(edge.points.length / 2);
+      const midPoint = edge.points[midIdx];
+      ctx.fillStyle = theme.NODE_TEXT_SECONDARY;
+      ctx.font = theme.FONT_BADGE;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(edge.label, midPoint.x, midPoint.y - 4);
+    }
   }
 }
 
