@@ -62,7 +62,7 @@ export const App: React.FC = () => {
 
       const action = () => {
         setNavigationStack((prev) => [...prev, ref]);
-        setSelectedNode(null);
+        setSelectedNode(ref);
         invalidateLayout(ref);
         window.history.pushState({ depth: navigationStack.length + 1 }, '');
       };
@@ -176,8 +176,8 @@ export const App: React.FC = () => {
                 {idx > 0 && <span className="breadcrumb-separator">/</span>}
                 <span
                   className={`breadcrumb-item ${isLast ? 'active' : ''}`}
-                  onClick={() => !isLast && handleGoToLevel(idx)}
-                  style={{ cursor: isLast ? 'default' : 'pointer', fontWeight: isLast ? 'bold' : 'normal' }}
+                  onClick={() => isLast ? handleSelect(currentView) : handleGoToLevel(idx)}
+                  style={{ cursor: 'pointer', fontWeight: isLast ? 'bold' : 'normal' }}
                 >
                   {item}
                 </span>
