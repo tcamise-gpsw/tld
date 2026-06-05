@@ -101,7 +101,17 @@ function drawConnectors(ctx: CanvasRenderingContext2D, edges: LayoutEdge[], stat
     let strokeWidth: number;
     let strokeColor: string;
 
-    if (isHighlighted) {
+    // Color edges by direction when a node is selected
+    const selectedNode = state.selectedNode;
+    const touchesSelected = selectedNode && (edge.source === selectedNode || edge.target === selectedNode);
+
+    if (touchesSelected) {
+      strokeWidth = CONNECTOR_HIGHLIGHTED_WIDTH;
+      // source = dependent, target = dependency
+      // Red: selected node depends on target (outgoing dependency)
+      // Green: something depends on selected node (incoming requirement)
+      strokeColor = edge.source === selectedNode ? '#f85149' : '#3fb950';
+    } else if (isHighlighted) {
       strokeWidth = CONNECTOR_HIGHLIGHTED_WIDTH;
       strokeColor = theme.CONNECTOR_EXTERNAL;
     } else if (isInternal) {
