@@ -60,8 +60,8 @@ export function renderFrame(
   // Draw nodes on top
   drawNodes(ctx, layout.nodes, state, camera, elements, dpr);
 
-  // Draw external stubs on top of nodes when toggled on
-  if (state.showExternalStubs && externalStubs.length > 0) {
+  // Draw external stubs on top of nodes (filtering handled upstream in App)
+  if (externalStubs.length > 0) {
     drawExternalStubs(ctx, externalStubs, state);
   }
 }
