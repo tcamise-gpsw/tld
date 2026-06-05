@@ -1,6 +1,11 @@
 import { DiagramData } from '../data/types';
 import { getNodeConnectors, isExternalToView } from '../data/loader';
 
+const RELATIONSHIP_VERBS: Record<string, string> = {
+  dependency: 'depends on',
+  inheritance: 'inherits',
+};
+
 export interface ConnectorRow {
   id: string;
   direction: 'Inbound' | 'Outbound';
@@ -39,7 +44,7 @@ export function resolveConnectors(
       target: otherElem?.name || otherRef,
       targetRef: otherRef,
       targetHasView: otherElem?.has_view ?? false,
-      type: conn.relationship || conn.label || '',
+      type: RELATIONSHIP_VERBS[conn.relationship || ''] || conn.relationship || conn.label || '',
       view: conn.view,
       isExternal,
     });

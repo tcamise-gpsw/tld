@@ -42,12 +42,15 @@ export function computeLayout(elements: Element[], connectors: Connector[]): Vie
   }
 
   // Add edges (only between nodes that are both in this layout)
+  // Dagre edge direction is REVERSED so that dependencies/parents rank higher (top)
+  // and dependents/children rank lower (bottom). Arrowhead renders at the last point
+  // which will be the dependent/child end.
   const nodeRefSet = new Set(elements.map(e => e.ref));
   const connectorByEdge = new Map<string, Connector>();
   for (const conn of connectors) {
     if (nodeRefSet.has(conn.source) && nodeRefSet.has(conn.target)) {
-      g.setEdge(conn.source, conn.target);
-      connectorByEdge.set(`${conn.source}|${conn.target}`, conn);
+      g.setEdge(conn.target, conn.source);
+      connectorByEdge.set(`${conn.target}|${conn.source}`, conn);
     }
   }
 
@@ -72,15 +75,20 @@ export function computeLayout(elements: Element[], connectors: Connector[]): Vie
   });
 
   // Extract edges with waypoints
+  const RELATIONSHIP_VERBS: Record<string, string> = {
+    dependency: 'depends on',
+    inheritance: 'inherits',
+  };
   const edges: LayoutEdge[] = [];
   g.edges().forEach((edge) => {
     const edgeData = g.edge(edge);
     const conn = connectorByEdge.get(`${edge.v}|${edge.w}`);
+    const rawLabel = conn?.relationship || conn?.label || undefined;
     edges.push({
-      source: edge.v,
-      target: edge.w,
+      source: conn?.source ?? edge.w,
+      target: conn?.target ?? edge.v,
       points: edgeData.points || [],
-      label: conn?.relationship || conn?.label || undefined,
+      label: rawLabel ? (RELATIONSHIP_VERBS[rawLabel] ?? rawLabel) : undefined,
     });
   });
 
