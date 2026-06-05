@@ -124,7 +124,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                     title={isNavigable ? `Navigate to ${conn.target}` : undefined}
                   >
                     <td className="connector-direction">
-                      {conn.direction === 'Inbound' ? '← Required by' : '→ Depends on'}
+                      <span className={conn.direction === 'Inbound' ? 'arrow-required-by' : 'arrow-depends-on'}>
+                        {conn.direction === 'Inbound' ? '←' : '→'}
+                      </span>
+                      {conn.direction === 'Inbound' ? ' Required by' : ' Depends on'}
                     </td>
                     <td className="connector-target-cell" title={conn.target}>{conn.target}</td>
                     <td className="connector-type">{conn.type}</td>
