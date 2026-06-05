@@ -62,7 +62,6 @@ export const ElementBody = ({
           <Text
             fontWeight="semibold"
             fontSize={nameSize}
-            noOfLines={2}
             textAlign={hasLogo ? 'left' : 'center'}
             color="gray.100"
             lineHeight={1.15}
