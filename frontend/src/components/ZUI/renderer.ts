@@ -683,12 +683,12 @@ function drawSceneNode(
 
       const worldPadding = w * 0.08
       const maxW = w - worldPadding
-      let label = layout.label
+      const label = layout.label
       const totalW = ctx.measureText(label).width
       if (totalW > maxW) {
-        const ratio = maxW / totalW
-        label = label.slice(0, Math.max(3, Math.floor(label.length * ratio)))
-        if (label.length < layout.label.length) label += '\u2026'
+        // Auto-shrink font to fit instead of truncating
+        const shrunkSize = nameFontSize * (maxW / totalW)
+        ctx.font = `600 ${shrunkSize}px Inter, system-ui, sans-serif`
       }
 
       const showLogo = !!layout.logoUrl && drawScreenW > 60

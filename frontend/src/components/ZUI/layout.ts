@@ -14,7 +14,7 @@ import { resolveElementIconUrl } from '../../utils/elementIcon'
 
 // ── Constants ──────────────────────────────────────────────────────
 
-export const NODE_W = 180
+export const NODE_W = 230
 export const NODE_H = 85
 const GROUP_PAD = 80         // padding inside a diagram group box
 const GROUP_SPACING = 400    // horizontal gap between root diagrams
