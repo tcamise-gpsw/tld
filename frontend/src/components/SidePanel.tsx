@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { DiagramData } from '../data/types';
 import { resolveConnectors, sortConnectors, SortCol } from './SidePanel.logic';
 
@@ -24,6 +24,33 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     direction: 'asc'
   });
 
+  const [panelWidth, setPanelWidth] = useState(640);
+  const draggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    startXRef.current = e.clientX;
+    startWidthRef.current = panelWidth;
+  }, [panelWidth]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const delta = startXRef.current - e.clientX;
+      setPanelWidth(Math.max(280, Math.min(900, startWidthRef.current + delta)));
+    };
+    const handleMouseUp = () => { draggingRef.current = false; };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
   const { connectors, inboundCount, outboundCount } = useMemo(
     () => selectedNode ? resolveConnectors(data, selectedNode, currentView) : { connectors: [], inboundCount: 0, outboundCount: 0 },
     [data, selectedNode, currentView]
@@ -47,7 +74,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const hasExternal = connectors.some(c => c.isExternal);
 
   return (
-    <div className="side-panel">
+    <div className="side-panel" style={{ width: panelWidth }}>
+      <div className="side-panel-resize-handle" onMouseDown={handleResizeStart} />
       <div className="panel-header">
         <h3>{element.name}</h3>
         <p className="panel-kind">{element.kind}</p>

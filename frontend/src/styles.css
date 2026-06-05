@@ -67,7 +67,7 @@ body {
 }
 
 .side-panel {
-  width: 640px;
+  position: relative;
   background-color: #0d1117;
   border-left: 1px solid #30363d;
   overflow-y: auto;
@@ -75,6 +75,22 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.side-panel-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background-color: transparent;
+  transition: background-color 0.15s;
+  z-index: 20;
+}
+
+.side-panel-resize-handle:hover {
+  background-color: #58a6ff;
 }
 
 .panel-header {
