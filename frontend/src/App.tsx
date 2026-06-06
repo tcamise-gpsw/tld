@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { loadDiagramData, getViewElements, getViewConnectors, getNodeConnectors, isExternalToView } from './data/loader';
+import { loadDiagramData, getViewElements, getViewConnectors, getDescendantRefs } from './data/loader';
 import { DiagramData } from './data/types';
 import { computeExternalStubs } from './canvas/stubs';
 import { getOrComputeLayout, invalidateLayout } from './canvas/layout';
@@ -41,10 +41,22 @@ export const App: React.FC = () => {
 
   const highlightedExternalEdges = useMemo(() => {
     if (!data || !selectedNode) return new Set<string>();
-    const externalConnectors = getNodeConnectors(data, selectedNode).filter((conn) =>
-      isExternalToView(conn, currentView, data)
-    );
-    return new Set(externalConnectors.map((conn) => `${conn.source}-${conn.target}`));
+    const descendants = getDescendantRefs(data, selectedNode);
+    const memberRefs = new Set<string>([selectedNode, ...descendants]);
+    const viewDescendants = getDescendantRefs(data, currentView);
+    const viewMembers = new Set<string>([currentView, ...viewDescendants]);
+
+    const externalKeys: string[] = [];
+    for (const conn of data.connectors) {
+      const sourceInside = memberRefs.has(conn.source);
+      const targetInside = memberRefs.has(conn.target);
+      if (sourceInside === targetInside) continue;
+      const otherRef = sourceInside ? conn.target : conn.source;
+      if (!viewMembers.has(otherRef)) {
+        externalKeys.push(`${conn.source}-${conn.target}`);
+      }
+    }
+    return new Set(externalKeys);
   }, [data, selectedNode, currentView]);
 
   const handleSelect = useCallback((ref: string | null) => {
