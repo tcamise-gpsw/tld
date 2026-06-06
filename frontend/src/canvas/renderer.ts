@@ -239,7 +239,7 @@ function drawNodes(
 
     // Draw expand icon for groups
     if (node.isGroup) {
-      drawGroupIcon(ctx, node.x + node.width / 2 - 12, node.y - node.height / 2 + 12);
+      drawGroupIcon(ctx, node.x + node.width / 2 - 16, node.y - node.height / 2 + 16);
     }
   }
 }
@@ -282,7 +282,7 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
 
 function drawGroupIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.fillStyle = theme.GROUP_ICON_COLOR;
-  ctx.font = theme.FONT_BADGE;
+  ctx.font = theme.FONT_GROUP_ICON;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('⊞', x, y);

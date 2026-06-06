@@ -90,9 +90,9 @@ describe('hitTestGroupIcon', () => {
     const nodes = [
       { ref: 'group1', x: 100, y: 100, width: 100, height: 100, isGroup: true }
     ];
-    // Icon center: x = 100 + 50 - 12 = 138, y = 100 - 50 + 12 = 62
-    expect(hitTestGroupIcon(138, 62, nodes)).toBe('group1');
-    expect(hitTestGroupIcon(140, 60, nodes)).toBe('group1'); // within 12px
+    // Icon center: x = 100 + 50 - 16 = 134, y = 100 - 50 + 16 = 66
+    expect(hitTestGroupIcon(134, 66, nodes)).toBe('group1');
+    expect(hitTestGroupIcon(140, 66, nodes)).toBe('group1'); // within 16px
     expect(hitTestGroupIcon(100, 100, nodes)).toBeNull(); // center of node, outside icon
   });
 
@@ -100,6 +100,6 @@ describe('hitTestGroupIcon', () => {
     const nodes = [
       { ref: 'leaf1', x: 100, y: 100, width: 100, height: 100, isGroup: false }
     ];
-    expect(hitTestGroupIcon(138, 62, nodes)).toBeNull();
+    expect(hitTestGroupIcon(134, 66, nodes)).toBeNull();
   });
 });

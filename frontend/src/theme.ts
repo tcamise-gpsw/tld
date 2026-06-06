@@ -25,3 +25,4 @@ export const NODE_PADDING = 12;
 export const FONT_PRIMARY = '14px Inter, system-ui, sans-serif';
 export const FONT_SECONDARY = '11px Inter, system-ui, sans-serif';
 export const FONT_BADGE = '10px Inter, system-ui, sans-serif';
+export const FONT_GROUP_ICON = '16px Inter, system-ui, sans-serif';

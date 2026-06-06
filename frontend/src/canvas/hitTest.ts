@@ -31,14 +31,14 @@ export function hitTestGroupIcon(worldX: number, worldY: number, nodes: LayoutNo
     const node = nodes[i];
     if (!node.isGroup) continue;
     
-    // Icon is drawn at (node.x + width/2 - 12, node.y - height/2 + 12)
-    // Let's give it a hit radius of 12px
-    const iconX = node.x + node.width / 2 - 12;
-    const iconY = node.y - node.height / 2 + 12;
+    // Icon is drawn at (node.x + width/2 - 16, node.y - height/2 + 16)
+    // Hit radius of 16px
+    const iconX = node.x + node.width / 2 - 16;
+    const iconY = node.y - node.height / 2 + 16;
     
     const dx = worldX - iconX;
     const dy = worldY - iconY;
-    if (dx * dx + dy * dy <= 144) { // 12^2
+    if (dx * dx + dy * dy <= 256) { // 16^2
       return node.ref;
     }
   }
