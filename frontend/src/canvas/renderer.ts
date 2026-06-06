@@ -6,6 +6,7 @@ import * as theme from '../theme';
 
 export interface RenderState {
   hoveredNode: string | null;
+  hoveredGroupIcon: string | null;
   selectedNode: string | null;
   showExternalStubs: boolean;
   highlightedExternalEdges: Set<string>;
@@ -239,7 +240,8 @@ function drawNodes(
 
     // Draw expand icon for groups
     if (node.isGroup) {
-      drawGroupIcon(ctx, node.x + node.width / 2 - 16, node.y - node.height / 2 + 16);
+      const iconHovered = node.ref === state.hoveredGroupIcon;
+      drawGroupIcon(ctx, node.x + node.width / 2 - 16, node.y - node.height / 2 + 16, iconHovered);
     }
   }
 }
@@ -280,8 +282,18 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
   return truncated + '…';
 }
 
-function drawGroupIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  ctx.fillStyle = theme.GROUP_ICON_COLOR;
+function drawGroupIcon(ctx: CanvasRenderingContext2D, x: number, y: number, hovered: boolean): void {
+  if (hovered) {
+    // Draw a subtle circular background on hover
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(88, 166, 255, 0.15)';
+    ctx.fill();
+    ctx.strokeStyle = theme.NODE_BORDER_HOVER;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.fillStyle = hovered ? theme.NODE_BORDER_HOVER : theme.GROUP_ICON_COLOR;
   ctx.font = theme.FONT_GROUP_ICON;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

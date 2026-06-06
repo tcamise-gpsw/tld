@@ -14,6 +14,7 @@ interface CanvasViewportProps {
   onSelect: (ref: string | null) => void;
   onEnterGroup: (ref: string) => void;
   onHover: (ref: string | null, x: number, y: number) => void;
+  onHoverGroupIcon: (ref: string | null) => void;
   onFitToContent?: () => void;
   transitionState?: TransitionState | null;
   onTransitionComplete?: () => void;
@@ -27,6 +28,7 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
   onSelect,
   onEnterGroup,
   onHover,
+  onHoverGroupIcon,
   onFitToContent: onFitToContentProp,
   transitionState,
   onTransitionComplete,
@@ -166,9 +168,18 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
     }
 
     const worldPoint = screenToWorld(screenX, screenY, cameraRef.current);
+    const iconHitRef = hitTestGroupIcon(worldPoint.x, worldPoint.y, layout.nodes);
     const hitRef = hitTestNodes(worldPoint.x, worldPoint.y, layout.nodes);
+
+    onHoverGroupIcon(iconHitRef);
     onHover(hitRef, e.clientX, e.clientY);
-  }, [layout.nodes, onHover]);
+
+    // Set pointer cursor when hovering over a group icon
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.style.cursor = iconHitRef ? 'pointer' : '';
+    }
+  }, [layout.nodes, onHover, onHoverGroupIcon]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (currentTransitionRef.current?.active) return;

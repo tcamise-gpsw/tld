@@ -78,6 +78,7 @@ function makeElement(ref: string, overrides: Partial<Element> = {}): Element {
 function emptyState(): RenderState {
   return {
     hoveredNode: null,
+    hoveredGroupIcon: null,
     selectedNode: null,
     showExternalStubs: false,
     highlightedExternalEdges: new Set(),

@@ -16,6 +16,7 @@ export const App: React.FC = () => {
   const currentView = navigationStack[navigationStack.length - 1];
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [hoveredGroupIcon, setHoveredGroupIcon] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [showExternalStubs, setShowExternalStubs] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -247,6 +248,7 @@ export const App: React.FC = () => {
           layout={layout}
           renderState={{
             hoveredNode,
+            hoveredGroupIcon,
             selectedNode,
             showExternalStubs,
             highlightedExternalEdges,
@@ -256,6 +258,7 @@ export const App: React.FC = () => {
           onSelect={handleSelect}
           onEnterGroup={handleEnterGroup}
           onHover={handleHover}
+          onHoverGroupIcon={setHoveredGroupIcon}
           transitionState={pendingNavigation?.transitionState}
           onTransitionComplete={() => {
             if (pendingNavigation?.action) {
