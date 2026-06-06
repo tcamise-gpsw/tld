@@ -13,11 +13,34 @@ export interface ConnectorRow {
   targetRef: string;
   targetHasView: boolean;
   type: string;
+  module: string;
   view: string;
   isExternal: boolean;
 }
 
-export type SortCol = 'Direction' | 'Target' | 'Type' | 'View';
+export type SortCol = 'Direction' | 'Target' | 'Type' | 'Module' | 'View';
+
+/**
+ * Walk up placements from `elementRef` to find the direct child of root
+ * that contains (or is) the element. Returns the name of that top-level node.
+ */
+function resolveTopLevelModule(data: DiagramData, elementRef: string): string {
+  let current = elementRef;
+  const visited = new Set<string>();
+
+  while (!visited.has(current)) {
+    visited.add(current);
+    const elem = data.elements.get(current);
+    if (!elem) return elementRef;
+
+    const parentRef = elem.placements[0]?.parent ?? 'root';
+    if (parentRef === 'root') {
+      return elem.name;
+    }
+    current = parentRef;
+  }
+  return elementRef; // cycle guard
+}
 
 export function resolveConnectors(
   data: DiagramData,
@@ -63,6 +86,7 @@ export function resolveConnectors(
       targetRef: otherRef,
       targetHasView: otherElem?.has_view ?? false,
       type: conn.relationship || conn.label || '',
+      module: resolveTopLevelModule(data, otherRef),
       view: conn.view,
       isExternal,
     });
@@ -91,6 +115,10 @@ export function sortConnectors(
       case 'Type':
         aVal = a.type.toLowerCase();
         bVal = b.type.toLowerCase();
+        break;
+      case 'Module':
+        aVal = a.module.toLowerCase();
+        bVal = b.module.toLowerCase();
         break;
       case 'View':
         aVal = a.view.toLowerCase();

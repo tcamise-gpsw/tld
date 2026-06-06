@@ -87,19 +87,21 @@ describe('SidePanel Logic', () => {
       expect(outbound?.target).toBe('External X');
       expect(outbound?.targetRef).toBe('external-x');
       expect(outbound?.type).toBe('dependency');
+      expect(outbound?.module).toBe('External X'); // direct child of root
 
       const inbound = result.connectors.find(c => c.direction === 'Inbound');
       expect(inbound?.target).toBe('External Y');
       expect(inbound?.targetRef).toBe('external-y');
       expect(inbound?.type).toBe('uses');
+      expect(inbound?.module).toBe('External Y'); // direct child of root
     });
   });
 
   describe('sortConnectors', () => {
     const mockRows: ConnectorRow[] = [
-      { id: '1', direction: 'Outbound', target: 'Zebra', targetRef: 'zebra-ref', targetHasView: false, type: 'Async', view: 'B', isExternal: false },
-      { id: '2', direction: 'Inbound', target: 'Apple', targetRef: 'apple-ref', targetHasView: true, type: 'Sync', view: 'A', isExternal: false },
-      { id: '3', direction: 'Outbound', target: 'Mango', targetRef: 'mango-ref', targetHasView: false, type: 'Event', view: 'C', isExternal: false },
+      { id: '1', direction: 'Outbound', target: 'Zebra', targetRef: 'zebra-ref', targetHasView: false, type: 'Async', module: 'Core', view: 'B', isExternal: false },
+      { id: '2', direction: 'Inbound', target: 'Apple', targetRef: 'apple-ref', targetHasView: true, type: 'Sync', module: 'Domain', view: 'A', isExternal: false },
+      { id: '3', direction: 'Outbound', target: 'Mango', targetRef: 'mango-ref', targetHasView: false, type: 'Event', module: 'Api', view: 'C', isExternal: false },
     ];
 
     it('should sort by Target ascending', () => {
@@ -115,6 +117,11 @@ describe('SidePanel Logic', () => {
     it('should sort by Direction ascending', () => {
       const sorted = sortConnectors(mockRows, 'Direction', false);
       expect(sorted.map(r => r.direction)).toEqual(['Inbound', 'Outbound', 'Outbound']);
+    });
+
+    it('should sort by Module ascending', () => {
+      const sorted = sortConnectors(mockRows, 'Module', false);
+      expect(sorted.map(r => r.module)).toEqual(['Api', 'Core', 'Domain']);
     });
 
     it('should sort by View descending', () => {

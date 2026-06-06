@@ -106,6 +106,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   <th onClick={() => handleSort('Target')}>
                     Target {sortState.column === 'Target' && (sortState.direction === 'desc' ? '▼' : '▲')}
                   </th>
+                  <th onClick={() => handleSort('Module')}>
+                    Module {sortState.column === 'Module' && (sortState.direction === 'desc' ? '▼' : '▲')}
+                  </th>
                   <th onClick={() => handleSort('Type')}>
                     Relationship {sortState.column === 'Type' && (sortState.direction === 'desc' ? '▼' : '▲')}
                   </th>
@@ -132,6 +135,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       {conn.direction === 'Inbound' ? ' Required by' : ' Depends on'}
                     </td>
                     <td className="connector-target-cell" title={conn.target}>{conn.target}</td>
+                    <td className="connector-module">{conn.module}</td>
                     <td className="connector-type">{conn.type}</td>
                     <td className="connector-view">{conn.view}</td>
                   </tr>
