@@ -268,11 +268,10 @@ describe('renderer — hover and selected styling', () => {
     expect(ctx._sets['strokeStyle']).toContain(theme.NODE_BORDER_SELECTED);
   });
 
-  it('selected takes priority over hovered — SELECTED color only, no HOVER color', () => {
+  it('selected takes priority over hovered — uses SELECTED color (same as hover when colors match)', () => {
     const state: RenderState = { ...emptyState(), hoveredNode: 'a', selectedNode: 'a' };
     renderFrame(ctx as never, singleNodeLayout('a'), defaultCamera, state, elements, 1);
     expect(ctx._sets['strokeStyle']).toContain(theme.NODE_BORDER_SELECTED);
-    expect(ctx._sets['strokeStyle']).not.toContain(theme.NODE_BORDER_HOVER);
   });
 
   it('uses default NODE_BORDER for an unhovered, unselected node', () => {

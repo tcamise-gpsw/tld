@@ -6,8 +6,6 @@ interface SidePanelProps {
   selectedNode: string | null;
   currentView: string;
   data: DiagramData;
-  showExternalStubs: boolean;
-  onToggleExternalStubs: () => void;
   onNavigateToElement?: (ref: string) => void;
 }
 
@@ -15,8 +13,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   selectedNode,
   currentView,
   data,
-  showExternalStubs,
-  onToggleExternalStubs,
   onNavigateToElement,
 }) => {
   const element = useMemo(() => selectedNode ? data.elements.get(selectedNode) : undefined, [data, selectedNode]);
@@ -25,6 +21,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     column: 'Target',
     direction: 'asc'
   });
+
+  const [showExternal, setShowExternal] = useState(true);
 
   const [panelWidth, setPanelWidth] = useState(640);
   const draggingRef = useRef(false);
@@ -59,8 +57,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   );
 
   const sortedConnectors = useMemo(
-    () => sortConnectors(connectors, sortState.column, sortState.direction === 'desc'),
-    [connectors, sortState.column, sortState.direction]
+    () => {
+      const filtered = showExternal ? connectors : connectors.filter(c => !c.isExternal);
+      return sortConnectors(filtered, sortState.column, sortState.direction === 'desc');
+    },
+    [connectors, sortState.column, sortState.direction, showExternal]
   );
 
   const handleSort = (col: SortCol) => {
@@ -151,8 +152,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
       {hasExternal && (
         <div className="panel-section">
-          <button className="panel-button" onClick={onToggleExternalStubs}>
-            {showExternalStubs ? '✓' : '○'} Show External Stubs
+          <button className="panel-button panel-button--external" onClick={() => setShowExternal(!showExternal)}>
+            {showExternal ? '✓' : '○'} Show External
           </button>
         </div>
       )}

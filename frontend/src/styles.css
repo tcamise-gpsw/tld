@@ -219,6 +219,15 @@ body {
   background-color: #2ea043;
 }
 
+.panel-button--external {
+  background-color: #9e6a03;
+  border-color: #f0883e;
+}
+
+.panel-button--external:hover {
+  background-color: #bb8009;
+}
+
 .tooltip {
   position: fixed;
   background-color: #1c2128;

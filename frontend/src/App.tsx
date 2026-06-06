@@ -280,8 +280,6 @@ export const App: React.FC = () => {
           selectedNode={selectedNode || currentView}
           currentView={currentView}
           data={data}
-          showExternalStubs={showExternalStubs}
-          onToggleExternalStubs={() => setShowExternalStubs(!showExternalStubs)}
           onNavigateToElement={handleNavigateToElement}
         />
       )}
