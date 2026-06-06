@@ -358,7 +358,9 @@ export function drawExternalStubs(
     // Label: show actual target name when count is 1, otherwise GroupName (N)
     const label = stub.count === 1 && stub.targetName
       ? stub.targetName
-      : `${stub.targetGroup} (${stub.count})`;
+      : stub.count === 1
+        ? stub.targetGroup
+        : `${stub.targetGroup} (${stub.count})`;
 
     // Align text away from node so it doesn't overlap the line
     const labelX = endX + cosA * 4;
