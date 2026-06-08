@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import logoUrl from './assets/logo.png';
 import { loadDiagramData, getViewElements, getViewConnectors, getDescendantRefs } from './data/loader';
 import { DiagramData } from './data/types';
 import { computeExternalStubs } from './canvas/stubs';
@@ -237,6 +238,8 @@ export const App: React.FC = () => {
             );
           })}
         </div>
+
+        <img src={logoUrl} alt="TL;DR" className="app-logo" />
 
         <Toolbar
           showExternalStubs={showExternalStubs}

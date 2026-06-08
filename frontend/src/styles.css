@@ -532,3 +532,20 @@ body {
 .toolbar-button--active:hover {
   background-color: rgba(240, 136, 62, 0.25);
 }
+
+/* App logo — bottom-left watermark */
+.app-logo {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  height: 108px;
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 10;
+  transition: opacity 0.2s;
+}
+
+.app-logo:hover {
+  opacity: 1;
+  pointer-events: auto;
+}
