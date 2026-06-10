@@ -1,5 +1,5 @@
 node_modules
-data/
+/data/
 frontend/node_modules
 frontend/public
 tmp
