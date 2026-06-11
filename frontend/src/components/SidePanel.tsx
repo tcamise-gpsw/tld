@@ -23,6 +23,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   });
 
   const [showExternal, setShowExternal] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
 
   const [panelWidth, setPanelWidth] = useState(640);
   const draggingRef = useRef(false);
@@ -74,11 +75,24 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   if (!selectedNode || !element) return null;
 
+  if (collapsed) {
+    return (
+      <div className="side-panel side-panel--collapsed">
+        <button className="side-panel-toggle" onClick={() => setCollapsed(false)} title="Expand panel">
+          ◀
+        </button>
+      </div>
+    );
+  }
+
   const hasExternal = connectors.some(c => c.isExternal);
 
   return (
     <div className="side-panel" style={{ width: panelWidth }}>
       <div className="side-panel-resize-handle" onMouseDown={handleResizeStart} />
+      <button className="side-panel-toggle side-panel-toggle--expanded" onClick={() => setCollapsed(true)} title="Collapse panel">
+        ▶
+      </button>
       <div className="panel-header">
         <h3>{element.name}</h3>
         <p className="panel-kind">{element.kind}</p>

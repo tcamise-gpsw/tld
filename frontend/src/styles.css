@@ -89,6 +89,37 @@ body {
   gap: 16px;
 }
 
+.side-panel--collapsed {
+  width: 32px !important;
+  min-width: 32px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.side-panel-toggle {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.side-panel-toggle:hover {
+  color: #e6edf3;
+  background-color: rgba(110, 118, 129, 0.2);
+}
+
+.side-panel-toggle--expanded {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 21;
+}
+
 .side-panel-resize-handle {
   position: absolute;
   left: 0;
